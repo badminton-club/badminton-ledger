@@ -1,4 +1,3 @@
-// src/components/BadmintonCalendarCard.jsx
 import React, { useState } from 'react';
 import { Button, ButtonGroup, Spinner, Alert } from 'react-bootstrap';
 import { getMonthYear, getNextMonth, getPrevMonth } from '../../utils/dateUtils';

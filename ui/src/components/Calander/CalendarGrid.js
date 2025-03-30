@@ -47,7 +47,7 @@ function CalendarGrid({ currentMonth, sessionsMap = {}, onDayClick }) {
                     currentWeek.push(<Col key={`empty-end-${i}`} xs={true} className="calendar-day empty p-2 border" />)
                 }
             }
-            weeks.push(<Row key={`week-${weeks.length}`} className="g-0">{currentWeek}</Row>); // g-0 removes gutters
+            weeks.push(<Row key={`week-${weeks.length}`} className="g-0">{currentWeek}</Row>); 
             currentWeek = [];
         }
     });
