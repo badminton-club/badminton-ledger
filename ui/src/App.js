@@ -1,6 +1,6 @@
 import './App.css';
 import { Container, Row, Col, Button } from 'react-bootstrap';
-import SessionCalendar from './components/Calander/SessionCalander';
+import SessionCalendar from './components/Calander/SessionCalendar';
 
 
 const session = {
@@ -10,16 +10,11 @@ const session = {
   unpaidPlayers: ["John Doe", "Mark Lee"]
 };
 
-
-const addButton = () => {
-  console.log("add Button clicked");
-}
-
 function App() {
   return (
     <div className="App">
       <Container >
-        <Row className=''>
+        <Row className='mb-3'>
           <Col md={4} className="birdie-button-column">
             <div className="birdie-button-wrapper">
               <button className="birdie-button" >

@@ -13,11 +13,8 @@
     align-items: center;
     padding: 8px;
 }
-.test {
-    display: flex;
-    align-items: flex-start;
-    justify-items: center;
-}
+
+
 
 .birdie-button-wrapper {
     display: flex;
