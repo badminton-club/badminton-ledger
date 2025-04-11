@@ -7,25 +7,28 @@ import { getMonth, getYear } from 'date-fns';
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-function CalendarGrid({ currentDate, sessionsMap = {}, onDayClick }) {
+function CalendarGrid({ currentDate, sessionsMap = [], onDayClick }) {
+    console.log("currentDate ==> ", currentDate);
+    console.log("sessionsMap ==> ", sessionsMap);
     const totalDays = getTotalDaysInMonth(currentDate);
     const startingDay = getFirstDayOfMonthWeekday(currentDate);
-    const year = getYear(currentDate).toString();
-    const month = (getMonth(currentDate) + 1).toString().padStart(2, '0');
+    const year = getYear(currentDate)
+    const month = getMonth(currentDate)
     const days = [];
     for (let i = 0; i < startingDay; i++) {
         days.push(<Col key={`empty-end-${i}`} xs={true} className="calendar-day empty p-2 border" />);
     }
     for (let day = 1; day <= totalDays; day++) {
-        const formattedDay = day.toString().padStart(2, '0') + month + year;
-        const dayInfo = sessionsMap[formattedDay];
+        const formattedDay = new Date(year, month, day)
+        const dayInfo = sessionsMap.find(session => +session.date === +formattedDay);
         const hasSession = !!dayInfo;
+        if (hasSession) console.log("dayInfo ==> ", dayInfo);
         const status = dayInfo?.paidStatus;
         days.push(
             <Col
                 key={day}
                 className={`calendar-day p-2 border ${hasSession ? 'has-session' : ''}`}
-                onClick={() => onDayClick(formattedDay)}  //change this to return date after firebase integration
+                onClick={() => onDayClick(dayInfo?.id|| '')}  //change this to return date after firebase integration
                 style={hasSession ? { cursor: 'pointer', position: 'relative' } : {}}
             >
                 <span>{day}</span>

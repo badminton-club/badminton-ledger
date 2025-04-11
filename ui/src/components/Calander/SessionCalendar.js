@@ -5,6 +5,8 @@ import CalendarGrid from './CalendarGrid';
 import DatePicker from 'react-datepicker';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import SessionModal from './SessionModal';
+import { getDay, getMonth, getYear } from 'date-fns';
+
 
 const exampleBirdies = [{
     id: 1,
@@ -25,28 +27,20 @@ const exampleBirdies = [{
     birdsInOpenTube: 2
 }]
 
-const exampleCourtCredits = {
+const exampleCourtCredits = [{
     id: 1,
-    location: "BV",
-    lastReloadDate: "2025-01-07",
-    remainingCredits: 280,
-}
+    name: 'WCA 1',
+    location: "west coast academy",
+    totalCost: 1120,
+    totalHours: 40,
+    purchasedDate: new Date(2024, 11, 7),
+    remainingHours: 40
+}]
 
-const exampleSession = {
-    "18032025": {
-        id: 18032025,
-        date: "March 18, 2025",
-        players: 3,
-        birdiesUsed: 4,
-        unpaidPlayers: ["John Doe", "Mark Lee"],
-        location: "west coast academy",
-        attendees: [{ name: "John Doe", userId: 1, paid: true, highlighted: false }, { name: "Mark Lee", userId: 2, paid: false, highlighted: false }, { name: "Jane Doe", userId: 3, paid: true, highlighted: false }]
-    },
-
-    "03042025":
+const exampleSession = [
     {
-        id: 18032025,
-        date: "April 2, 2025",
+        id: '03042025',
+        date: new Date(2025, 2, 4),
         "players": [
             {
                 "name": "Jordan",
@@ -167,8 +161,181 @@ const exampleSession = {
             }
         ],
         "courtCost": 56
+    },
+    {
+        id: "02042025",
+        date: new Date(2025, 3, 2),
+        "players": [
+            {
+                "name": "Jordan",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Jackson",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "David",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Ethan",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Stephanie",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Henry",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Joey",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Gary",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "eddy",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Justin",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Jonny",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "May",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Jonathan",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Kevin",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Krizel",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Neil",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Gordon",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Chris",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Victor",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Karen",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Ann",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            },
+            {
+                "name": "Katherine",
+                "percentage": 1,
+                "cost": 12.41,
+                "paid": false,
+                "highlighted": false
+            }
+        ],
+        "courtCount": 4,
+        "birdiesUsed": [
+            {
+                "id": 1,
+                "quantity": 21
+            }
+        ],
+        "courtCost": 56,
+        "totalSessionCost": 273,
+        "totalBirdieCost": 49,
+        "totalCourtCost": 224
     }
-}
+]
+
+
 function SessionCalendar() {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [isLoading, setIsLoading] = useState(false);
@@ -187,10 +354,12 @@ function SessionCalendar() {
         setCurrentDate(date);
     };
 
-    const handleDayClick = async (date) => {
-        console.log(`Day ${date} clicked`);
-        console.log(testSession[date]); 
-        setModalData(testSession[date])
+    const handleDayClick = async (value) => {
+        console.log(`Day ${value} clicked`);
+        const session = testSession.find(session => session.id === value);
+
+        console.log("session ==> ", session);
+        setModalData(session);
         setShowModal(true);
     };
 
@@ -247,21 +416,26 @@ function SessionCalendar() {
                 )}
             </div>
 
-            <SessionModal show={showModal} onHide={() => setShowModal(false)} onAddSession={() => { console.log('added') }} session={modalData}
+            <SessionModal show={showModal} onHide={() => setShowModal(false)} session={modalData}
                 birdies={exampleBirdies}
+                courtCredits={exampleCourtCredits}
                 onUpdatePaymentStatus={(id, name, status) => {
                     const tempSession = { ...testSession };
-                    const userIndex = tempSession[id].attendees.findIndex(user => user.name === name);
-                    tempSession[id].attendees[userIndex].paid = status;
+                    const userIndex = tempSession[id].players.findIndex(user => user.name === name);
+                    tempSession[id].players[userIndex].paid = status;
                     setTestSession(tempSession);
                 }}
                 onUpdateHighlightStatus={(id, name, status) => {
                     const tempSession = { ...testSession };
-                    const userIndex = tempSession[id].attendees.findIndex(user => user.name === name);
-                    tempSession[id].attendees[userIndex].highlighted = status;
-                    console.log("exampleSession ==> ", tempSession);
-
+                    const userIndex = tempSession[id].players.findIndex(user => user.name === name);
+                    tempSession[id].players[userIndex].highlighted = status;
                     setTestSession(tempSession);
+                }}
+                onAddSubmit={(newSession) => {
+                    const tempSession = { ...newSession }
+                    // tempSession.id = 
+                        tempSession.date = currentDate
+
                 }}
             />
         </div>

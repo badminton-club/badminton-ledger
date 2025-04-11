@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Modal, Button, ListGroup, Badge, Form, InputGroup, Alert, Row, Col } from 'react-bootstrap';
+import { Modal, Button, ListGroup, Form, InputGroup, Alert, Row, Col } from 'react-bootstrap';
 import { format } from 'date-fns';
 
 const initialUsedBirdieSet = { id: -1, quantity: 0 };
@@ -24,15 +24,17 @@ function SessionModal({ show,
     onHide,
     session,
     birdies = [],
+    courtCredits = [],
     onUpdateHighlightStatus,
-    onUpdatePaymentStatus
+    onUpdatePaymentStatus,
+    onAddSubmit
 }) {
 
     const [playerNamesList, setPlayerNamesList] = useState([]);
     const [modalMode, setModalMode] = useState(MODALMODE.VIEW);
     const [playersInput, setPlayersInput] = useState('');
-    const [courtNumInput, setCourtNumInput] = useState('4');
-    const [courtCostInput, setCourtCostInput] = useState('56');
+    const [courtNumInput, setCourtNumInput] = useState('0');
+    const [courtCostInput, setCourtCostInput] = useState('0');
     const [birdieUsage, setBirdieUsage] = useState([initialUsedBirdieSet]);
     const [addError, setAddError] = useState('');
 
@@ -42,7 +44,10 @@ function SessionModal({ show,
             setPlayersInput('');
             setBirdieUsage([initialUsedBirdieSet]);
             setAddError('');
-        } else if (session && session.length > 0) {
+            setCourtCostInput('0')
+            setCourtNumInput('0')
+            setPlayerNamesList([])
+        } else if (session) {
             setModalMode(MODALMODE.VIEW);
         }
     }, [show]);
@@ -52,6 +57,7 @@ function SessionModal({ show,
         parseFloat(courtCostInput * courtNumInput) || 0
         , [courtCostInput, courtNumInput]);
 
+    console.log("totalCourtCost ==> ", totalCourtCost);
     const totalBirdieCost = useMemo(() => {
         let calculatedBirdieCost = 0;
         const validBirdieUsage = birdieUsage.filter(set => set.id && set.quantity > 0);
@@ -73,7 +79,7 @@ function SessionModal({ show,
         const calculatedCostPerPlayerEqual = numPlayers > 0 ? totalSessionCost / numPlayers : 0;
         const calculatedPlayerCosts = playerNamesList.map(player => ({
             ...player,
-            cost: (calculatedCostPerPlayerEqual * (player.percentage || 0)).toFixed(2),
+            cost: parseFloat((calculatedCostPerPlayerEqual * (player.percentage || 0)).toFixed(2)),
             paid: false,
             highlighted: false
         }));
@@ -162,26 +168,27 @@ function SessionModal({ show,
         });
     }
 
-    const handlePaymentToggle = (attendee) => {
-        if (!onUpdatePaymentStatus || !session || !session.id || !attendee || !attendee.name) {
-            console.error("Missing data or handler for payment update", { handler: !!onUpdatePaymentStatus, session, attendee });
+    const handlePaymentToggle = (player) => {
+        console.log("player ==> ", player);
+        if (!onUpdatePaymentStatus || !session || !session.id || !player || !player.name) {
+            console.error("Missing data or handler for payment update", { handler: !!onUpdatePaymentStatus, session, player });
             setAddError("Cannot update payment status - configuration error.");
             return;
         }
-        const currentPaidStatus = !!attendee.paid;
+        const currentPaidStatus = !!player.paid;
         const newPaidStatus = !currentPaidStatus;
-        onUpdatePaymentStatus(session.id, attendee.name, newPaidStatus);
+        onUpdatePaymentStatus(session.id, player.name, newPaidStatus);
     };
 
-    const handleHighlightToggle = (attendee) => {
-        if (!onUpdateHighlightStatus || !session || !session.id || !attendee || !attendee.name) {
-            console.error("Missing data or handler for highlight update", { handler: !!onUpdateHighlightStatus, session, attendee });
+    const handleHighlightToggle = (player) => {
+        if (!onUpdateHighlightStatus || !session || !session.id || !player || !player.name) {
+            console.error("Missing data or handler for highlight update", { handler: !!onUpdateHighlightStatus, session, player });
             setAddError("Cannot update highlight status - configuration error.");
             return;
         }
-        const currentHighlightStatus = !!attendee.highlighted;
+        const currentHighlightStatus = !!player.highlighted;
         const newHighlightStatus = !currentHighlightStatus;
-        onUpdateHighlightStatus(session.id, attendee.name, newHighlightStatus);
+        onUpdateHighlightStatus(session.id, player.name, newHighlightStatus);
     };
 
     const handleAddSubmit = (event) => {
@@ -201,74 +208,115 @@ function SessionModal({ show,
                 id: set.id,
                 quantity: set.quantity
             })),
-            courtCost: parseInt(courtCostInput)
+            courtCost: parseInt(courtCostInput),
+            totalSessionCost,
+            totalBirdieCost,
+            totalCourtCost
         };
+        onAddSubmit(newSessionData)
+        console.log("newSessionData ==> ", newSessionData);
     };
 
 
 
-    const renderSessionDetails = () => (
-        <><div key={session.id} className={session ? 'mb-4 border-bottom pb-3' : ''}>
-            <h5>Session on: {session.date}</h5> {/* Assumes date is pre-formatted */}
-            {session.location && <p><strong>Location:</strong> {session.location || 'NA'}</p>}
-            <p><strong>Birdies Used:</strong> {session?.birdiesUsed?.quantity || 'N/A'}</p> {/* Might need better display if birdiesUsed is complex */}
-            <h6>Attendees:</h6>
-            <ListGroup variant="flush">
-                {session.players && session.players.length > 0 ? session.players.map(attendee => {
-                    if (!attendee || !attendee.name) return null;
-                    const isPaid = !!attendee.paid;
-                    const isHighlighted = !!attendee.highlighted;
-                    return (
+    console.log("session ==> ", session);
+    const renderSessionDetails = () => {
+        const sessionPaidTotal = session?.players?.filter(player => player.paid)?.reduce((sum, player) => sum + player.cost, 0) || 0
+        return (
+            <><div key={session.id} className={session ? 'mb-4 border-bottom pb-3' : ''}>
+                <h6>Session on: {format(session.date, 'PPP')}</h6>
+                {session.location && <p><strong>Location:</strong> {session.location || 'NA'}</p>}
+                <p><strong>Birdies Used:</strong> {session?.birdiesUsed?.quantity || 'N/A'}</p>
+                <h6>Players:</h6>
+                <ListGroup variant="flush">
+                    {session.players && session.players.length > 0 ? session.players.map(player => {
+                        if (!player || !player.name) return null;
+                        const isPaid = !!player.paid;
+                        const isHighlighted = !!player.highlighted;
+                        return (
 
-                        <ListGroup.Item
-                            key={attendee.name}
-                            className="d-flex justify-content-between align-items-center"
-                            style={isHighlighted ? highlightedStyle : defaultStyle}
-                        >
-                            <span>{attendee.name || attendee.userId}</span>
-                            <div className="d-flex align-items-center gap-2">
-                                <span className={isPaid ? 'invisible' : ''}>{`$${attendee.cost}`}</span>
+                            <ListGroup.Item
+                                key={player.name}
+                                className="d-flex justify-content-between align-items-center"
+                                style={isHighlighted ? highlightedStyle : defaultStyle}
+                            >
+                                <span>{player.name || player.userId}</span>
+                                <div className="d-flex align-items-center gap-2">
+                                    <span className={isPaid ? 'invisible' : ''}>{`$${player.cost}`}</span>
 
-                                <Button
-                                    variant={isHighlighted ? 'warning' : 'outline-secondary'}
-                                    size="sm"
-                                    onClick={() => handleHighlightToggle(attendee)}
-                                    disabled={!onUpdateHighlightStatus}
-                                    aria-label={isHighlighted ? `Unhighlight ${attendee.name}` : `Highlight ${attendee.name}`}
-                                    title={isHighlighted ? 'Remove Highlight' : 'Highlight Player'}
-                                >
-                                    {isHighlighted ? '★' : '☆'}
-                                </Button>
+                                    <Button
+                                        variant={isHighlighted ? 'warning' : 'outline-secondary'}
+                                        size="sm"
+                                        onClick={() => handleHighlightToggle(player)}
+                                        disabled={!onUpdateHighlightStatus}
+                                        aria-label={isHighlighted ? `Unhighlight ${player.name}` : `Highlight ${player.name}`}
+                                        title={isHighlighted ? 'Remove Highlight' : 'Highlight Player'}
+                                    >
+                                        {isHighlighted ? '★' : '☆'}
+                                    </Button>
 
-                                <Button
-                                    size="sm"
-                                    variant={isPaid ? 'success' : 'outline-secondary'}
-                                    onClick={() => handlePaymentToggle(attendee)}
-                                    disabled={!onUpdatePaymentStatus}
-                                    style={{ minWidth: '110px' }}
-                                >
-                                    {isPaid ? '✓ Paid' : 'Mark as Paid'}
-                                </Button>
-                            </div>
-                        </ListGroup.Item>
-                    );
-                }) : <ListGroup.Item>No attendees listed.</ListGroup.Item>}
-            </ListGroup>
-            {session.notes && <p className="mt-3"><strong>Notes:</strong> {session.notes}</p>}
-        </div>
-            <div className="d-flex justify-content-end mt-3">
-                <Button variant="primary" onClick={() => {
-                    setPlayerNamesList(session.players.map((a) => { return { name: a.name, percentage: a.percentage } }))
-                    setBirdieUsage(session.birdiesUsed)
-                    setCourtCostInput(session.courtCost)
-                    setCourtNumInput(session.courtCount)
-                    setModalMode(MODALMODE.EDIT)
-                }} className="me-2">
-                    Edit
-                </Button>
+                                    <Button
+                                        size="sm"
+                                        variant={isPaid ? 'success' : 'outline-secondary'}
+                                        onClick={() => handlePaymentToggle(player)}
+                                        disabled={!onUpdatePaymentStatus}
+                                        style={{ minWidth: '110px' }}
+                                    >
+                                        {isPaid ? '✓ Paid' : 'Mark as Paid'}
+                                    </Button>
+                                </div>
+                            </ListGroup.Item>
+                        );
+                    }) : <ListGroup.Item>No players listed.</ListGroup.Item>}
+                </ListGroup>
+                {session.notes && <p className="mt-3"><strong>Notes:</strong> {session.notes}</p>}
+
+                <div className="mt-4 p-3 bg-light border rounded">
+                    <h6 className="mb-2">Session Cost Summary</h6>
+                    <Row>
+                        <Col xs={7}>Total Court Cost:</Col>
+                        <Col xs={5} className="text-end">${(session.totalCourtCost || 0).toFixed(2)}</Col>
+                    </Row>
+                    <Row>
+                        <Col xs={7}>Total Birdie Cost:</Col>
+                        <Col xs={5} className="text-end">${(session.totalBirdieCost || 0).toFixed(2)}</Col>
+                    </Row>
+                    <Row className="fw-bold my-1 pt-1 border-bottom">
+                        <Col xs={7}>Total Session Cost:</Col>
+                        <Col xs={5} className="text-end">${(session.totalSessionCost || 0).toFixed(2)}</Col>
+                    </Row>
+                    <Row>
+                        <Col xs={7}>Player Count:</Col>
+                        <Col xs={5} className="text-end">{session?.players?.length || 0}</Col>
+                    </Row>
+                    <Row>
+                        <Col xs={7}>Unpaid Player Count:</Col>
+                        <Col xs={5} className="text-end">{session?.players?.filter(a => !a.paid).length}</Col>
+                    </Row>
+                    <Row>
+                        <Col xs={7}>Total Paid:</Col>
+                        <Col xs={5} className="text-end">{sessionPaidTotal}</Col>
+                    </Row>
+                    <Row>
+                        <Col xs={7}>Total Due:</Col>
+                        <Col xs={5} className="text-end">{session.totalSessionCost - sessionPaidTotal}</Col>
+                    </Row>
+                </div>
             </div>
-        </>
-    );
+                <div className="d-flex justify-content-end mt-3">
+                    <Button variant="primary" onClick={() => {
+                        setPlayerNamesList(session.players.map((a) => { return { name: a.name, percentage: a.percentage } }))
+                        setBirdieUsage(session.birdiesUsed)
+                        setCourtCostInput(session.courtCost)
+                        setCourtNumInput(session.courtCount)
+                        setModalMode(MODALMODE.EDIT)
+                    }} className="me-2">
+                        Edit
+                    </Button>
+                </div>
+            </>
+        );
+    }
 
     const renderNoSessionView = () => (
         <div className="text-center p-4">
@@ -348,7 +396,7 @@ function SessionModal({ show,
                     </Col>
                     <Col md={4}>
                         <InputGroup>
-                            <Form.Label style={{ marginRight: 16 }}>{`$${player.cost}`}</Form.Label>
+                            <Form.Label style={{ marginRight: 20, minWidth: 48 }}>{`$${player.cost}`}</Form.Label>
                             <Form.Control
                                 type="number"
                                 min="0"
@@ -467,7 +515,7 @@ function SessionModal({ show,
                 </Row>
                 {playerNamesList.length > 0 && (
                     <Row className="mt-1 text-muted">
-                        <Col xs={7}>Avg. Cost (Equal Split):</Col>
+                        <Col xs={7}>Avg. Cost:</Col>
                         <Col xs={5} className="text-end">${costPerPlayerEqual.toFixed(2)} / person</Col>
                     </Row>
                 )}
@@ -504,7 +552,7 @@ function SessionModal({ show,
             case MODALMODE.EDIT:
                 return renderAddSessionFormDetails();
             default:
-                return (session)
+                return (session && session.id)
                     ? renderSessionDetails()
                     : renderNoSessionView();
         }
