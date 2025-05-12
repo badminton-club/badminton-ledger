@@ -360,7 +360,7 @@ function SessionModal({ show,
 
     const formatBirdieBatchLabel = (batch) => {
         try {
-            const dateObj = batch.purchasedDate?.toDate ? batch.purchasedDate.toDate() : new Date(batch.purchasedDate);
+            const dateObj = batch.purchaseDate?.toDate ? batch.purchaseDate.toDate() : new Date(batch.purchaseDate);
             const dateStr = format(dateObj, 'yyyy-MM-dd');
             const costStr = batch.costPerTube?.toFixed(2) ?? 'N/A';
             const remainingTotal = calculateRemainingBirds(batch);

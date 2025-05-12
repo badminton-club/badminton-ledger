@@ -11,7 +11,7 @@ import { getDay, getMonth, getYear } from 'date-fns';
 const exampleBirdies = [{
     id: 1,
     name: "HangYu 1",
-    purchasedDate: "2025-01-07",
+    purchaseDate: "2025-01-07",
     costPerTube: 28,
     unopenedTubesRemaining: 13,
     birdsPerTube: 12,
@@ -20,7 +20,7 @@ const exampleBirdies = [{
 {
     id: 2,
     name: "HangYu 1",
-    purchasedDate: "2024-11-07",
+    purchaseDate: "2024-11-07",
     costPerTube: 27,
     unopenedTubesRemaining: 3,
     birdsPerTube: 12,
@@ -33,7 +33,7 @@ const exampleCourtCredits = [{
     location: "west coast academy",
     totalCost: 1120,
     totalHours: 40,
-    purchasedDate: new Date(2024, 11, 7),
+    purchaseDate: new Date(2024, 11, 7),
     remainingHours: 40
 }]
 

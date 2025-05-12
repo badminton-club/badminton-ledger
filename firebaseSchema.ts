@@ -36,9 +36,10 @@ interface birdieBatch {
     costPerTube: number;
     birdsPerTube: number;
     unopenedTubesRemaining: number;
-    birdsinOpenTube: number;
-    paidBy: string;
-}
+    birdsInOpenTube: number;
+    purchaserName: string;
+    purchaseDate: Date; 
+}   
 
 interface courtCredits {
     id: string;
@@ -46,10 +47,10 @@ interface courtCredits {
     location: string;
     totalCost: number;
     costPerHour:number;
-    quantity: number; //number of hours
-    date: Date; 
-    remaining: number;
-    paidBy: string;
+    hours: number; //number of hours
+    purchaseDate: Date; 
+    remainingHours: number;
+    purchaserName: string;
 }
 
 interface transaction{
