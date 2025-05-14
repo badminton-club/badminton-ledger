@@ -1,10 +1,11 @@
+import React from 'react';
 import { Container, Row, Col, Button } from 'react-bootstrap';
 import './HomePage.css';
 import SessionCalendar from '../components/Calander/SessionCalendar';
 import AddBirdieBatchModal from '../components/AddBirdieBatchModal';
 import { useState } from 'react';
 import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { db } from '../fireBaseService'; // Ensure this is the correct path to your Firebase service
+import { db } from '../fireBaseService';
 import AddCourtCreditModal from '../components/AddCourtCreditsModal';
 
 const session = {

@@ -1,3 +1,4 @@
+import React from 'react';
 import './App.css';
 import AppNavbar from './components/AppNavBar';
 import { Routes, Route } from 'react-router-dom';

@@ -47,7 +47,7 @@ interface courtCredits {
     location: string;
     totalCost: number;
     costPerHour:number;
-    hours: number; //number of hours
+    hours: number;
     purchaseDate: Date; 
     remainingHours: number;
     purchaserName: string;
@@ -62,4 +62,15 @@ interface transaction{
     date: Date;
     isPreloaded: boolean
     payerId: string;
+}
+
+interface inventoryAdjustment{
+    adjustmentDate: Date,
+    userId: string,
+    userName: string,
+    resourceType: "birdieBatch"|"courtCredits",
+    batchId: string,
+    batchNameSnapshot: string,
+    reason: string,
+    changes: string
 }
