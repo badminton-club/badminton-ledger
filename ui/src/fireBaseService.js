@@ -1,8 +1,8 @@
 import {
-  getFirestore, collection, query, where, getDocs, Timestamp, doc, getDoc, updateDoc,orderBy,
+  getFirestore, collection, query, where, getDocs, Timestamp, doc, getDoc, updateDoc, orderBy,
   addDoc,
   serverTimestamp,
-  writeBatch 
+  writeBatch
 } from 'firebase/firestore';
 
 import { initializeApp } from "firebase/app";
@@ -57,8 +57,8 @@ export const addBirdieBatchToFirestore = async (batchData) => {
 
   try {
     const finalBatchData = {
-      ...batchData, 
-      purchaseDate: Timestamp.fromDate(new Date(batchData.purchaseDate)), 
+      ...batchData,
+      purchaseDate: Timestamp.fromDate(new Date(batchData.purchaseDate)),
       createdAt: serverTimestamp()
     };
 
@@ -120,7 +120,7 @@ export const fetchBirdieBatchById = async (batchId) => {
 export const updateBirdieBatchAndLogAdjustments = async (
   batchId,
   originalBatchData,
-  updatedFormData,   
+  updatedFormData,
   reason,
   userId,
   userName
@@ -149,7 +149,7 @@ export const updateBirdieBatchAndLogAdjustments = async (
 
   for (const field of fieldsToCompare) {
     let originalValue = originalBatchData[field];
-    let newValue = dataToUpdateInInventory[field]; 
+    let newValue = dataToUpdateInInventory[field];
     if (field === 'purchaseDate') {
       const originalDate = originalBatchData.purchaseDate instanceof Date ? originalBatchData.purchaseDate.toISOString() : originalBatchData.purchaseDate;
       const newDateVal = dataToUpdateInInventory.purchaseDate instanceof Timestamp ? dataToUpdateInInventory.purchaseDate.toDate().toISOString() : new Date(dataToUpdateInInventory.purchaseDate).toISOString();
@@ -157,8 +157,8 @@ export const updateBirdieBatchAndLogAdjustments = async (
       if (originalDate !== newDateVal) {
         changes.push({
           fieldName: field,
-          oldValue: originalDate, 
-          newValue: newDateVal    
+          oldValue: originalDate,
+          newValue: newDateVal
         });
       }
     } else if (originalValue !== newValue) {
@@ -168,7 +168,7 @@ export const updateBirdieBatchAndLogAdjustments = async (
 
   if (changes.length === 0) {
     console.log("Service: No actual changes detected for batch update. Skipping log and update.");
-    return; 
+    return;
   }
 
   const adjustmentLogData = {
@@ -177,7 +177,7 @@ export const updateBirdieBatchAndLogAdjustments = async (
     userName: userName,
     resourceType: "birdieBatch",
     batchId: batchId,
-    batchNameSnapshot: originalBatchData.name, 
+    batchNameSnapshot: originalBatchData.name,
     reason: reason,
     changes: changes
   };
@@ -188,7 +188,7 @@ export const updateBirdieBatchAndLogAdjustments = async (
     const inventoryDocRef = doc(db, "birdieInventory", batchId);
     batch.update(inventoryDocRef, dataToUpdateInInventory);
 
-    const adjustmentLogDocRef = doc(inventoryAdjustmentsRef); 
+    const adjustmentLogDocRef = doc(inventoryAdjustmentsRef);
     batch.set(adjustmentLogDocRef, adjustmentLogData);
 
     await batch.commit();
@@ -215,8 +215,8 @@ export const fetchInventoryAdjustmentsForBatch = async (batchId) => {
   const q = query(
     inventoryAdjustmentsRef,
     where("batchId", "==", batchId),
-    where("resourceType", "==", "birdieBatch"), 
-    orderBy("adjustmentDate", "desc") 
+    where("resourceType", "==", "birdieBatch"),
+    orderBy("adjustmentDate", "desc")
   );
   try {
     const querySnapshot = await getDocs(q);
@@ -254,7 +254,7 @@ export const fetchSessionUsageForBirdieBatch = async (batchId) => {
           if (usage.batchId === batchId && usage.quantityUsed > 0) {
             usageDetails.push({
               sessionId: doc.id,
-              sessionDate: sessionData.date, 
+              sessionDate: sessionData.date,
               quantityUsed: usage.quantityUsed
             });
           }
@@ -267,4 +267,160 @@ export const fetchSessionUsageForBirdieBatch = async (batchId) => {
     throw error;
   }
 };
+
+
+/**
+ * Adds a new court credit batch document to the 'courtCredits' collection.
+ * @param {object} batchData - Data from the form { name, purchaseDate, purchaserName, hoursPurchased, totalCost, remainingHours, notes }
+ * @returns {Promise<string>} The ID of the new document.
+ */
+export const addCourtCreditBatchToFirestore = async (batchData) => {
+  if (!db || !courtCreditsRef) { throw new Error("Database not initialized. Cannot add court credit batch."); }
+  try {
+    const finalBatchData = {
+      ...batchData,
+      purchaseDate: Timestamp.fromDate(new Date(batchData.purchaseDate)),
+      remainingHours: parseFloat(batchData.hoursPurchased), // Initially remaining is same as purchased
+      createdAt: serverTimestamp()
+    };
+    const docRef = await addDoc(courtCreditsRef, finalBatchData);
+    console.log("Service: Successfully added court credit batch with ID:", docRef.id);
+    return docRef.id;
+  } catch (error) {
+    console.error("Service: Error writing new court credit batch:", error);
+    throw new Error(error.message || "Database error: Could not save court credit batch.");
+  }
+};
+
+/**
+ * Fetches a single court credit batch by ID.
+ * @param {string} batchId
+ * @returns {Promise<object|null>}
+ */
+export const fetchCourtCreditBatchById = async (batchId) => {
+  if (!db || !courtCreditsRef) { throw new Error("Database not initialized."); }
+  if (!batchId) return null;
+  try {
+    const batchDocRef = doc(db, "courtCredits", batchId);
+    const batchSnap = await getDoc(batchDocRef);
+    if (batchSnap.exists()) {
+      const data = batchSnap.data();
+      return {
+        id: batchSnap.id, ...data,
+        purchaseDate: data.purchaseDate?.toDate ? data.purchaseDate.toDate() : new Date(data.purchaseDate)
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error("Service: Error fetching court credit batch by ID:", error);
+    throw new Error(error.message || "Database error: Could not fetch court credit batch.");
+  }
+};
+
+/**
+* Updates a court credit batch and logs adjustments.
+* @param {string} batchId
+* @param {object} originalBatchData (with JS Dates)
+* @param {object} updatedFormData (with JS Dates)
+* @param {string} reason
+* @param {string} userId
+* @param {string} userName
+* @returns {Promise<void>}
+*/
+export const updateCourtCreditBatchAndLogAdjustments = async (batchId, originalBatchData, updatedFormData, reason, userId, userName) => {
+  if (!db || !courtCreditsRef || !inventoryAdjustmentsRef) { throw new Error("Database not initialized."); }
+  if (!batchId || !originalBatchData || !updatedFormData || !reason || !userId || !userName) { throw new Error("Invalid parameters for updating court credit batch."); }
+
+  const dataToUpdateInInventory = {
+    ...updatedFormData,
+    purchaseDate: Timestamp.fromDate(new Date(updatedFormData.purchaseDate)),
+    lastModifiedAt: serverTimestamp(),
+    lastModifiedBy: userId,
+    lastModifiedByName: userName
+  };
+
+  const changes = [];
+  const fieldsToCompare = ['purchaseDate', 'purchaserName', 'hoursPurchased', 'totalCost', 'remainingHours', 'notes'];
+  for (const field of fieldsToCompare) {
+    let originalValueForComparison = originalBatchData[field];
+    let newValueForComparison = updatedFormData[field];
+    if (field === 'purchaseDate') {
+      originalValueForComparison = originalBatchData.purchaseDate instanceof Date ? originalBatchData.purchaseDate.toISOString().split('T')[0] : null;
+      newValueForComparison = updatedFormData.purchaseDate instanceof Date ? updatedFormData.purchaseDate.toISOString().split('T')[0] : null;
+    }
+    if (String(originalValueForComparison ?? '') !== String(newValueForComparison ?? '')) { // Compare as strings after handling null/undefined
+      changes.push({ fieldName: field, oldValue: originalBatchData[field], newValue: updatedFormData[field] });
+    }
+  }
+
+  if (changes.length === 0) {
+    console.log("Service: No actual changes for court credit batch. Updating lastModified fields only.");
+    const inventoryDocRefOnlyModified = doc(db, "courtCredits", batchId);
+    await updateDoc(inventoryDocRefOnlyModified, { lastModifiedAt: serverTimestamp(), lastModifiedBy: userId, lastModifiedByName: userName });
+    return;
+  }
+
+  const adjustmentLogData = { adjustmentDate: serverTimestamp(), userId, userName, resourceType: "courtCreditBatch", batchId, reason, changes };
+  try {
+    const batchWrite = writeBatch(db);
+    const inventoryDocRef = doc(db, "courtCredits", batchId);
+    batchWrite.update(inventoryDocRef, dataToUpdateInInventory);
+    const adjustmentLogDocRef = doc(inventoryAdjustmentsRef);
+    console.log("adjustmentLogData ==> ", adjustmentLogData);
+    batchWrite.set(adjustmentLogDocRef, adjustmentLogData);
+    await batchWrite.commit();
+  } catch (error) { console.error("Service: Error in batched write for court credit update/log:", error); throw new Error(error.message || "DB error."); }
+};
+
+/**
+* Fetches inventory adjustment logs for a specific court credit batch.
+* @param {string} batchId
+* @returns {Promise<Array<object>>}
+*/
+export const fetchCourtCreditAdjustmentsForBatch = async (batchId) => {
+  if (!inventoryAdjustmentsRef) { return []; }
+  if (!batchId) return [];
+  const q = query(inventoryAdjustmentsRef, where("batchId", "==", batchId), where("resourceType", "==", "courtCreditBatch"), orderBy("adjustmentDate", "desc"));
+  try {
+    const querySnapshot = await getDocs(q); return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  } catch (error) { console.error("Error fetching court credit adjustments:", error); throw error; }
+};
+
+/**
+* Fetches session usage for a specific court credit batch.
+* (This assumes session documents store court credit usage with a batchId)
+* @param {string} batchId
+* @returns {Promise<Array<object>>}
+*/
+export const fetchSessionUsageForCourtCreditBatch = async (batchId) => {
+  if (!sessionsRef) { return []; }
+  if (!batchId) return [];
+  // This is a placeholder. You'll need to adapt this based on how court credit usage is
+  // actually stored within your 'sessions' documents.
+  // For example, if sessions.courtInfo has a 'creditBatchIdUsed' field:
+  // const q = query(sessionsRef, where("courtInfo.creditBatchIdUsed", "==", batchId), firestoreOrderBy("date", "desc"));
+  // For now, returning an empty array as the structure isn't defined for this yet.
+  console.warn("fetchSessionUsageForCourtCreditBatch: Session data structure for court credit batch usage not yet defined.");
+  return [];
+  // Example if sessions.courtUsage was an array like birdieUsage:
+  // const q = query(sessionsRef, firestoreOrderBy("date", "desc"));
+  // try {
+  //     const querySnapshot = await getDocs(q);
+  //     const usageDetails = [];
+  //     querySnapshot.forEach(doc => {
+  //         const sessionData = doc.data();
+  //         if (Array.isArray(sessionData.courtUsage)) { // Assuming a 'courtUsage' array
+  //             sessionData.courtUsage.forEach(usage => {
+  //                 if (usage.batchId === batchId && usage.hoursUsed > 0) {
+  //                     usageDetails.push({ sessionId: doc.id, sessionDate: sessionData.date, hoursUsed: usage.hoursUsed });
+  //                 }
+  //             });
+  //         }
+  //     });
+  //     return usageDetails;
+  // } catch (error) { console.error("Error fetching session usage for court credit batch:", error); throw error; }
+};
+// --- End Court Credit Functions ---
+
+
 export { db }

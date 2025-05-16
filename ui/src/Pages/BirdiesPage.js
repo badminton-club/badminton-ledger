@@ -13,7 +13,7 @@ import {
     fetchBirdieBatchById,
     fetchInventoryAdjustmentsForBatch,
     fetchSessionUsageForBirdieBatch
-} from '../fireBaseService';
+} from '../firebaseService';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { Link } from 'react-router';
 

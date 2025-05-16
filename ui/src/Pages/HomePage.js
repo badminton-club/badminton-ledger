@@ -5,7 +5,7 @@ import SessionCalendar from '../components/Calander/SessionCalendar';
 import AddBirdieBatchModal from '../components/AddBirdieBatchModal';
 import { useState } from 'react';
 import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { db } from '../fireBaseService';
+import { addCourtCreditBatchToFirestore, db } from '../firebaseService';
 import AddCourtCreditModal from '../components/AddCourtCreditsModal';
 
 const session = {
@@ -17,27 +17,7 @@ const session = {
 
 
 const handleAddCourtCredit = async (batchData) => {
-    if (!db) {
-        console.error("Firestore database instance (db) is not available.");
-        throw new Error("Database not initialized.");
-    }
-
-    console.log("Attempting to add new birdie batch:", batchData);
-
-    try {
-        const inventoryCollectionRef = collection(db, "courtCredits");
-        const docRef = await addDoc(inventoryCollectionRef, {
-            ...batchData,
-            purchaseDate: Timestamp.fromDate(batchData.purchaseDate),
-            createdAt: serverTimestamp()
-        });
-
-        console.log("Successfully added birdie batch with ID:", docRef.id);
-
-    } catch (error) {
-        console.error("Error writing new birdie batch to Firestore:", error);
-        throw new Error("Database error: Could not save the new birdie batch.");
-    }
+    await addCourtCreditBatchToFirestore(batchData);
 }
 
 const handleAddBirdieBatch = async (batchData) => {

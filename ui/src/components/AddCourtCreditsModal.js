@@ -39,7 +39,6 @@ function AddCourtCreditModal({
         if (isNaN(cost) || cost <= 0) { setError('Valid Cost Per Hour (> 0) is required.'); return; }
         const hours = parseInt(hoursPurchased, 10);
         if (isNaN(hours) || hours <= 0) { setError('Valid Number of Hours Purchased (> 0) is required.'); return; }
-        console.log("totalCost ==> ", totalCost);
         const totalCostOfBatch = Number.parseFloat(totalCost).toFixed(2);
         if (isNaN(totalCostOfBatch) || totalCostOfBatch <= 0) { setError('Valid Total Cost (> 0) is required.'); return; }
         if (!purchaserName.trim()) { setError('Purchaser Name is required.'); return; }
@@ -50,9 +49,8 @@ function AddCourtCreditModal({
             purchaseDate: purchaseDate,
             purchaserName: purchaserName.trim(),
             costPerHour: cost,
-            totalCost: totalCostOfBatch,
-            hours: hours,
-            remainingHours: hours
+            totalCost: Number(totalCostOfBatch),
+            hoursPurchased: hours,
         };
 
         try {
