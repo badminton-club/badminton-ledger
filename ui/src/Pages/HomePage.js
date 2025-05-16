@@ -5,7 +5,7 @@ import SessionCalendar from '../components/Calander/SessionCalendar';
 import AddBirdieBatchModal from '../components/AddBirdieBatchModal';
 import { useState } from 'react';
 import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { addCourtCreditBatchToFirestore, db } from '../firebaseService';
+import { addCourtCreditBatchToFirestore, db } from '../services/firebaseService';
 import AddCourtCreditModal from '../components/AddCourtCreditsModal';
 
 const session = {

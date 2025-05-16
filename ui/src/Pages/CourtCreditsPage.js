@@ -13,8 +13,8 @@ import {
     fetchCourtCreditBatchById,
     fetchCourtCreditAdjustmentsForBatch,
     fetchSessionUsageForCourtCreditBatch
-} from '../firebaseService';
-import { db } from '../firebaseService';
+} from '../services/firebaseService';
+import { db } from '../services/firebaseService';
 import { collection, getDocs, query, orderBy as firestoreOrderBy } from 'firebase/firestore';
 
 // Styles for history rows
