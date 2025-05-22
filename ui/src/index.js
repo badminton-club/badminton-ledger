@@ -5,13 +5,17 @@ import App from './App';
 import reportWebVitals from './reportWebVitals';
 import 'react-datepicker/dist/react-datepicker.css';
 import { BrowserRouter } from 'react-router-dom';
+import { Provider } from 'react-redux'; // Import Provider
+import { store } from './store'; // Import your store
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <Provider store={store}>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </Provider>
   </React.StrictMode>
 );
 

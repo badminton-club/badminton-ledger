@@ -35,7 +35,7 @@ try {
 
 
 const sessionsRef = db ? collection(db, "sessions") : null;
-const usersRef = db ? collection(db, "users") : null;
+const playersRef = db ? collection(db, "players") : null;
 const birdieInventoryRef = db ? collection(db, "birdieInventory") : null;
 const courtCreditsRef = db ? collection(db, "courtCredits") : null;
 const inventoryAdjustmentsRef = db ? collection(db, "inventoryAdjustments") : null;
@@ -47,7 +47,7 @@ const inventoryAdjustmentsRef = db ? collection(db, "inventoryAdjustments") : nu
  * 
  * @returns {Promise<string>} A promise resolving to the ID of the newly created document.
  */
-export const addBirdieBatchToFirestore = async (batchData) => {
+export const addBirdieBatch = async (batchData) => {
   if (!db || !birdieInventoryRef) {
     console.error("Firestore database instance (db) or birdieInventoryRef is not available.");
     throw new Error("Database not initialized. Cannot add birdie batch.");
@@ -201,7 +201,7 @@ export const updateBirdieBatchAndLogAdjustments = async (
 };
 
 /**
- * Fetches all inventory adjustment logs for a specific birdie batch.
+ * Fetches all inventory adjustment logs for specified birdie batch.
  * @param {string} batchId - The ID of the birdie batch.
  * @returns {Promise<Array<object>>} A promise resolving to an array of adjustment log objects.
  */
@@ -228,11 +228,7 @@ export const fetchInventoryAdjustmentsForBatch = async (batchId) => {
 };
 
 /**
-* Fetches all sessions where a specific birdie batch was used.
-* Note: This requires querying the 'sessions' collection and checking inside an array,
-* which is not ideal for performance if done frequently across many sessions.
-* For high-performance history, a dedicated 'resourceUsageLog' collection is better.
-* This function provides a basic implementation.
+* Fetches all sessions where birdie batch was used.
 * @param {string} batchId - The ID of the birdie batch.
 * @returns {Promise<Array<object>>} A promise resolving to an array of usage details.
 */
@@ -274,7 +270,7 @@ export const fetchSessionUsageForBirdieBatch = async (batchId) => {
  * @param {object} batchData - Data from the form { name, purchaseDate, purchaserName, hoursPurchased, totalCost, remainingHours, notes }
  * @returns {Promise<string>} The ID of the new document.
  */
-export const addCourtCreditBatchToFirestore = async (batchData) => {
+export const addCourtCreditBatch = async (batchData) => {
   if (!db || !courtCreditsRef) { throw new Error("Database not initialized. Cannot add court credit batch."); }
   try {
     const finalBatchData = {
@@ -373,7 +369,7 @@ export const updateCourtCreditBatchAndLogAdjustments = async (batchId, originalB
 };
 
 /**
-* Fetches inventory adjustment logs for a specific court credit batch.
+* Fetches inventory adjustment logs for specified court credit batch.
 * @param {string} batchId
 * @returns {Promise<Array<object>>}
 */
@@ -386,41 +382,68 @@ export const fetchCourtCreditAdjustmentsForBatch = async (batchId) => {
   } catch (error) { console.error("Error fetching court credit adjustments:", error); throw error; }
 };
 
-/**
-* Fetches session usage for a specific court credit batch.
-* (This assumes session documents store court credit usage with a batchId)
-* @param {string} batchId
-* @returns {Promise<Array<object>>}
-*/
-export const fetchSessionUsageForCourtCreditBatch = async (batchId) => {
-  if (!sessionsRef) { return []; }
-  if (!batchId) return [];
-  // This is a placeholder. You'll need to adapt this based on how court credit usage is
-  // actually stored within your 'sessions' documents.
-  // For example, if sessions.courtInfo has a 'creditBatchIdUsed' field:
-  // const q = query(sessionsRef, where("courtInfo.creditBatchIdUsed", "==", batchId), firestoreOrderBy("date", "desc"));
-  // For now, returning an empty array as the structure isn't defined for this yet.
-  console.warn("fetchSessionUsageForCourtCreditBatch: Session data structure for court credit batch usage not yet defined.");
-  return [];
-  // Example if sessions.courtUsage was an array like birdieUsage:
-  // const q = query(sessionsRef, firestoreOrderBy("date", "desc"));
-  // try {
-  //     const querySnapshot = await getDocs(q);
-  //     const usageDetails = [];
-  //     querySnapshot.forEach(doc => {
-  //         const sessionData = doc.data();
-  //         if (Array.isArray(sessionData.courtUsage)) { // Assuming a 'courtUsage' array
-  //             sessionData.courtUsage.forEach(usage => {
-  //                 if (usage.batchId === batchId && usage.hoursUsed > 0) {
-  //                     usageDetails.push({ sessionId: doc.id, sessionDate: sessionData.date, hoursUsed: usage.hoursUsed });
-  //                 }
-  //             });
-  //         }
-  //     });
-  //     return usageDetails;
-  // } catch (error) { console.error("Error fetching session usage for court credit batch:", error); throw error; }
-};
-// --- End Court Credit Functions ---
 
+/**
+ * Find user matches in Firestore based on a parsed name.
+ * Assumes 'players' collection has 'firstNameLower' and 'lastNameLower' fields for case-insensitive search.
+ * @param {string} parsedName - The name string to search for.
+ * @returns {Promise<Array<object>>} A promise resolving to an array of matching user objects { id, firstName, lastName, ...otherData }.
+ * Returns an empty array if no matches.
+ */
+export const findUserMatchesByName = async (parsedName) => {
+  if (!playersRef) {
+    console.error("Firestore (playersRef) is not initialized. Cannot find user matches.");
+    throw new Error("Database not initialized.");
+  }
+  if (!parsedName || !parsedName.trim()) {
+    return [];
+  }
+
+  const nameParts = parsedName.trim().toLowerCase().split(/\s+/).filter(part => part.length > 0);
+  let results = [];
+  const uniqueResultIds = new Set();
+
+  if (nameParts.length === 0) {
+    return [];
+  }
+
+  if (nameParts.length >= 2) {
+    const firstNameQueryPart = nameParts[0];
+    const lastNameQueryPart = nameParts.slice(1).join(" "); 
+
+    const qFullName = query(playersRef,
+      where("firstNameLower", "==", firstNameQueryPart),
+      where("lastNameLower", "==", lastNameQueryPart)
+    );
+    try {
+      const querySnapshot = await getDocs(qFullName);
+      querySnapshot.forEach(doc => {
+        if (!uniqueResultIds.has(doc.id)) {
+          results.push({ id: doc.id, ...doc.data(), matchConfidence: 'exact_full' });
+          uniqueResultIds.add(doc.id);
+        }
+      });
+    } catch (error) {
+      console.error(`Error querying for full name "${parsedName}":`, error);
+    }
+  }
+
+  if (results.length === 0 || nameParts.length === 1) {
+    const qFirstNameOnly = query(playersRef, where("firstNameLower", "==", nameParts[0]));
+    try {
+      const querySnapshot = await getDocs(qFirstNameOnly);
+      querySnapshot.forEach(doc => {
+        if (!uniqueResultIds.has(doc.id)) {
+          results.push({ id: doc.id, ...doc.data(), matchConfidence: 'exact_first' });
+          uniqueResultIds.add(doc.id);
+        }
+      });
+    } catch (error) {
+      console.error(`Error querying for first name "${nameParts[0]}":`, error);
+    }
+  }
+  console.log(`Matches found for "${parsedName}":`, results.length);
+  return results;
+};
 
 export { db }
