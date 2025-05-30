@@ -1,24 +1,21 @@
-import React from 'react';
-import { Container, Row, Col, Button } from 'react-bootstrap';
-import './HomePage.css';
-import SessionCalendar from '../components/Calander/SessionCalendar';
-import AddBirdieBatchModal from '../components/AddBirdieBatchModal';
-import { useState } from 'react';
-import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { addCourtCreditBatchToFirestore, db } from '../services/firebaseService';
-import AddCourtCreditModal from '../components/AddCourtCreditsModal';
+import React from "react";
+import { Container, Row, Col, Button } from "react-bootstrap";
+import "./HomePage.css";
+import SessionCalendar from "../components/Calander/SessionCalendar";
+import { useState } from "react";
+import { collection, addDoc, serverTimestamp, Timestamp } from "firebase/firestore";
+import { addCourtCredits, db } from "../services/firebaseService";
 
 const session = {
     date: "March 18, 2025",
     players: 12,
     birdiesUsed: 4,
-    unpaidPlayers: ["John Doe", "Mark Lee"]
+    unpaidPlayers: ["John Doe", "Mark Lee"],
 };
 
-
 const handleAddCourtCredit = async (batchData) => {
-    await addCourtCreditBatchToFirestore(batchData);
-}
+    await addCourtCredits(batchData);
+};
 
 const handleAddBirdieBatch = async (batchData) => {
     if (!db) {
@@ -33,61 +30,35 @@ const handleAddBirdieBatch = async (batchData) => {
         const docRef = await addDoc(inventoryCollectionRef, {
             ...batchData,
             purchaseDate: Timestamp.fromDate(batchData.purchaseDate),
-            createdAt: serverTimestamp()
+            createdAt: serverTimestamp(),
         });
 
         console.log("Successfully added birdie batch with ID:", docRef.id);
-
     } catch (error) {
         console.error("Error writing new birdie batch to Firestore:", error);
         throw new Error("Database error: Could not save the new birdie batch.");
     }
-
-
-}
+};
 function HomePage() {
     const [showAddBirdieBatchModal, setShowAddBirdieBatchModal] = useState(false);
     const [showAddCourtCreditModal, setShowAddCourtCreditModal] = useState(false);
 
-
     return (
-
         <div className="home-page">
-            <Container >
-                <Row className='mb-3'>
-                    <Col md={4} className="birdie-button-column">
-                        <div className="birdie-button-wrapper">
-                            <button className="birdie-button" onClick={() => setShowAddBirdieBatchModal(true)}>
-                                <img src="birdie.png" alt="Birdie" className="birdie-image" />
-                            </button>
-                        </div>
-
-                        <div className="birdie-button-wrapper">
-                            <button className="birdie-button" onClick={() => setShowAddCourtCreditModal(true)}>
-                                <img src="court.png" alt="Court" className="birdie-image" />
-                            </button>
-                        </div>
-                    </Col>
+            <Container>
+                <Row className="mb-3">
                     <Col md={8}>
                         <div className="session-card">
-                            <h2 className="session-title">
-                                Previous Session
-                            </h2>
+                            <h2 className="session-title">Previous Session</h2>
                             <p className="session-date">{session.date}</p>
 
                             <div className="session-details">
-                                <p className="session-info">
-                                    Players: {session.players}
-                                </p>
-                                <p className="session-info">
-                                    Birdies Used: {session.birdiesUsed}
-                                </p>
+                                <p className="session-info">Players: {session.players}</p>
+                                <p className="session-info">Birdies Used: {session.birdiesUsed}</p>
                             </div>
 
                             <div className="mt-3">
-                                <h3 className="unpaid-title">
-                                    Unpaid Players:
-                                </h3>
+                                <h3 className="unpaid-title">Unpaid Players:</h3>
                                 {session.unpaidPlayers.length > 0 ? (
                                     <ul className="list-disc list-inside">
                                         {session.unpaidPlayers.map((player, index) => (
@@ -97,9 +68,7 @@ function HomePage() {
                                         ))}
                                     </ul>
                                 ) : (
-                                    <p className="no-unpaid">
-                                        All players have paid.
-                                    </p>
+                                    <p className="no-unpaid">All players have paid.</p>
                                 )}
                             </div>
 
@@ -112,12 +81,9 @@ function HomePage() {
                 <Row>
                     <SessionCalendar />
                 </Row>
-                <AddBirdieBatchModal show={showAddBirdieBatchModal} onHide={() => setShowAddBirdieBatchModal(false)} onAddBatch={handleAddBirdieBatch} />
-                <AddCourtCreditModal show={showAddCourtCreditModal} onHide={() => setShowAddCourtCreditModal(false)} onAddBatch={handleAddCourtCredit} />
-
             </Container>
         </div>
-    )
+    );
 }
 
 export default HomePage;

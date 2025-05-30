@@ -465,6 +465,7 @@ function PlayersPage() {
                 show={showAddPlayerModal}
                 onHide={() => setShowAddPlayerModal(false)}
                 onAddPlayer={handleAddNewPlayer}
+                existingPlayers={playersList}
             />
 
         </Container>

@@ -1,177 +1,303 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Modal, Button, ListGroup, Form, InputGroup, Alert, Row, Col } from 'react-bootstrap';
-import { format } from 'date-fns';
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Modal } from "react-bootstrap";
+import { findUserMatchesByName } from "../../services/firebaseService";
+import { useDispatch, useSelector } from "react-redux";
+import { selectAllPlayers } from "../../features/players/playersSlice";
+import AddSessionList from "./SessionModal/components/AddSessionList";
+import SessionDetails from "./SessionModal/components/SessionDetails";
+import {
+    setModalMode,
+    setPlayersInput,
+    setParsedNamesWithMatches,
+    setMatchedPlayers,
+    setFormError,
+    setAddError,
+    MODALMODE,
+    selectModalMode,
+} from "../../features/SessionModal/sessionModalSlice";
+import ListNamesMatching from "./SessionModal/components/ListNamesMatching";
+import NoSessionView from "./SessionModal/components/NoSessionView";
+import { store } from "../../store";
 
-const initialUsedBirdieSet = { id: -1, quantity: 0 };
-
-const MODALMODE = Object.freeze({
-    VIEW: 0,
-    ADDLIST: 1,
-    ADDDETAILS: 2,
-    EDIT: 3,
-})
-
-const highlightedStyle = {
-    backgroundColor: '#fff3cd',
-    transition: 'background-color 0.3s ease-in-out',
+const formatDisplayPlayerName = (user) => {
+    if (!user) return "N/A";
+    return `${user.firstName || ""} ${user.lastName || ""}`.trim();
 };
-const defaultStyle = {
-    backgroundColor: 'transparent',
-    transition: 'background-color 0.3s ease-in-out',
-};
 
-function SessionModal({ show,
+function SessionModal({
+    show,
     onHide,
     session,
-    birdies = [],
-    courtCredits = [],
     onUpdateHighlightStatus,
     onUpdatePaymentStatus,
-    onAddSubmit
+    onSaveSession,
+    onOpenAddUserModal,
 }) {
+    const dispatch = useDispatch();
+    const modalMode = useSelector(selectModalMode);
 
-    const [playerNamesList, setPlayerNamesList] = useState([]);
-    const [modalMode, setModalMode] = useState(MODALMODE.VIEW);
-    const [playersInput, setPlayersInput] = useState('');
-    const [courtNumInput, setCourtNumInput] = useState('0');
-    const [courtCostInput, setCourtCostInput] = useState('0');
-    const [birdieUsage, setBirdieUsage] = useState([initialUsedBirdieSet]);
-    const [addError, setAddError] = useState('');
+    const parsedNamesWithMatches = useSelector(() => store.getState().sessionModal.parsedNamesWithMatches);
+
+    const playersListFromStore = useSelector(selectAllPlayers);
+    console.log("playersListFromStore ==> ", playersListFromStore);
+    const prevPlayersListRef = useRef(playersListFromStore);
+
+
+    const [isLoadingMatches, setIsLoadingMatches] = useState(false);
 
     useEffect(() => {
         if (!show) {
+            dispatch(setModalMode(MODALMODE.VIEW));
+            dispatch(setPlayersInput(""));
+            dispatch(setParsedNamesWithMatches([]));
+            dispatch(setMatchedPlayers([]));
+            dispatch(setFormError(""));
+            setIsLoadingMatches(false);
+        } else if (session && modalMode !== MODALMODE.EDIT) {
             setModalMode(MODALMODE.VIEW);
-            setPlayersInput('');
-            setBirdieUsage([initialUsedBirdieSet]);
-            setAddError('');
-            setCourtCostInput('0')
-            setCourtNumInput('0')
-            setPlayerNamesList([])
-        } else if (session) {
-            setModalMode(MODALMODE.VIEW);
+        } else if (
+            !session &&
+            ![MODALMODE.ADDLIST, MODALMODE.NAMES_MATCHING, MODALMODE.ADDDETAILS].includes(modalMode)
+        ) {
+            dispatch(setModalMode(MODALMODE.VIEW));
         }
-    }, [show]);
+    }, [show, session]);
 
-
-    const totalCourtCost = useMemo(() =>
-        parseFloat(courtCostInput * courtNumInput) || 0
-        , [courtCostInput, courtNumInput]);
-
-    console.log("totalCourtCost ==> ", totalCourtCost);
-    const totalBirdieCost = useMemo(() => {
-        let calculatedBirdieCost = 0;
-        const validBirdieUsage = birdieUsage.filter(set => set.id && set.quantity > 0);
-        validBirdieUsage.forEach(usage => {
-            const batch = birdies.find(b => b.id === usage.id);
-            if (batch && batch.birdsPerTube > 0) {
-                calculatedBirdieCost += (usage.quantity / batch.birdsPerTube) * batch.costPerTube;
+    useEffect(() => {
+        const playerListContentChangedSignificant = () => {
+            if (!prevPlayersListRef.current || !playersListFromStore) return false;
+            if (prevPlayersListRef.current.length !== playersListFromStore.length) return true;
+            const prevIds = new Set(prevPlayersListRef.current.map((p) => p.id));
+            for (const player of playersListFromStore) {
+                if (!prevIds.has(player.id)) return true;
             }
-        });
-        return calculatedBirdieCost;
-    }, [birdieUsage, birdies])
-
-    const totalSessionCost = useMemo(() =>
-        totalCourtCost + totalBirdieCost,
-        [totalCourtCost, totalBirdieCost]);
-
-    const { costPerPlayerEqual, playerCosts } = useMemo(() => {
-        const numPlayers = playerNamesList.reduce((sum, player) => sum + player.percentage, 0);
-        const calculatedCostPerPlayerEqual = numPlayers > 0 ? totalSessionCost / numPlayers : 0;
-        const calculatedPlayerCosts = playerNamesList.map(player => ({
-            ...player,
-            cost: parseFloat((calculatedCostPerPlayerEqual * (player.percentage || 0)).toFixed(2)),
-            paid: false,
-            highlighted: false
-        }));
-        return {
-            costPerPlayerEqual: calculatedCostPerPlayerEqual,
-            playerCosts: calculatedPlayerCosts
+            return false;
         };
-    }, [playerNamesList, totalSessionCost]);
-
-    const handleBirdieUsageChange = (index, field, value) => {
-        const updatedSets = [...birdieUsage];
-        if (field === 'quantity') {
-            const numValue = parseInt(value, 10);
-            updatedSets[index][field] = isNaN(numValue) || numValue < 0 ? 0 : numValue;
-        } else {
-            updatedSets[index][field] = value;
+        if (
+            show &&
+            modalMode === MODALMODE.NAMES_MATCHING &&
+            playerListContentChangedSignificant() &&
+            !isLoadingMatches
+        ) {
+            setIsLoadingMatches(true);
+            dispatch(setFormError(""));
+            const rematchAndUpdate = async () => {
+                const updatedItems = await Promise.all(
+                    parsedNamesWithMatches.map(async (currentItem) => {
+                        if (currentItem.status === "resolved" || currentItem.isEditingName) return currentItem;
+                        try {
+                            const matches = await findUserMatchesByName(currentItem.originalName);
+                            if (matches.length === 1)
+                                return {
+                                    ...currentItem,
+                                    status: "singleMatch",
+                                    potentialMatches: matches,
+                                    selectedPlayerId: matches[0].id,
+                                    error: undefined,
+                                };
+                            if (matches.length > 1)
+                                return {
+                                    ...currentItem,
+                                    status: "multipleMatches",
+                                    potentialMatches: matches,
+                                    selectedPlayerId: null,
+                                    error: undefined,
+                                };
+                            return {
+                                ...currentItem,
+                                status: "unmatched",
+                                potentialMatches: [],
+                                selectedPlayerId: null,
+                                error: undefined,
+                            };
+                        } catch (error) {
+                            return { ...currentItem, status: "matchingFailed", error: "Re-matching failed" };
+                        }
+                    })
+                );
+                dispatch(setParsedNamesWithMatches(updatedItems));
+                setIsLoadingMatches(false);
+            };
+            rematchAndUpdate().catch((err) => {
+                dispatch(setFormError("Error refreshing matches."));
+                setIsLoadingMatches(false);
+            });
         }
-        setBirdieUsage(updatedSets);
-    };
+        prevPlayersListRef.current = [...playersListFromStore];
+    }, [playersListFromStore, modalMode, show, isLoadingMatches, parsedNamesWithMatches, dispatch]);
 
-    const handleAddBirdieSet = () => {
-        setBirdieUsage([...birdieUsage, { ...initialUsedBirdieSet }]);
-    };
+    const runNameMatching = useCallback(
+        async (namesToParse, targetIndexForUpdate = null) => {
+            console.log("namesToParse ==> ", namesToParse);
+            // setIsLoadingMatches(true);
+            dispatch(setFormError(""));
 
-    const handleRemoveBirdieUsageSet = (index) => {
-        if (birdieUsage.length > 1) {
-            const updatedSets = birdieUsage.filter((_, i) => i !== index);
-            setBirdieUsage(updatedSets);
-        }
-    };
+            const matchPromises = namesToParse.map(async (nameString) => {
+                try {
+                    const matches = await findUserMatchesByName(nameString);
+                    if (matches.length === 1) {
+                        return {
+                            originalName: nameString,
+                            editableName: nameString,
+                            isEditingName: false,
+                            status: "singleMatch",
+                            potentialMatches: matches,
+                            selectedPlayerId: matches[0].id,
+                        };
+                    } else if (matches.length > 1) {
+                        return {
+                            originalName: nameString,
+                            editableName: nameString,
+                            isEditingName: false,
+                            status: "multipleMatches",
+                            potentialMatches: matches,
+                            selectedPlayerId: null,
+                        };
+                    } else {
+                        return {
+                            originalName: nameString,
+                            editableName: nameString,
+                            isEditingName: false,
+                            status: "unmatched",
+                            potentialMatches: [],
+                            selectedPlayerId: null,
+                        };
+                    }
+                } catch (error) {
+                    console.error(`Error matching name "${nameString}":`, error);
+                    return {
+                        originalName: nameString,
+                        editableName: nameString,
+                        isEditingName: false,
+                        status: "matchingFailed",
+                        potentialMatches: [],
+                        selectedPlayerId: null,
+                        error: "Matching process failed for this name",
+                    };
+                }
+            });
 
-    const handleGoToDetails = () => {
-        setAddError('');
-        if (!playersInput.trim()) {
-            setAddError('Player list cannot be empty.');
+            try {
+                const results = await Promise.all(matchPromises);
+
+                if (targetIndexForUpdate !== null && results.length === 1) {
+                    dispatch(
+                        setParsedNamesWithMatches((prev) => {
+                            const newArray = [...prev];
+                            const newMatchData = results[0];
+                            newArray[targetIndexForUpdate] = {
+                                ...newArray[targetIndexForUpdate],
+                                originalName: newMatchData.originalName,
+                                editableName: newMatchData.originalName,
+                                isEditingName: false,
+                                status: newMatchData.status,
+                                potentialMatches: newMatchData.potentialMatches,
+                                selectedPlayerId: newMatchData.selectedPlayerId,
+                                error: newMatchData.error,
+                            };
+                            return newArray;
+                        })
+                    );
+                } else {
+                    console.log("results ==> ", results);
+                    dispatch(setParsedNamesWithMatches(results.map((item) => ({ ...item }))));
+                }
+            } catch (overallError) {
+                dispatch(setFormError("An error occurred while trying to match names."));
+            } finally {
+                // setIsLoadingMatches(false);
+            }
+        },
+        [dispatch]
+    );
+
+    const handleGoToNamesMatching = async (playersInput) => {
+        dispatch(setFormError(""));
+        const trimmedInput = playersInput.trim();
+        if (!trimmedInput) {
+            dispatch(setFormError("Player list cannot be empty."));
             return;
         }
-        const lines = playersInput.split('\n');
+        const parsedNames = trimmedInput
+            .split(/[\n,]+/)
+            .map((p) => p.trim())
+            .filter((p) => p !== "");
+        if (parsedNames.length === 0) {
+            dispatch(setFormError("Please enter valid player names."));
+            return;
+        }
+
         const nameRegex = /^\s*\d+\s*\.\s*(.*)$/;
-        const names = []
-        for (const line of lines) {
+        const names = [];
+        for (const line of parsedNames) {
             const matchResult = line.match(nameRegex);
             if (matchResult) {
                 const name = matchResult[1].trim();
                 if (name) {
-                    names.push({ name: name, percentage: 1 });
+                    names.push(name);
                 }
             }
         }
         if (names.length === 0) {
-            setAddError('No valid player names found.');
+            dispatch(setAddError("No valid player names found."));
             return;
         }
-        setPlayerNamesList(names);
-        setModalMode(2);
+
+        setIsLoadingMatches(true);
+        try {
+            await runNameMatching(names);
+            dispatch(setModalMode(MODALMODE.NAMES_MATCHING));
+        } catch (overallError) {
+            dispatch(setFormError("An error occurred while trying to match names."));
+        } finally {
+            setIsLoadingMatches(false);
+        }
     };
 
-    const handlePlayerDetailChange = (index, field, value) => {
-        setPlayerNamesList(prevPlayers => {
-            const updatedPlayers = [...prevPlayers];
-            const playerToUpdate = { ...updatedPlayers[index] };
+    const handleSaveNameAndRematch = async (index) => {
+        const itemToRematch = parsedNamesWithMatches[index];
+        if (!itemToRematch.editableName.trim()) {
+            dispatch(setFormError("Edited name cannot be empty."));
+            // setParsedNamesWithMatches(prev => prev.map((item, i) => i === index ? {...item, isEditingName: true} : item));
+            return;
+        }
+        await runNameMatching([itemToRematch.editableName], index); // Pass array with single name and target index
+    };
 
-            if (field === 'name') {
-                playerToUpdate.name = value;
-            } else if (field === 'percentage') {
-                let numValue = parseFloat(value);
-                if (isNaN(numValue) || numValue < 0) {
-                    numValue = 0;
-                } else if (numValue > 1) {
-                    numValue = 1;
-                }
-                playerToUpdate.percentage = numValue;
+    const handleGoToDetails = () => {
+        dispatch(setFormError(""));
+        const confirmedPlayersForStage2 = [];
+        for (const item of parsedNamesWithMatches) {
+            console.log("parsedNamesWithMatches ==> ", parsedNamesWithMatches);
+            if (item.selectedPlayerId) {
+                // Must have a selected user ID
+                const matchedUser = item.potentialMatches.find((u) => u.id === item.selectedPlayerId);
+                confirmedPlayersForStage2.push({
+                    name: matchedUser ? formatDisplayPlayerName(matchedUser) : item.originalName,
+                    id: item.selectedPlayerId,
+                    paymentPercentage: 1,
+                });
+            } else {
+                dispatch(
+                    setFormError(
+                        `Please select a player for "${item.originalName}". If the player is new, please add them to the system first via the Players page.`
+                    )
+                );
+                return;
             }
-
-            updatedPlayers[index] = playerToUpdate;
-            return updatedPlayers;
-        });
-    }
-
-
-    const handleRemovePlayer = (index) => {
-        setPlayerNamesList(prevPlayers => {
-            const updatedPlayers = [...prevPlayers];
-            updatedPlayers.splice(index, 1);
-            return updatedPlayers;
-        });
-    }
+        }
+        dispatch(setMatchedPlayers(confirmedPlayersForStage2));
+        dispatch(setModalMode(MODALMODE.ADDDETAILS));
+    };
 
     const handlePaymentToggle = (player) => {
         console.log("player ==> ", player);
         if (!onUpdatePaymentStatus || !session || !session.id || !player || !player.name) {
-            console.error("Missing data or handler for payment update", { handler: !!onUpdatePaymentStatus, session, player });
+            console.error("Missing data or handler for payment update", {
+                handler: !!onUpdatePaymentStatus,
+                session,
+                player,
+            });
             setAddError("Cannot update payment status - configuration error.");
             return;
         }
@@ -182,7 +308,11 @@ function SessionModal({ show,
 
     const handleHighlightToggle = (player) => {
         if (!onUpdateHighlightStatus || !session || !session.id || !player || !player.name) {
-            console.error("Missing data or handler for highlight update", { handler: !!onUpdateHighlightStatus, session, player });
+            console.error("Missing data or handler for highlight update", {
+                handler: !!onUpdateHighlightStatus,
+                session,
+                player,
+            });
             setAddError("Cannot update highlight status - configuration error.");
             return;
         }
@@ -191,384 +321,84 @@ function SessionModal({ show,
         onUpdateHighlightStatus(session.id, player.name, newHighlightStatus);
     };
 
-    const handleAddSubmit = (event) => {
-        event.preventDefault();
-        setAddError('');
-        if (!playersInput.trim()) {
-            setAddError('Player list cannot be empty.');
-            return;
-        }
+    const handleSessionSubmit = (
+        courtNumInput,
+        totalBirdieCost,
+        totalSessionCost,
+        totalCourtCost,
+        birdieUsage,
+        playerCosts,
+        courtCreditUsage
+    ) => {
+        setAddError("");
+
         const courtCount = parseFloat(courtNumInput);
-        const validBirdieSets = birdieUsage.filter(set => set.id && set.quantity > 0);
+        const validBirdieSets = birdieUsage.filter((set) => set.id && set.quantity > 0);
 
         const newSessionData = {
             players: playerCosts,
             courtCount,
-            birdiesUsed: validBirdieSets.map(set => ({
+            birdieUsage: validBirdieSets.map((set) => ({
                 id: set.id,
-                quantity: set.quantity
+                quantity: set.quantity,
             })),
-            courtCost: parseInt(courtCostInput),
+            courtCreditUsage: courtCreditUsage,
             totalSessionCost,
             totalBirdieCost,
-            totalCourtCost
+            totalCourtCost,
         };
-        onAddSubmit(newSessionData)
+        onSaveSession(newSessionData);
         console.log("newSessionData ==> ", newSessionData);
     };
 
-
-
-    console.log("session ==> ", session);
-    const renderSessionDetails = () => {
-        const sessionPaidTotal = session?.players?.filter(player => player.paid)?.reduce((sum, player) => sum + player.cost, 0) || 0
-        return (
-            <><div key={session.id} className={session ? 'mb-4 border-bottom pb-3' : ''}>
-                <h6>Session on: {format(session.date, 'PPP')}</h6>
-                {session.location && <p><strong>Location:</strong> {session.location || 'NA'}</p>}
-                <p><strong>Birdies Used:</strong> {session?.birdiesUsed?.quantity || 'N/A'}</p>
-                <h6>Players:</h6>
-                <ListGroup variant="flush">
-                    {session.players && session.players.length > 0 ? session.players.map(player => {
-                        if (!player || !player.name) return null;
-                        const isPaid = !!player.paid;
-                        const isHighlighted = !!player.highlighted;
-                        return (
-
-                            <ListGroup.Item
-                                key={player.name}
-                                className="d-flex justify-content-between align-items-center"
-                                style={isHighlighted ? highlightedStyle : defaultStyle}
-                            >
-                                <span>{player.name || player.userId}</span>
-                                <div className="d-flex align-items-center gap-2">
-                                    <span className={isPaid ? 'invisible' : ''}>{`$${player.cost}`}</span>
-
-                                    <Button
-                                        variant={isHighlighted ? 'warning' : 'outline-secondary'}
-                                        size="sm"
-                                        onClick={() => handleHighlightToggle(player)}
-                                        disabled={!onUpdateHighlightStatus}
-                                        aria-label={isHighlighted ? `Unhighlight ${player.name}` : `Highlight ${player.name}`}
-                                        title={isHighlighted ? 'Remove Highlight' : 'Highlight Player'}
-                                    >
-                                        {isHighlighted ? '★' : '☆'}
-                                    </Button>
-
-                                    <Button
-                                        size="sm"
-                                        variant={isPaid ? 'success' : 'outline-secondary'}
-                                        onClick={() => handlePaymentToggle(player)}
-                                        disabled={!onUpdatePaymentStatus}
-                                        style={{ minWidth: '110px' }}
-                                    >
-                                        {isPaid ? '✓ Paid' : 'Mark as Paid'}
-                                    </Button>
-                                </div>
-                            </ListGroup.Item>
-                        );
-                    }) : <ListGroup.Item>No players listed.</ListGroup.Item>}
-                </ListGroup>
-                {session.notes && <p className="mt-3"><strong>Notes:</strong> {session.notes}</p>}
-
-                <div className="mt-4 p-3 bg-light border rounded">
-                    <h6 className="mb-2">Session Cost Summary</h6>
-                    <Row>
-                        <Col xs={7}>Total Court Cost:</Col>
-                        <Col xs={5} className="text-end">${(session.totalCourtCost || 0).toFixed(2)}</Col>
-                    </Row>
-                    <Row>
-                        <Col xs={7}>Total Birdie Cost:</Col>
-                        <Col xs={5} className="text-end">${(session.totalBirdieCost || 0).toFixed(2)}</Col>
-                    </Row>
-                    <Row className="fw-bold my-1 pt-1 border-bottom">
-                        <Col xs={7}>Total Session Cost:</Col>
-                        <Col xs={5} className="text-end">${(session.totalSessionCost || 0).toFixed(2)}</Col>
-                    </Row>
-                    <Row>
-                        <Col xs={7}>Player Count:</Col>
-                        <Col xs={5} className="text-end">{session?.players?.length || 0}</Col>
-                    </Row>
-                    <Row>
-                        <Col xs={7}>Unpaid Player Count:</Col>
-                        <Col xs={5} className="text-end">{session?.players?.filter(a => !a.paid).length}</Col>
-                    </Row>
-                    <Row>
-                        <Col xs={7}>Total Paid:</Col>
-                        <Col xs={5} className="text-end">{sessionPaidTotal}</Col>
-                    </Row>
-                    <Row>
-                        <Col xs={7}>Total Due:</Col>
-                        <Col xs={5} className="text-end">{session.totalSessionCost - sessionPaidTotal}</Col>
-                    </Row>
-                </div>
-            </div>
-                <div className="d-flex justify-content-end mt-3">
-                    <Button variant="primary" onClick={() => {
-                        setPlayerNamesList(session.players.map((a) => { return { name: a.name, percentage: a.percentage } }))
-                        setBirdieUsage(session.birdiesUsed)
-                        setCourtCostInput(session.courtCost)
-                        setCourtNumInput(session.courtCount)
-                        setModalMode(MODALMODE.EDIT)
-                    }} className="me-2">
-                        Edit
-                    </Button>
-                </div>
-            </>
-        );
-    }
-
-    const renderNoSessionView = () => (
-        <div className="text-center p-4">
-            <p>No session data recorded for this day.</p>
-            <Button variant="primary" onClick={() => { setModalMode(MODALMODE.ADDLIST); setAddError(''); }}>
-                Add New Session
-            </Button>
-        </div>
-    );
-
-    const renderAddSessionListStage = () => (
-        <>
-            <h5 className="mb-3">Add New Session - Step 1: Players</h5>
-            {addError && <Alert variant="danger" onClose={() => setAddError('')} dismissible>{addError}</Alert>}
-            <Form.Group className="mb-3" controlId="formSessionPlayers">
-                <Form.Label>Players</Form.Label>
-                <Form.Control
-                    as="textarea"
-                    rows={4}
-                    placeholder="Enter List of Players"
-                    value={playersInput}
-                    onChange={(e) => setPlayersInput(e.target.value)}
-                    required
-                />
-                <Form.Text muted>Comma or newline separated list.</Form.Text>
-            </Form.Group>
-            <div className="d-flex justify-content-end mt-3">
-                <Button variant="secondary" onClick={onHide} className="me-2">Cancel</Button>
-                <Button variant="primary" onClick={handleGoToDetails}>Next: Add Details</Button>
-            </div>
-        </>
-    );
-
-
-    const calculateRemainingBirds = (batch) => {
-        if (!batch || typeof batch.unopenedTubesRemaining !== 'number' || typeof batch.birdsPerTube !== 'number' || typeof batch.birdsInOpenTube !== 'number') {
-            return 0;
-        }
-        return ((batch.unopenedTubesRemaining) + batch.birdsInOpenTube / batch.birdsPerTube).toFixed(2);
-    }
-
-    const formatBirdieBatchLabel = (batch) => {
-        try {
-            const dateObj = batch.purchaseDate?.toDate ? batch.purchaseDate.toDate() : new Date(batch.purchaseDate);
-            const dateStr = format(dateObj, 'yyyy-MM-dd');
-            const costStr = batch.costPerTube?.toFixed(2) ?? 'N/A';
-            const remainingTotal = calculateRemainingBirds(batch);
-            return `${batch.name} (Purch: ${dateStr}, $${costStr}/tube, remain: ${remainingTotal} tubes)`;
-        } catch (e) {
-            console.error("Error formatting birdie batch label:", batch, e);
-            return `${batch.name} (Invalid Data)`;
-        }
-    };
-
-    const renderAddSessionFormDetails = () => (
-        <Form onSubmit={handleAddSubmit}>
-            <h5 className="mb-3">Add New Session</h5>
-            {addError && <Alert variant="danger">{addError}</Alert>}
-            <Row className='justify-content-between'>
-                <Col md={6}>
-                    <Form.Label>Player Name</Form.Label>
-                </Col>
-                <Col md={3}>
-                    <Form.Label>Payment Fraction</Form.Label>
-                </Col>
-            </Row>
-            {playerCosts.map((player, index) => (
-                <Row key={player.id} className="justify-content-between mb-1">
-                    <Col md={5}>
-                        <Form.Control
-                            type="text"
-                            aria-label="Player Name"
-                            value={player.name}
-                            onChange={(e) => handlePlayerDetailChange(index, 'name', e.target.value)}
-                            required
-                        />
-                    </Col>
-                    <Col md={4}>
-                        <InputGroup>
-                            <Form.Label style={{ marginRight: 20, minWidth: 48 }}>{`$${player.cost}`}</Form.Label>
-                            <Form.Control
-                                type="number"
-                                min="0"
-                                max="1"
-                                step="0.25"
-                                aria-label="Payment Percentage"
-                                value={player.percentage}
-                                onChange={(e) => handlePlayerDetailChange(index, 'percentage', e.target.value)}
-                                required
-                                style={{ maxWidth: '100px' }}
-                            />
-                            <Button
-                                variant="outline-danger"
-                                size="sm"
-                                onClick={() => handleRemovePlayer(index)}
-                                aria-label={`Remove player ${player.name}`}
-                            >
-                                X
-                            </Button>
-                        </InputGroup>
-                    </Col>
-
-                </Row>
-            ))}
-            <Form.Group className="my-4" controlId="formSessionCourtHours">
-                <Row className='justify-content-between'>
-                    <Col md={6}>
-                        <Form.Label >No. of courts</Form.Label>
-                    </Col>
-                    <Col md={6}>
-                        <Form.Label >Cost per court (/2 hr)</Form.Label>
-                    </Col>
-                </Row>
-                <InputGroup>
-                    <Form.Control
-                        type="number"
-                        min="1"
-                        placeholder="# of Courts"
-                        value={courtNumInput}
-                        onChange={(e) => setCourtNumInput(e.target.value)}
-                        required
-                    />
-                    <Form.Control
-                        type="number"
-                        placeholder="Cost per hour"
-                        value={courtCostInput}
-                        onChange={(e) => setCourtCostInput(e.target.value)}
-                        required
-                    />
-                    <div style={{ paddingLeft: "26px" }} />
-                </InputGroup>
-            </Form.Group>
-
-            <Form.Label>Birdies Used</Form.Label>
-            {birdieUsage.map((set, index) => {
-                const selectedBatch = birdies.find(b => b.id === set.id);
-                const costDisplay = selectedBatch ? `$${selectedBatch.costPerTube.toFixed(2)}/tube` : '';
-                return (
-                    <InputGroup key={index} className="mb-2">
-                        <Form.Select
-                            aria-label="Select Birdie Batch"
-                            value={set.id}
-                            onChange={(e) => handleBirdieUsageChange(index, 'id', parseInt(e.target.value))}
-                            required={set.quantity > 0}
-                        >
-                            <option value="">-- Select Batch --</option>
-                            {birdies.map(batch => (
-                                <option
-                                    key={batch.id}
-                                    value={batch.id}
-                                    disabled={calculateRemainingBirds(batch) <= 0}
-                                >
-                                    {formatBirdieBatchLabel(batch)}
-                                </option>
-                            ))}
-                        </Form.Select>
-                        <InputGroup.Text>Birdies Used:</InputGroup.Text>
-                        <Form.Control
-                            type="number"
-                            min="1"
-                            step="1"
-                            placeholder="# Birds"
-                            aria-label="Number of birds used"
-                            value={set.quantity}
-                            onChange={(e) => handleBirdieUsageChange(index, 'quantity', e.target.value)}
-                            required={!!set.id}
-                        />
-                        {costDisplay && <InputGroup.Text title={`Cost per tube: $${selectedBatch.costPerTube.toFixed(2)}`}>{costDisplay}</InputGroup.Text>}
-
-                        <Button variant="outline-danger" size="sm"
-                            className={birdieUsage.length > 1 ? '' : 'invisible'}
-                            onClick={() => handleRemoveBirdieUsageSet(index)}
-                            aria-label="Remove Birdie Usage">
-                            X
-                        </Button>
-                    </InputGroup>
-                );
-            })}
-            <Button variant="outline-secondary" size="sm" onClick={handleAddBirdieSet} className="mt-1 mb-3">
-                + Add Another Birdie Type
-            </Button>
-
-            <div className="mt-4 p-3 bg-light border rounded">
-                <h6 className="mb-2">Session Cost Summary</h6>
-                <Row>
-                    <Col xs={7}>Total Court Cost:</Col>
-                    <Col xs={5} className="text-end">${(totalCourtCost || 0).toFixed(2)}</Col>
-                </Row>
-                <Row>
-                    <Col xs={7}>Total Birdie Cost:</Col>
-                    <Col xs={5} className="text-end">${(totalBirdieCost || 0).toFixed(2)}</Col>
-                </Row>
-                <Row className="fw-bold mt-1 pt-1 border-top">
-                    <Col xs={7}>Total Session Cost:</Col>
-                    <Col xs={5} className="text-end">${(totalSessionCost || 0).toFixed(2)}</Col>
-                </Row>
-                {playerNamesList.length > 0 && (
-                    <Row className="mt-1 text-muted">
-                        <Col xs={7}>Avg. Cost:</Col>
-                        <Col xs={5} className="text-end">${costPerPlayerEqual.toFixed(2)} / person</Col>
-                    </Row>
-                )}
-            </div>
-
-            <div className="d-flex justify-content-end mt-3">
-                <Button variant="secondary" onClick={() => setModalMode(MODALMODE.VIEW)} className="me-2">
-                    Cancel
-                </Button>
-                <Button variant="primary" type="submit">
-                    Save Session
-                </Button>
-            </div>
-        </Form>
-    );
     const getModalHeader = () => {
         switch (modalMode) {
             case MODALMODE.ADDLIST:
-                return 'Add Session - Step 1: Players';
+                return "Add Session - Step 1: Players";
+            case MODALMODE.NAMES_MATCHING:
+                return "Add Session - Step 2: Confirm Attendees";
             case MODALMODE.ADDDETAILS:
-                return 'Add Session - Step 2: Details';
+                return "Add Session - Step 3: Details";
             case MODALMODE.EDIT:
-                return 'Edit Session';
+                return "Edit Session";
             default:
-                return 'Session Details';
+                return "Session Details";
         }
-    }
+    };
 
-    const getModalBody = () => {
+    console.log("modalMode ==> ", modalMode);
+    const renderModalBody = () => {
         switch (modalMode) {
             case MODALMODE.ADDLIST:
-                return renderAddSessionListStage();
+                return <AddSessionList handleGoToNamesMatching={handleGoToNamesMatching} onHide={onHide} />;
+            case MODALMODE.NAMES_MATCHING:
+                return (
+                    <ListNamesMatching
+                        isLoadingMatches={isLoadingMatches}
+                        handleSaveNameAndRematch={handleSaveNameAndRematch}
+                        handleGoToDetails={handleGoToDetails}
+                        formatDisplayPlayerName={formatDisplayPlayerName}
+                        onOpenAddUserModal={onOpenAddUserModal}
+                    />
+                );
             case MODALMODE.ADDDETAILS:
             case MODALMODE.EDIT:
-                return renderAddSessionFormDetails();
+                return <SessionDetails onHide={onHide} handleSessionSubmit={handleSessionSubmit} />;
             default:
-                return (session && session.id)
-                    ? renderSessionDetails()
-                    : renderNoSessionView();
+                console.log("default");
+                return <NoSessionView />;
+            // session && session.id ? <ExistingSessionDetails /> :
         }
-
-    }
+    };
 
     return (
-        <Modal show={show} onHide={onHide} centered size="lg">
+        <Modal show={show} onHide={onHide} centered size="lg" style={{ minHeight: "100%" }}>
             <Modal.Header closeButton>
                 <Modal.Title>{getModalHeader()}</Modal.Title>
             </Modal.Header>
-            <Modal.Body>
-                {getModalBody()}
-            </Modal.Body>
+            <Modal.Body>{renderModalBody()}</Modal.Body>
         </Modal>
     );
 }
 
-export default SessionModal
+export default SessionModal;

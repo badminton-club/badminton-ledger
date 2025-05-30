@@ -1,347 +1,28 @@
-import React, { useState } from 'react';
-import { Button, ButtonGroup, Spinner } from 'react-bootstrap';
-import { getMonthYear, getNextMonth, getPrevMonth } from '../../utils/dateUtils';
-import CalendarGrid from './CalendarGrid';
-import DatePicker from 'react-datepicker';
-import 'bootstrap/dist/css/bootstrap.min.css';
-import SessionModal from './SessionModal';
-import { getDay, getMonth, getYear } from 'date-fns';
-
-
-const exampleBirdies = [{
-    id: 1,
-    name: "HangYu 1",
-    purchaseDate: "2025-01-07",
-    costPerTube: 28,
-    unopenedTubesRemaining: 13,
-    birdsPerTube: 12,
-    birdsInOpenTube: 10
-},
-{
-    id: 2,
-    name: "HangYu 1",
-    purchaseDate: "2024-11-07",
-    costPerTube: 27,
-    unopenedTubesRemaining: 3,
-    birdsPerTube: 12,
-    birdsInOpenTube: 2
-}]
-
-const exampleCourtCredits = [{
-    id: 1,
-    name: 'WCA 1',
-    location: "west coast academy",
-    totalCost: 1120,
-    totalHours: 40,
-    purchaseDate: new Date(2024, 11, 7),
-    remainingHours: 40
-}]
-
-const exampleSession = [
-    {
-        id: '03042025',
-        date: new Date(2025, 2, 4),
-        "players": [
-            {
-                "name": "Jordan",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Jackson",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "David",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Ethan",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Stephanie",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Henry",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Joey",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Gary",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "eddy",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Justin",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Jonny",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "May",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Jonathan",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Kevin",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Krizel",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Neil",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Gordon",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Chris",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Victor",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Karen",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Ann",
-                "percentage": 1,
-                "cost": "12.41"
-            },
-            {
-                "name": "Katherine",
-                "percentage": 1,
-                "cost": "12.41"
-            }
-        ],
-        "courtCount": 4,
-        "birdiesUsed": [
-            {
-                "id": 1,
-                "quantity": 21
-            }
-        ],
-        "courtCost": 56
-    },
-    {
-        id: "02042025",
-        date: new Date(2025, 3, 2),
-        "players": [
-            {
-                "name": "Jordan",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Jackson",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "David",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Ethan",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Stephanie",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Henry",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Joey",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Gary",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "eddy",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Justin",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Jonny",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "May",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Jonathan",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Kevin",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Krizel",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Neil",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Gordon",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Chris",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Victor",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Karen",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Ann",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            },
-            {
-                "name": "Katherine",
-                "percentage": 1,
-                "cost": 12.41,
-                "paid": false,
-                "highlighted": false
-            }
-        ],
-        "courtCount": 4,
-        "birdiesUsed": [
-            {
-                "id": 1,
-                "quantity": 21
-            }
-        ],
-        "courtCost": 56,
-        "totalSessionCost": 273,
-        "totalBirdieCost": 49,
-        "totalCourtCost": 224
-    }
-]
-
+import React, { useState } from "react";
+import { Button, ButtonGroup, Spinner } from "react-bootstrap";
+import { getMonthYear, getNextMonth, getPrevMonth } from "../../utils/dateUtils";
+import CalendarGrid from "./CalendarGrid";
+import DatePicker from "react-datepicker";
+import "bootstrap/dist/css/bootstrap.min.css";
+import SessionModal from "./SessionModal";
+import { getDay, getMonth, getYear } from "date-fns";
+import AddPlayerModal from "../AddUserModal";
+import { collection, serverTimestamp, addDoc } from "firebase/firestore";
+import { db, addSessionAndUpdateInventory } from "../../services/firebaseService";
+import { useSelector } from "react-redux";
+import { selectAllPlayers } from "../../features/players/playersSlice";
 
 function SessionCalendar() {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [isLoading, setIsLoading] = useState(false);
     const [showModal, setShowModal] = useState(false);
     const [modalData, setModalData] = useState({});
-    const [testSession, setTestSession] = useState(exampleSession);
+    // const [testSession, setTestSession] = useState(exampleSession);
+
+    const [showAddUserModal, setShowAddUserModal] = useState(false);
+    const [initialPlayerName, setInitialPlayerName] = useState("");
+    const existingPlayers = useSelector(selectAllPlayers);
+
     const handlePrevMonth = () => {
         setCurrentDate(getPrevMonth(currentDate));
     };
@@ -356,11 +37,46 @@ function SessionCalendar() {
 
     const handleDayClick = async (value) => {
         console.log(`Day ${value} clicked`);
-        const session = testSession.find(session => session.id === value);
+        // const session = testSession.find(session => session.id === value);
 
-        console.log("session ==> ", session);
-        setModalData(session);
+        // console.log("session ==> ", session);
+        // setModalData(session);
         setShowModal(true);
+    };
+
+    const handleRequestOpenAddPlayerModal = (initialName) => {
+        console.log("Parent: SessionModal requested to add user:", initialName);
+        setInitialPlayerName(initialName);
+        setShowAddUserModal(true);
+    };
+
+    const handleAddNewPlayer = async (newUserDataFromModal) => {
+        if (!db) {
+            console.error("Firestore not initialized");
+            throw new Error("Database not available. Cannot add user.");
+        }
+        console.log("Adding new user:", newUserDataFromModal);
+
+        try {
+            const playersCollectionRef = collection(db, "players");
+            const dataToSave = {
+                firstName: newUserDataFromModal.firstName,
+                lastName: newUserDataFromModal.lastName || null,
+                firstNameLower: newUserDataFromModal.firstName.toLowerCase(),
+                lastNameLower: newUserDataFromModal.lastName ? newUserDataFromModal.lastName.toLowerCase() : null,
+                email: newUserDataFromModal.email || null,
+                balance: newUserDataFromModal.balance || 0,
+                description: newUserDataFromModal.description || "",
+                attendedSessionIds: [],
+                createdAt: serverTimestamp(),
+            };
+
+            await addDoc(playersCollectionRef, dataToSave);
+            setShowAddUserModal(false);
+        } catch (error) {
+            console.error("Error adding user to Firestore:", error);
+            throw new Error(error.message || "Could not save new user to the database.");
+        }
     };
 
     function CustomHeaderButton({ value, onClick, ref }) {
@@ -378,6 +94,10 @@ function SessionCalendar() {
         );
     }
 
+    const handleSessionSave = async (sessionData) => {
+        await addSessionAndUpdateInventory(sessionData);
+        setShowModal(false);
+    };
 
     return (
         <div className="session-calendar-container border rounded p-3 shadow-sm bg-light">
@@ -393,8 +113,12 @@ function SessionCalendar() {
                     />
                 </div>
                 <ButtonGroup>
-                    <Button variant="outline-secondary" size="sm" onClick={handlePrevMonth} aria-label="Previous month">&lt;</Button>
-                    <Button variant="outline-secondary" size="sm" onClick={handleNextMonth} aria-label="Next month">&gt;</Button>
+                    <Button variant="outline-secondary" size="sm" onClick={handlePrevMonth} aria-label="Previous month">
+                        &lt;
+                    </Button>
+                    <Button variant="outline-secondary" size="sm" onClick={handleNextMonth} aria-label="Next month">
+                        &gt;
+                    </Button>
                 </ButtonGroup>
             </div>
 
@@ -407,40 +131,41 @@ function SessionCalendar() {
                     </div>
                 )}
 
-                {!isLoading && (
-                    <CalendarGrid
-                        currentDate={currentDate}
-                        sessionsMap={testSession}
-                        onDayClick={handleDayClick}
-                    />
-                )}
+                {!isLoading && <CalendarGrid currentDate={currentDate} sessionsMap={[]} onDayClick={handleDayClick} />}
             </div>
 
-            <SessionModal show={showModal} onHide={() => setShowModal(false)} session={modalData}
-                birdies={exampleBirdies}
-                courtCredits={exampleCourtCredits}
+            <SessionModal
+                show={showModal}
+                onHide={() => setShowModal(false)}
+                session={modalData}
                 onUpdatePaymentStatus={(id, name, status) => {
-                    const tempSession = { ...testSession };
-                    const userIndex = tempSession[id].players.findIndex(user => user.name === name);
-                    tempSession[id].players[userIndex].paid = status;
-                    setTestSession(tempSession);
+                    // const tempSession = { ...testSession };
+                    // const userIndex = tempSession[id].players.findIndex(user => user.name === name);
+                    // tempSession[id].players[userIndex].paid = status;
+                    // setTestSession(tempSession);
                 }}
                 onUpdateHighlightStatus={(id, name, status) => {
-                    const tempSession = { ...testSession };
-                    const userIndex = tempSession[id].players.findIndex(user => user.name === name);
-                    tempSession[id].players[userIndex].highlighted = status;
-                    setTestSession(tempSession);
+                    // const tempSession = { ...testSession };
+                    // const userIndex = tempSession[id].players.findIndex(user => user.name === name);
+                    // tempSession[id].players[userIndex].highlighted = status;
+                    // setTestSession(tempSession);
                 }}
-                onAddSubmit={(newSession) => {
-                    const tempSession = { ...newSession }
-                    // tempSession.id = 
-                        tempSession.date = currentDate
-
+                onSaveSession={(newSession) => {
+                    const tempSession = { ...newSession };
+                    tempSession.date = currentDate;
+                    handleSessionSave(tempSession);
                 }}
+                onOpenAddUserModal={handleRequestOpenAddPlayerModal}
+            />
+            <AddPlayerModal
+                show={showAddUserModal}
+                onHide={() => setShowAddUserModal(false)}
+                initialFirstName={initialPlayerName}
+                onAddPlayer={handleAddNewPlayer}
+                existingPlayers={existingPlayers}
             />
         </div>
     );
 }
-
 
 export default SessionCalendar;

@@ -1,8 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Form, Row, Col, Alert, Spinner } from 'react-bootstrap';
-import { useSelector } from 'react-redux';
-import { selectAllPlayers } from '../features/players/playersSlice';
-
 // Define the player interface (as provided by the user, modified for first/last name)
 // interface User {
 //   firstName: string;
@@ -23,7 +20,7 @@ import { selectAllPlayers } from '../features/players/playersSlice';
 
 
 const initialFormState = {
-    firstName: '',
+    firstName:'',
     lastName: '',
     email: '',
     balance: 0,
@@ -34,21 +31,22 @@ function AddPlayerModal({
     show,
     onHide,
     onAddPlayer,
-    initialFirstName = ''
+    initialFirstName = '',
+    existingPlayers = []
 }) {
-
-    const existingPlayers = useSelector(selectAllPlayers);
-    const [formData, setFormData] = useState({ ...initialFormState, firstName:initialFirstName });
+    console.log("initialFirstName ==> ", initialFirstName);
+    const [formData, setFormData] = useState({...initialFormState,firstName:initialFirstName});
+    console.log("formData ==> ", formData);
     const [error, setError] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
         if (show) {
-            setFormData({ ...initialFormState }); 
+            setFormData({ ...initialFormState,firstName:initialFirstName }); 
             setError('');
             setIsSubmitting(false);
         }
-    }, [show]);
+    }, [show, initialFirstName]);
 
     const handleChange = (event) => {
         const { name, value, type, checked } = event.target;

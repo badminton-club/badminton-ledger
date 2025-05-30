@@ -1,9 +1,11 @@
-interface user {
-    name: string;
+interface player {
+    firstName: string;
+    lastName?: string;
     id: string;
-    highlighted: boolean;
     attendedSessionIds: string[];
     balance: number;
+    description: string;
+    email?: string;
 }
 
 interface Session {
@@ -13,16 +15,22 @@ interface Session {
     durationHours: number;
     birdieUsage: BirdieUsage[]; // Array tracking usage from specific batches
     players: sessionPlayer[];
-    courtCredits: string[]; // array of court credit ids
+    courtCredits: courtCreditUsage[];
 }
 
 interface sessionPlayer {
     id: string;
-    name: string;
+    firstName: string;
+    lastName?: string;
     percentage: number;
     cost: number;
     paid: boolean;
     highlighted: boolean;
+}
+
+interface courtCreditUsage {
+    id: string;
+    hoursUsed: number;
 }
 
 interface BirdieUsage {
