@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Modal, Button, Form, Row, Col, Alert, Spinner } from 'react-bootstrap';
+import React, { useState, useEffect } from "react";
+import { Modal, Button, Form, Row, Col, Alert, Spinner } from "react-bootstrap";
 // Define the player interface (as provided by the user, modified for first/last name)
 // interface User {
 //   firstName: string;
@@ -18,82 +18,76 @@ import { Modal, Button, Form, Row, Col, Alert, Spinner } from 'react-bootstrap';
 //   // other fields like id, email might be present but not directly used in this validation
 // }
 
-
 const initialFormState = {
-    firstName:'',
-    lastName: '',
-    email: '',
+    firstName: "",
+    lastName: "",
+    email: "",
     balance: 0,
-    description: '',
+    description: "",
 };
 
-function AddPlayerModal({
-    show,
-    onHide,
-    onAddPlayer,
-    initialFirstName = '',
-    existingPlayers = []
-}) {
-    console.log("initialFirstName ==> ", initialFirstName);
-    const [formData, setFormData] = useState({...initialFormState,firstName:initialFirstName});
-    console.log("formData ==> ", formData);
-    const [error, setError] = useState('');
+function AddPlayerModal({ show, onHide, onAddPlayer, initialFirstName = "", existingPlayers = [] }) {
+    const [formData, setFormData] = useState({ ...initialFormState, firstName: initialFirstName });
+    const [error, setError] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
         if (show) {
-            setFormData({ ...initialFormState,firstName:initialFirstName }); 
-            setError('');
+            setFormData({ ...initialFormState, firstName: initialFirstName });
+            setError("");
             setIsSubmitting(false);
         }
     }, [show, initialFirstName]);
 
     const handleChange = (event) => {
         const { name, value, type, checked } = event.target;
-        setFormData(prevData => ({
+        setFormData((prevData) => ({
             ...prevData,
-            [name]: type === 'checkbox' ? checked : (type === 'number' ? parseFloat(value) || 0 : value)
+            [name]: type === "checkbox" ? checked : type === "number" ? parseFloat(value) || 0 : value,
         }));
     };
 
     const handleSubmit = async (event) => {
         event.preventDefault();
-        setError(''); 
+        setError("");
 
         const currentFirstName = formData.firstName.trim().toLowerCase();
         const currentLastName = formData.lastName.trim().toLowerCase();
         const currentDescription = formData.description.trim().toLowerCase();
         if (!currentFirstName) {
-            setError('First Name is required.');
+            setError("First Name is required.");
             return;
         }
         if (formData.email.trim() && !/\S+@\S+\.\S+/.test(formData.email)) {
-            setError('Please enter a valid email address.');
+            setError("Please enter a valid email address.");
             return;
         }
-        if (typeof formData.balance !== 'number') {
-            setError('Initial balance must be a valid number.');
+        if (typeof formData.balance !== "number") {
+            setError("Initial balance must be a valid number.");
             return;
         }
 
-        const firstNameExists = existingPlayers.some(
-            player => player.firstName.toLowerCase() === currentFirstName
-        );
+        const firstNameExists = existingPlayers.some((player) => player.firstName.toLowerCase() === currentFirstName);
 
         if (firstNameExists) {
             if (!currentLastName) {
-                setError(`A player with the first name "${formData.firstName.trim()}" already exists. Please provide a Last Name to differentiate.`);
+                setError(
+                    `A player with the first name "${formData.firstName.trim()}" already exists. Please provide a Last Name to differentiate.`
+                );
                 return;
             }
 
             const firstAndLastNameExists = existingPlayers.some(
-                player => player.firstName.toLowerCase() === currentFirstName &&
-                    (player.lastName || '').toLowerCase() === currentLastName
+                (player) =>
+                    player.firstName.toLowerCase() === currentFirstName &&
+                    (player.lastName || "").toLowerCase() === currentLastName
             );
 
             if (firstAndLastNameExists) {
                 if (!currentDescription) {
-                    setError(`A player named "${formData.firstName.trim()} ${formData.lastName.trim()}" already exists. Please provide a Description to differentiate.`);
+                    setError(
+                        `A player named "${formData.firstName.trim()} ${formData.lastName.trim()}" already exists. Please provide a Description to differentiate.`
+                    );
                     return;
                 }
             }
@@ -132,11 +126,17 @@ function AddPlayerModal({
             </Modal.Header>
             <Form onSubmit={handleSubmit}>
                 <Modal.Body>
-                    {error && <Alert variant="danger" onClose={() => setError('')} dismissible>{error}</Alert>}
+                    {error && (
+                        <Alert variant="danger" onClose={() => setError("")} dismissible>
+                            {error}
+                        </Alert>
+                    )}
 
                     <Row className="mb-3">
                         <Form.Group as={Col} md="6" controlId="addPlayerFirstName">
-                            <Form.Label>First Name <span className="text-danger">*</span></Form.Label>
+                            <Form.Label>
+                                First Name <span className="text-danger">*</span>
+                            </Form.Label>
                             <Form.Control
                                 type="text"
                                 name="firstName"
@@ -160,7 +160,6 @@ function AddPlayerModal({
                             />
                         </Form.Group>
                     </Row>
-
 
                     <Form.Group className="mb-3" controlId="addPlayerEmail">
                         <Form.Label>Email (Optional)</Form.Label>
@@ -208,7 +207,11 @@ function AddPlayerModal({
                         Cancel
                     </Button>
                     <Button variant="primary" type="submit" disabled={isSubmitting}>
-                        {isSubmitting ? <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" /> : 'Add player'}
+                        {isSubmitting ? (
+                            <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
+                        ) : (
+                            "Add player"
+                        )}
                     </Button>
                 </Modal.Footer>
             </Form>

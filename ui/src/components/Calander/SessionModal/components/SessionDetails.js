@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useEffect, useState } from "react";
+import React, { useMemo, useCallback, useEffect, useState, use } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { setAddError, setMatchedPlayers } from "../../../../features/SessionModal/sessionModalSlice";
 import { fetchBirdieInventory, fetchCourtCredits } from "../../../../services/firebaseService";
@@ -9,7 +9,7 @@ const { Form, Alert, Row, Col, InputGroup, Button } = require("react-bootstrap")
 
 const initialUsedBirdieSet = { id: "-1", quantity: 0 };
 
-function SessionDetails({ handleSessionSubmit, onHide }) {
+function SessionDetails({ handleSessionSubmit, onHide, session = {} }) {
     const dispatch = useDispatch();
 
     const addError = useSelector(() => store.getState().sessionModal.addError);
@@ -42,6 +42,17 @@ function SessionDetails({ handleSessionSubmit, onHide }) {
         updatedPlayers[index] = playerToUpdate;
         dispatch(setMatchedPlayers(updatedPlayers));
     };
+    useEffect(() => {
+        if (session) {
+            if (session.courtCreditUsage) {
+                const courtNum = session.courtCreditUsage.reduce((sum, credit) => sum + credit.hoursUsed, 0) / 2;
+                setCourtNumInput(courtNum || "4");
+            }
+            setCourtCostInput(session.courtCostInput || "");
+            setBirdieUsage(session.birdieUsage || [initialUsedBirdieSet]);
+            setUseCourtCredits(session.useCourtCredits || true);
+        }
+    }, [session]);
 
     const handleRemovePlayer = (index) => {
         const updatedPlayers = [...matchedPlayers];

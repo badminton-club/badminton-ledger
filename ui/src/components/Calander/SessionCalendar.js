@@ -1,27 +1,67 @@
-import React, { useState } from "react";
+import React, { use, useCallback, useEffect, useState } from "react";
 import { Button, ButtonGroup, Spinner } from "react-bootstrap";
 import { getMonthYear, getNextMonth, getPrevMonth } from "../../utils/dateUtils";
 import CalendarGrid from "./CalendarGrid";
 import DatePicker from "react-datepicker";
 import "bootstrap/dist/css/bootstrap.min.css";
 import SessionModal from "./SessionModal";
-import { getDay, getMonth, getYear } from "date-fns";
+import { getDay, getMonth, getYear, lastDayOfMonth, set } from "date-fns";
 import AddPlayerModal from "../AddUserModal";
 import { collection, serverTimestamp, addDoc } from "firebase/firestore";
-import { db, addSessionAndUpdateInventory } from "../../services/firebaseService";
+import { db, addSessionAndUpdateInventory, fetchSessions, fetchSessionById } from "../../services/firebaseService";
 import { useSelector } from "react-redux";
 import { selectAllPlayers } from "../../features/players/playersSlice";
+import { MODALMODE, selectModalMode } from "../../features/SessionModal/sessionModalSlice";
 
 function SessionCalendar() {
     const [currentDate, setCurrentDate] = useState(new Date());
+    console.log("currentDate ==> ", currentDate);
+    const [clickedDate, setClickedDate] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [showModal, setShowModal] = useState(false);
     const [modalData, setModalData] = useState({});
-    // const [testSession, setTestSession] = useState(exampleSession);
-
+    const [sessionList, setSessionList] = useState([]);
+    console.log("sessionList ==> ", sessionList);
     const [showAddUserModal, setShowAddUserModal] = useState(false);
     const [initialPlayerName, setInitialPlayerName] = useState("");
     const existingPlayers = useSelector(selectAllPlayers);
+    const modalMode = useSelector(selectModalMode);
+
+    const getSessionsForMonth = useCallback(async () => {
+        try {
+            setIsLoading(true);
+            const sessionResult = await fetchSessions({
+                startDate: new Date(getYear(currentDate), getMonth(currentDate), 1),
+                endDate: new Date(lastDayOfMonth(currentDate)),
+            });
+            setSessionList(sessionResult);
+        } catch (error) {
+            console.error("Error fetching sessions for month:", error);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [currentDate]);
+
+    useEffect(() => {
+        getSessionsForMonth();
+    }, [currentDate, getSessionsForMonth]);
+    
+    const updateSession = useCallback(async(sessionId)=>{
+        try{
+            await fetchSessionById(sessionId).then((session)=>{
+                setModalData(session);
+                const updatedSession = {
+                    ...session
+                };
+                setSessionList((prevList) =>
+                    prevList.map((s) => (s.id === sessionId ? updatedSession : s))
+                );
+            })
+        }
+        catch(error){
+            console.error("Error updating session:", error);
+        }
+    })
 
     const handlePrevMonth = () => {
         setCurrentDate(getPrevMonth(currentDate));
@@ -37,10 +77,10 @@ function SessionCalendar() {
 
     const handleDayClick = async (value) => {
         console.log(`Day ${value} clicked`);
-        // const session = testSession.find(session => session.id === value);
+        setClickedDate(value);
 
-        // console.log("session ==> ", session);
-        // setModalData(session);
+        const session = sessionList.find((session) => +session.date === +value);
+        setModalData(session);
         setShowModal(true);
     };
 
@@ -95,7 +135,12 @@ function SessionCalendar() {
     }
 
     const handleSessionSave = async (sessionData) => {
-        await addSessionAndUpdateInventory(sessionData);
+        if (modalMode === MODALMODE.EDIT) {
+        }
+        await addSessionAndUpdateInventory(sessionData).then(() => {
+            getSessionsForMonth();
+        });
+
         setShowModal(false);
     };
 
@@ -124,35 +169,30 @@ function SessionCalendar() {
 
             <div className="calendar-body-section">
                 {isLoading && (
-                    <div className="text-center my-3">
+                    <div className="text-center my-3" style={{ minHeight: "1050px" }}>
                         <Spinner animation="border" role="status">
                             <span className="visually-hidden">Loading...</span>
                         </Spinner>
                     </div>
                 )}
 
-                {!isLoading && <CalendarGrid currentDate={currentDate} sessionsMap={[]} onDayClick={handleDayClick} />}
+                {!isLoading && (
+                    <CalendarGrid currentDate={currentDate} sessionsMap={sessionList} onDayClick={handleDayClick} />
+                )}
             </div>
 
             <SessionModal
                 show={showModal}
                 onHide={() => setShowModal(false)}
                 session={modalData}
-                onUpdatePaymentStatus={(id, name, status) => {
-                    // const tempSession = { ...testSession };
-                    // const userIndex = tempSession[id].players.findIndex(user => user.name === name);
-                    // tempSession[id].players[userIndex].paid = status;
-                    // setTestSession(tempSession);
-                }}
-                onUpdateHighlightStatus={(id, name, status) => {
-                    // const tempSession = { ...testSession };
-                    // const userIndex = tempSession[id].players.findIndex(user => user.name === name);
-                    // tempSession[id].players[userIndex].highlighted = status;
-                    // setTestSession(tempSession);
-                }}
+                onSessionUpdate={updateSession}
                 onSaveSession={(newSession) => {
+                    if (!clickedDate) {
+                        console.error("No date selected for session save.");
+                        return;
+                    }
                     const tempSession = { ...newSession };
-                    tempSession.date = currentDate;
+                    tempSession.date = clickedDate;
                     handleSessionSave(tempSession);
                 }}
                 onOpenAddUserModal={handleRequestOpenAddPlayerModal}

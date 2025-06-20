@@ -18,6 +18,7 @@ import {
 import ListNamesMatching from "./SessionModal/components/ListNamesMatching";
 import NoSessionView from "./SessionModal/components/NoSessionView";
 import { store } from "../../store";
+import ExistingSessionDetails from "./SessionModal/components/ExistingSessionDetails";
 
 const formatDisplayPlayerName = (user) => {
     if (!user) return "N/A";
@@ -28,11 +29,11 @@ function SessionModal({
     show,
     onHide,
     session,
-    onUpdateHighlightStatus,
-    onUpdatePaymentStatus,
+    onSessionUpdate,
     onSaveSession,
     onOpenAddUserModal,
 }) {
+    console.log("sessionsssss ==> ", session);
     const dispatch = useDispatch();
     const modalMode = useSelector(selectModalMode);
 
@@ -41,7 +42,6 @@ function SessionModal({
     const playersListFromStore = useSelector(selectAllPlayers);
     console.log("playersListFromStore ==> ", playersListFromStore);
     const prevPlayersListRef = useRef(playersListFromStore);
-
 
     const [isLoadingMatches, setIsLoadingMatches] = useState(false);
 
@@ -290,37 +290,6 @@ function SessionModal({
         dispatch(setModalMode(MODALMODE.ADDDETAILS));
     };
 
-    const handlePaymentToggle = (player) => {
-        console.log("player ==> ", player);
-        if (!onUpdatePaymentStatus || !session || !session.id || !player || !player.name) {
-            console.error("Missing data or handler for payment update", {
-                handler: !!onUpdatePaymentStatus,
-                session,
-                player,
-            });
-            setAddError("Cannot update payment status - configuration error.");
-            return;
-        }
-        const currentPaidStatus = !!player.paid;
-        const newPaidStatus = !currentPaidStatus;
-        onUpdatePaymentStatus(session.id, player.name, newPaidStatus);
-    };
-
-    const handleHighlightToggle = (player) => {
-        if (!onUpdateHighlightStatus || !session || !session.id || !player || !player.name) {
-            console.error("Missing data or handler for highlight update", {
-                handler: !!onUpdateHighlightStatus,
-                session,
-                player,
-            });
-            setAddError("Cannot update highlight status - configuration error.");
-            return;
-        }
-        const currentHighlightStatus = !!player.highlighted;
-        const newHighlightStatus = !currentHighlightStatus;
-        onUpdateHighlightStatus(session.id, player.name, newHighlightStatus);
-    };
-
     const handleSessionSubmit = (
         courtNumInput,
         totalBirdieCost,
@@ -348,7 +317,6 @@ function SessionModal({
             totalCourtCost,
         };
         onSaveSession(newSessionData);
-        console.log("newSessionData ==> ", newSessionData);
     };
 
     const getModalHeader = () => {
@@ -383,11 +351,12 @@ function SessionModal({
                 );
             case MODALMODE.ADDDETAILS:
             case MODALMODE.EDIT:
-                return <SessionDetails onHide={onHide} handleSessionSubmit={handleSessionSubmit} />;
+                return (
+                    <SessionDetails onHide={onHide} handleSessionSubmit={modalMode=== handleSessionSubmit} session={session || {}} />
+                );
             default:
                 console.log("default");
-                return <NoSessionView />;
-            // session && session.id ? <ExistingSessionDetails /> :
+                return session && session.id ? <ExistingSessionDetails session={session} onSessionUpdate={onSessionUpdate} /> : <NoSessionView />;
         }
     };
 
