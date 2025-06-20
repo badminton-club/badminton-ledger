@@ -13,6 +13,8 @@ import {
     serverTimestamp,
     writeBatch,
     runTransaction,
+    limit,
+    FieldValue,
 } from "firebase/firestore";
 
 import { initializeApp } from "firebase/app";
@@ -289,29 +291,27 @@ export const fetchInventoryAdjustmentsForBatch = async (batchId) => {
  * @returns {Promise<Array<object>>} A promise resolving to an array of usage details.
  */
 export const fetchSessionUsageForBirdieBatch = async (batchId) => {
-    if (!sessionsRef) {
-        console.error("Firestore (sessionsRef) is not initialized.");
+    if (!transcationsRef) {
+        console.error("Firestore (transcationsRef) is not initialized.");
         return [];
     }
     if (!batchId) return [];
 
-    const q = query(sessionsRef, orderBy("date", "desc"));
+    console.log("batchId ==> ", batchId);
+    const q = query(
+        transcationsRef,
+        where("resourceType", "==", "birdie"),
+        where("batchId", "==", batchId),
+        orderBy("date", "desc")
+    );
     try {
         const querySnapshot = await getDocs(q);
+        console.log("querySnapshot ==> ", querySnapshot.docs);
         const usageDetails = [];
         querySnapshot.forEach((doc) => {
-            const sessionData = doc.data();
-            if (Array.isArray(sessionData.birdieUsage)) {
-                sessionData.birdieUsage.forEach((usage) => {
-                    if (usage.batchId === batchId && usage.quantityUsed > 0) {
-                        usageDetails.push({
-                            sessionId: doc.id,
-                            sessionDate: sessionData.date,
-                            quantityUsed: usage.quantityUsed,
-                        });
-                    }
-                });
-            }
+            const transactionData = doc.data();
+            console.log("transactionData ==> ", transactionData);
+            usageDetails.push(transactionData)
         });
         return usageDetails;
     } catch (error) {
@@ -510,6 +510,41 @@ export const fetchCourtCreditAdjustmentsForBatch = async (batchId) => {
 };
 
 /**
+ * Fetches all transctions where court credit batch was used.
+ * @param {string} batchId - The ID of the court credit batch.
+ * @returns {Promise<Array<object>>} A promise resolving to an array of usage details.
+ */
+export const fetchSessionUsageForCourtCredit = async (batchId) => {
+    if (!transcationsRef) {
+        console.error("Firestore (transcationsRef) is not initialized.");
+        return [];
+    }
+    if (!batchId) return [];
+
+    console.log("batchId ==> ", batchId);
+    const q = query(
+        transcationsRef,
+        where("resourceType", "==", "courtCredit"),
+        where("batchId", "==", batchId),
+        orderBy("date", "desc")
+    );
+    try {
+        const querySnapshot = await getDocs(q);
+        console.log("querySnapshot ==> ", querySnapshot.docs);
+        const usageDetails = [];
+        querySnapshot.forEach((doc) => {
+            const transactionData = doc.data();
+            console.log("transactionData ==> ", transactionData);
+            usageDetails.push(transactionData)
+        });
+        return usageDetails;
+    } catch (error) {
+        console.error("Error fetching session usage for birdie batch:", error);
+        throw error;
+    }
+};
+
+/**
  * Find user matches in Firestore based on a parsed name.
  * Assumes 'players' collection has 'firstNameLower' and 'lastNameLower' fields for case-insensitive search.
  * @param {string} parsedName - The name string to search for.
@@ -583,7 +618,7 @@ export const findUserMatchesByName = async (parsedName) => {
  *
  * } sessionData
  */
-export const addSessionAndUpdateInventory = async (sessionData) => {
+export const addSessionAndUpdateInventory = async (sessionData, existingSessionId = null) => {
     console.log("sessionData ==> ", sessionData);
     if (!db) {
         console.error("Invalid Firestore db instance provided.");
@@ -593,13 +628,38 @@ export const addSessionAndUpdateInventory = async (sessionData) => {
         console.error("Session data is required and must be an object.");
         throw new Error("Session data is required and must be an object.");
     }
+    const isUpdate = !!existingSessionId;
 
-    const newSessionRef = doc(sessionsRef);
-    const newSessionId = newSessionRef.id;
+    const sessionId = isUpdate ? existingSessionId : doc(sessionsRef).id;
+    const newSessionRef = doc(sessionsRef, sessionId);
     try {
         await runTransaction(db, async (transaction) => {
-            // read all affefcted documents
+            let originalSessionData = null;
             const birdieBatchDocs = new Map();
+            const courtCreditDocs = new Map();
+            const playerDocs = new Map();
+
+            if (isUpdate) {
+                const originalSessionSnap = await transaction.get(sessionsRef);
+                if (!originalSessionSnap.exists()) {
+                    throw new Error(`Session with ID ${existingSessionId} not found for update.`);
+                }
+                originalSessionData = originalSessionSnap.data();
+                originalSessionData.id = originalSessionSnap.id; // Ensure ID is on the object
+
+                // Collect items from original session
+                (originalSessionData.birdieUsage || []).forEach((usage) =>
+                    birdieBatchDocs.set(usage.id, doc(birdieInventoryRef, usage.id))
+                );
+                (originalSessionData.courtCreditsUsed || []).forEach((usage) =>
+                    courtCreditDocs.set(usage.id, doc(courtCreditsRef, usage.id))
+                );
+                (originalSessionData.players || []).forEach((player) =>
+                    playerDocs.set(player.userId, doc(playersRef, player.id))
+                );
+            }
+
+            // read all affected documents
             for (const birdieUsage of sessionData.birdieUsage) {
                 if (birdieUsage.id) {
                     const birdieBatchRef = doc(birdieInventoryRef, birdieUsage.id);
@@ -608,16 +668,14 @@ export const addSessionAndUpdateInventory = async (sessionData) => {
                 }
             }
 
-            const courtCreditBatchDocs = new Map();
             for (const courtUsage of sessionData.courtCreditUsage) {
                 if (courtUsage.id) {
                     const courtCreditRef = doc(courtCreditsRef, courtUsage.id);
                     const courtCreditDoc = await transaction.get(courtCreditRef);
-                    courtCreditBatchDocs.set(courtUsage.id, courtCreditDoc);
+                    courtCreditDocs.set(courtUsage.id, courtCreditDoc);
                 }
             }
 
-            const playerDocs = new Map();
             for (const player of sessionData.players) {
                 if (player.id) {
                     const playerRef = doc(playersRef, player.id);
@@ -627,9 +685,60 @@ export const addSessionAndUpdateInventory = async (sessionData) => {
             }
             console.log("playerDocs ==> ", playerDocs);
 
-            //create new session document
-            transaction.set(newSessionRef, { ...sessionData, id: newSessionId, createdAt: serverTimestamp() });
+            if (isUpdate && originalSessionData) {
+                // 2.1 Revert Birdie Usage
+                for (const usage of originalSessionData.birdieUsage || []) {
+                    const birdieBatchDocSnap = birdieBatchDocs.get(usage.id);
+                    if (birdieBatchDocSnap && birdieBatchDocSnap.exists()) {
+                        const batchData = birdieBatchDocSnap.data();
+                        const birdsPerTube = batchData.birdsPerTube || 12;
+                        const originalQuantityUsed = usage.quantity || 0;
 
+                        // Reverting is tricky with absolute values, FieldValue.increment is easier
+                        // This logic assumes we add back the birds. A model based on net change is safer.
+                        let currentUnopened = batchData.unopenedTubesRemaining || 0;
+                        let currentOpen = batchData.birdsInOpenTube || 0;
+
+                        let totalBirds = currentUnopened * birdsPerTube + currentOpen + originalQuantityUsed;
+
+                        transaction.update(birdieBatchDocSnap.ref, {
+                            unopenedTubesRemaining: Math.floor(totalBirds / birdsPerTube),
+                            birdsInOpenTube: totalBirds % birdsPerTube,
+                        });
+                    } else {
+                        console.warn(`Original birdie batch ${usage.id} not found during revert. Skipping.`);
+                    }
+                }
+                // 2.2 Revert Court Credit Usage
+                for (const usage of originalSessionData.courtCreditsUsed || []) {
+                    const creditBatchDocSnap = courtCreditDocs.get(usage.id);
+                    if (creditBatchDocSnap && creditBatchDocSnap.exists()) {
+                        transaction.update(creditBatchDocSnap.ref, {
+                            remainingHours: FieldValue.increment(usage.hoursUsed || 0), // Add back
+                        });
+                    } else {
+                        console.warn(`Original court credit batch ${usage.id} not found during revert. Skipping.`);
+                    }
+                }
+                // 2.3 Revert Player Costs
+                for (const player of originalSessionData.players || []) {
+                    const playerDocSnap = playerDocs.get(player.id);
+                    if (playerDocSnap && playerDocSnap.exists()) {
+                        transaction.update(playerDocSnap.ref, {
+                            balance: FieldValue.increment(player.cost || 0), // Add back cost
+                        });
+                    } else {
+                        console.warn(`Original player ${player.userId} not found during revert. Skipping.`);
+                    }
+                }
+            }
+
+            //create new session document
+            if (isUpdate) {
+                transaction.set(newSessionRef, { ...sessionData, updatedAt: serverTimestamp() }, { merge: true });
+            } else {
+                transaction.set(newSessionRef, { ...sessionData, id: sessionId, createdAt: serverTimestamp() });
+            }
             //update birdied inventory
             for (const batchUsage of sessionData.birdieUsage) {
                 if (!batchUsage.id || typeof batchUsage.quantity !== "number" || batchUsage.quantity <= 0) {
@@ -675,8 +784,9 @@ export const addSessionAndUpdateInventory = async (sessionData) => {
                     batchId: batchUsage.id,
                     quantityUsed: batchUsage.quantity,
                     cost: birdieCostforBatch,
-                    sessionId: newSessionId, // Assuming sessionData has an id field
-                    timestamp: serverTimestamp(),
+                    sessionId: sessionId, // Assuming sessionData has an id field
+                    createdAt: serverTimestamp(),
+                    date: sessionData.date ? Timestamp.fromDate(new Date(sessionData.date)) : serverTimestamp(),
                 });
             }
             //update court credits usage
@@ -686,7 +796,7 @@ export const addSessionAndUpdateInventory = async (sessionData) => {
                     throw new Error("Invalid court credit data.");
                 }
 
-                const courtCreditDoc = courtCreditBatchDocs.get(courtUsage.id);
+                const courtCreditDoc = courtCreditDocs.get(courtUsage.id);
                 if (!courtCreditDoc.exists()) {
                     console.error(`Court credit with ID ${courtUsage.id} does not exist.`);
                     throw new Error(`Court credit with ID ${courtUsage.id} does not exist.`);
@@ -710,8 +820,9 @@ export const addSessionAndUpdateInventory = async (sessionData) => {
                     resourceType: "courtCredit",
                     batchId: courtUsage.id,
                     hoursUsed: courtUsage.hoursUsed,
-                    sessionId: newSessionId,
-                    timestamp: serverTimestamp(),
+                    sessionId: sessionId,
+                    createdAt: serverTimestamp(),
+                    date: sessionData.date ? Timestamp.fromDate(new Date(sessionData.date)) : serverTimestamp(),
                     cost: courtCostforBatch,
                 });
             }
@@ -731,14 +842,14 @@ export const addSessionAndUpdateInventory = async (sessionData) => {
                 const playerData = playerDoc.data();
                 const currentBalance = playerData.balance || 0;
                 const newBalance = currentBalance - player.cost;
-                const newAttendedSessionIds = (playerData.attendedSessionIds || []).concat(newSessionId);
+                const newAttendedSessionIds = (playerData.attendedSessionIds || []).concat(sessionId);
                 transaction.update(playerDoc.ref, { balance: newBalance, attendedSessionIds: newAttendedSessionIds });
             }
         });
     } catch (error) {
         console.error(
             `Client-side transaction failed for session ${
-                newSessionId || "(ID not yet generated)"
+                sessionId || "(ID not yet generated)"
             }. Data: ${JSON.stringify(sessionData)}. Error:`,
             error
         );
@@ -746,4 +857,173 @@ export const addSessionAndUpdateInventory = async (sessionData) => {
     }
 };
 
+/**
+ * Fetches sessions from Firestore.
+ * @param {object} [options] - Optional parameters for querying.
+ * @param {Date} [options.startDate] - Filter sessions on or after this date.
+ * @param {Date} [options.endDate] - Filter sessions before this date (exclusive).
+ * @param {"asc" | "desc"} [options.orderDirection="desc"] - Direction of ordering.
+ * @param {number} [options.limitCount] - Limit the number of sessions fetched.
+ * @returns {Promise<Array<object>>} A promise that resolves to an array of session objects.
+ * @throws {Error} If fetching fails.
+ */
+export const fetchSessions = async (options = {}) => {
+    if (!db) {
+        console.error("Firestore is not initialized.");
+        throw new Error("Firestore not initialized.");
+    }
+
+    const queryConstraints = [];
+
+    if (options.startDate) {
+        queryConstraints.push(where("date", ">=", options.startDate));
+    }
+    if (options.endDate) {
+        queryConstraints.push(where("date", "<=", options.endDate));
+    }
+    queryConstraints.push(orderBy("date", options.orderDirection || "desc"));
+
+    let q =
+        options.limitCount && typeof options.limitCount === "number" && options.limitCount > 0
+            ? query(sessionsRef, ...queryConstraints, limit(options.limitCount))
+            : query(sessionsRef, ...queryConstraints);
+
+    try {
+        const querySnapshot = await getDocs(q);
+        const sessions = querySnapshot.docs.map((docSnap) => {
+            const data = docSnap.data();
+            return {
+                id: docSnap.id,
+                ...data,
+                date: data.date && data.date.toDate ? data.date.toDate() : data.date ? new Date(data.date) : null,
+            };
+        });
+        return sessions;
+    } catch (error) {
+        console.error("Error fetching sessions:", error);
+        throw new Error(`Failed to fetch sessions: ${error.message}`);
+    }
+};
+
+//give me a function to fetch a single session by ID
+/**
+ * Fetches a single session by its ID.
+ *
+ * @param {string} sessionId - The ID of the session to fetch.
+ * @returns {Promise<object>} A promise that resolves to the session object.
+ *
+ *
+ */
+export const fetchSessionById = async (sessionId) => {
+    if (!db || !sessionsRef) {
+        console.error("Firestore is not initialized or sessionsRef is missing.");
+        throw new Error("Database not initialized. Cannot fetch session.");
+    }
+    if (!sessionId) {
+        console.error("Session ID is required to fetch a session.");
+        throw new Error("Session ID is required.");
+    }
+    try {
+        const sessionDocRef = doc(sessionsRef, sessionId);
+        const sessionDocSnap = await getDoc(sessionDocRef);
+        if (!sessionDocSnap.exists()) {
+            console.error(`Session with ID ${sessionId} not found.`);
+            throw new Error(`Session with ID ${sessionId} not found.`);
+        }
+        const sessionData = sessionDocSnap.data();
+        return {
+            id: sessionDocSnap.id,
+            ...sessionData,
+            date: sessionData.date && sessionData.date.toDate ? sessionData.date.toDate() : new Date(sessionData.date),
+        };
+    } catch (error) {
+        console.error(`Error fetching session with ID ${sessionId}:`, error);
+        throw new Error(`Failed to fetch session: ${error.message || "An unknown error occurred."}`);
+    }
+};
+/**
+ * toggles the payment status of a specific player within a session.
+ *
+ * @param {string} sessionId - The ID of the session to update.
+ * @param {string} playerId - The `userId` of the player whose payment status is to be updated.
+ * @returns {Promise<{message: string}>} A success message.
+ * @throws {Error} If the operation fails or player/session not found.
+ */
+export async function togglePlayerPaidStatus(sessionId, playerId) {
+    const sessionDocRef = doc(sessionsRef, sessionId);
+
+    try {
+        await runTransaction(db, async (transaction) => {
+            const sessionDoc = await transaction.get(sessionDocRef);
+            if (!sessionDoc.exists()) {
+                throw new Error(`Session with ID ${sessionId} not found.`);
+            }
+            const sessionData = sessionDoc.data();
+            const players = sessionData.players || [];
+            let playerFound = false;
+            const updatedPlayers = players.map((player) => {
+                if (player.id === playerId) {
+                    playerFound = true;
+                    return { ...player, paid: !player.paid };
+                }
+                return player;
+            });
+            if (!playerFound) {
+                throw new Error(`Player with userId ${playerId} not found in session ${sessionId}.`);
+            }
+            transaction.update(sessionDocRef, { players: updatedPlayers });
+        });
+        return { message: `Player payment status updated successfully.` };
+    } catch (error) {
+        console.error(`Failed to update payment status for player ${playerId} in session ${sessionId}:`, error);
+        throw new Error(`Failed to update payment status: ${error.message || "An unknown error occurred."}`);
+    }
+}
+
+/**
+ * toggles the highlight status of a specific player within a session.
+ *
+ * @param {string} sessionId - The ID of the session to update.
+ * @param {string} playerId - The `userId` of the player whose highlight status is to be updated.
+ * @returns {Promise<{message: string}>} A success message.
+ * @throws {Error} If the operation fails or player/session not found.
+ */
+export async function togglePlayerHighlightStatus(sessionId, playerId) {
+    const sessionDocRef = doc(sessionsRef, sessionId);
+
+    try {
+        await runTransaction(db, async (transaction) => {
+            const sessionDoc = await transaction.get(sessionDocRef);
+
+            if (!sessionDoc.exists()) {
+                throw new Error(`Session with ID ${sessionId} not found.`);
+            }
+
+            const sessionData = sessionDoc.data();
+            const players = sessionData.players || [];
+            let playerFound = false;
+
+            const updatedPlayers = players.map((player) => {
+                if (player.id === playerId) {
+                    playerFound = true;
+                    return {
+                        ...player,
+                        highlighted: !player.highlighted, // Toggle the current status
+                    };
+                }
+                return player;
+            });
+
+            if (!playerFound) {
+                throw new Error(`Player with userId ${playerId} not found in session ${sessionId}.`);
+            }
+
+            transaction.update(sessionDocRef, { players: updatedPlayers });
+        });
+        return { message: `Player highlight status toggled successfully.` };
+    } catch (error) {
+        console.error(`Failed to toggle highlight for player ${playerId} in session ${sessionId}:`, error);
+        throw new Error(`Failed to toggle highlight status: ${error.message || "An unknown error occurred."}`);
+    }
+}
 export { db };

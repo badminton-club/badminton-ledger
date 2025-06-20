@@ -8,11 +8,11 @@ import 'react-datepicker/dist/react-datepicker.css';
 import AddCourtCreditModal from '../components/AddCourtCreditsModal';
 
 import {
-    addCourtCreditBatchToFirestore,
+    addCourtCredits,
     updateCourtCreditBatchAndLogAdjustments,
     fetchCourtCreditBatchById,
     fetchCourtCreditAdjustmentsForBatch,
-    fetchSessionUsageForCourtCreditBatch
+    fetchSessionUsageForCourtCredit,
 } from '../services/firebaseService';
 import { db } from '../services/firebaseService';
 import { collection, getDocs, query, orderBy as firestoreOrderBy } from 'firebase/firestore';
@@ -91,7 +91,7 @@ function CourtCreditsPage() {
                     try {
                         const [adjustmentsData, usagesData] = await Promise.all([
                             fetchCourtCreditAdjustmentsForBatch(activeKey),
-                            fetchSessionUsageForCourtCreditBatch(activeKey)
+                            fetchSessionUsageForCourtCredit(activeKey)
                         ]);
                         const adjustments = (adjustmentsData || []).map(adj => ({ ...adj, type: 'adjustment', eventDate: adj.adjustmentDate?.toDate ? adj.adjustmentDate.toDate() : new Date(adj.adjustmentDate || 0) }));
                         const usages = (usagesData || []).map(usage => ({ ...usage, type: 'sessionUsage', eventDate: usage.sessionDate?.toDate ? usage.sessionDate.toDate() : new Date(usage.sessionDate || 0) }));
@@ -152,7 +152,7 @@ function CourtCreditsPage() {
     // Handler for submitting from the Add Modal
     const handleAddBatchFromModal = async (formData) => {
         try {
-            const newBatchId = await addCourtCreditBatchToFirestore(formData);
+            const newBatchId = await addCourtCredits(formData);
             await fetchCreditBatches(newBatchId); // Refresh and set new as active
             setShowAddModal(false);
         } catch (error) {
