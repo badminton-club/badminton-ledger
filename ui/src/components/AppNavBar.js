@@ -23,6 +23,9 @@ function AppNavbar() {
             <Nav.Link as={Link} to="/players">
               Players
             </Nav.Link>
+            <Nav.Link as={Link} to="/auth">
+              Auth
+            </Nav.Link>
             {/* <NavDropdown title="Sessions" id="sessions-nav-dropdown">
               <NavDropdown.Item as={Link} to="/sessions/calendar">
                 Calendar

@@ -9,6 +9,7 @@ import PlayersPage from "./Pages/PlayersPage";
 import { Container } from "react-bootstrap";
 import { subscribeToPlayers } from "./features/players/playersSlice";
 import { useDispatch } from "react-redux";
+import AuthPage from "./Pages/AuthPage";
 function App() {
     const dispatch = useDispatch();
 
@@ -31,6 +32,7 @@ function App() {
                     <Route path="/birdies" element={<BirdiesPage />} />
                     <Route path="/credits" element={<CourtCreditsPage />} />
                     <Route path="/players" element={<PlayersPage />} />
+                    <Route path="/auth" element={<AuthPage />} />
                 </Routes>
             </Container>
         </div>

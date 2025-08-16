@@ -16,10 +16,10 @@ import {
     limit,
     FieldValue,
 } from "firebase/firestore";
-
 import { initializeApp } from "firebase/app";
+
 import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "firebase/auth";
 
 const firebaseConfig = {
     apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
@@ -34,11 +34,13 @@ const firebaseConfig = {
 let app;
 let db;
 let analytics;
+let auth;
 try {
     console.log("Firebase Config Being Used:", JSON.stringify(firebaseConfig, null, 2));
     app = initializeApp(firebaseConfig);
     db = getFirestore(app);
     analytics = getAnalytics(app);
+    auth = getAuth(app);
     console.log("Firebase Initialized Successfully with Project ID:", firebaseConfig.projectId);
 
     console.log("Initialized Firebase App Instance:", app);
@@ -49,11 +51,44 @@ try {
     if (db) {
         console.log("Firestore DB App associated:", db.app.name);
     }
+    if (auth) {
+        console.log("Firebase Auth initialized.");
+    }
 } catch (error) {
     console.error("Firebase initialization failed:", error);
     db = null;
     analytics = null;
+    auth = null;
 }
+
+// Firebase Auth and Google Login functions
+export const signInWithGoogle = async () => {
+    if (!auth) throw new Error("Firebase Auth not initialized.");
+    const provider = new GoogleAuthProvider();
+    try {
+        const result = await signInWithPopup(auth, provider);
+        // result.user contains user info
+        return result.user;
+    } catch (error) {
+        console.error("Google sign-in error:", error);
+        throw error;
+    }
+};
+
+export const signOutUser = async () => {
+    if (!auth) throw new Error("Firebase Auth not initialized.");
+    try {
+        await signOut(auth);
+    } catch (error) {
+        console.error("Sign out error:", error);
+        throw error;
+    }
+};
+
+export const onAuthStateChangedListener = (callback) => {
+    if (!auth) throw new Error("Firebase Auth not initialized.");
+    return onAuthStateChanged(auth, callback);
+};
 
 const sessionsRef = db ? collection(db, "sessions") : null;
 const playersRef = db ? collection(db, "players") : null;
