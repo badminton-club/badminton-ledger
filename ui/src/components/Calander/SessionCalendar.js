@@ -20,6 +20,7 @@ function SessionCalendar() {
     const [isLoading, setIsLoading] = useState(false);
     const [showModal, setShowModal] = useState(false);
     const [modalData, setModalData] = useState({});
+    console.log("modalData ==> ", modalData);
     const [sessionList, setSessionList] = useState([]);
     console.log("sessionList ==> ", sessionList);
     const [showAddUserModal, setShowAddUserModal] = useState(false);
@@ -134,10 +135,11 @@ function SessionCalendar() {
         );
     }
 
-    const handleSessionSave = async (sessionData) => {
+    const handleSessionSave = async (sessionData, existingSessionId = null) => {
         if (modalMode === MODALMODE.EDIT) {
+            existingSessionId = modalData.id;
         }
-        await addSessionAndUpdateInventory(sessionData).then(() => {
+        await addSessionAndUpdateInventory(sessionData,existingSessionId).then(() => {
             getSessionsForMonth();
         });
 

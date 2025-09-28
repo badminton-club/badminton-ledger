@@ -269,7 +269,6 @@ function CourtCreditsPage() {
             return (
                 <Form onSubmit={(e) => { e.preventDefault(); handleSaveInlineEdit(); }}>
                     {formError && <Alert variant="danger" onClose={() => setFormError('')} dismissible>{formError}</Alert>}
-                    {/* Form fields similar to AddEditCourtCreditBatchModal */}
                     <Row>
                         <Col md={6} className="mb-3">
                             <Form.Group controlId={`editPDate-${batch.id}`}>
@@ -318,7 +317,6 @@ function CourtCreditsPage() {
             );
         }
 
-        // Read-only details
         return (
             <>
                 <Row className="mb-3">
@@ -383,7 +381,6 @@ function CourtCreditsPage() {
                     </Button>
                 </Card.Header>
                 <Card.Body>
-                    {/* Sortable Header Row for Accordion Titles */}
                     <Row className="fw-bold text-muted py-2 px-4 border-bottom mb-2 d-none d-md-flex">
                         <Col md={2} className="text-md-center" onClick={() => requestSort('costPerHour')} style={{ cursor: 'pointer' }}>Cost/Hr{getSortIndicator('costPerHour')}</Col>
                         <Col md={2} className="text-md-center" onClick={() => requestSort('remainingHours')} style={{ cursor: 'pointer' }}>Rem. Hrs{getSortIndicator('remainingHours')}</Col>
@@ -411,14 +408,11 @@ function CourtCreditsPage() {
                 </Card.Body>
             </Card>
 
-            {/* Modal is now ONLY for ADDING new batches */}
             {showAddModal && (
                 <AddCourtCreditModal
                     show={showAddModal}
                     onHide={() => setShowAddModal(false)}
-                    onAddBatch={handleAddBatchFromModal} // This handles ADDING
-                // isEditMode={false} // Explicitly set to false
-                // initialBatchData={null} // No initial data for add
+                    onAddBatch={handleAddBatchFromModal} 
                 />
             )}
         </Container>

@@ -306,12 +306,10 @@ export const fetchSessionUsageForBirdieBatch = async (batchId) => {
     );
     try {
         const querySnapshot = await getDocs(q);
-        console.log("querySnapshot ==> ", querySnapshot.docs);
         const usageDetails = [];
         querySnapshot.forEach((doc) => {
             const transactionData = doc.data();
-            console.log("transactionData ==> ", transactionData);
-            usageDetails.push(transactionData)
+            usageDetails.push(transactionData);
         });
         return usageDetails;
     } catch (error) {
@@ -535,7 +533,7 @@ export const fetchSessionUsageForCourtCredit = async (batchId) => {
         querySnapshot.forEach((doc) => {
             const transactionData = doc.data();
             console.log("transactionData ==> ", transactionData);
-            usageDetails.push(transactionData)
+            usageDetails.push(transactionData);
         });
         return usageDetails;
     } catch (error) {
@@ -617,6 +615,7 @@ export const findUserMatchesByName = async (parsedName) => {
  * @param {
  *
  * } sessionData
+ * @param {string|null} existingSessionId - If updating an existing session, provide its ID.
  */
 export const addSessionAndUpdateInventory = async (sessionData, existingSessionId = null) => {
     console.log("sessionData ==> ", sessionData);
@@ -640,7 +639,7 @@ export const addSessionAndUpdateInventory = async (sessionData, existingSessionI
             const playerDocs = new Map();
 
             if (isUpdate) {
-                const originalSessionSnap = await transaction.get(sessionsRef);
+                const originalSessionSnap = await transaction.get(newSessionRef);
                 if (!originalSessionSnap.exists()) {
                     throw new Error(`Session with ID ${existingSessionId} not found for update.`);
                 }
@@ -655,7 +654,7 @@ export const addSessionAndUpdateInventory = async (sessionData, existingSessionI
                     courtCreditDocs.set(usage.id, doc(courtCreditsRef, usage.id))
                 );
                 (originalSessionData.players || []).forEach((player) =>
-                    playerDocs.set(player.userId, doc(playersRef, player.id))
+                    playerDocs.set(player.id, doc(playersRef, player.id))
                 );
             }
 
@@ -694,8 +693,6 @@ export const addSessionAndUpdateInventory = async (sessionData, existingSessionI
                         const birdsPerTube = batchData.birdsPerTube || 12;
                         const originalQuantityUsed = usage.quantity || 0;
 
-                        // Reverting is tricky with absolute values, FieldValue.increment is easier
-                        // This logic assumes we add back the birds. A model based on net change is safer.
                         let currentUnopened = batchData.unopenedTubesRemaining || 0;
                         let currentOpen = batchData.birdsInOpenTube || 0;
 
@@ -712,9 +709,12 @@ export const addSessionAndUpdateInventory = async (sessionData, existingSessionI
                 // 2.2 Revert Court Credit Usage
                 for (const usage of originalSessionData.courtCreditsUsed || []) {
                     const creditBatchDocSnap = courtCreditDocs.get(usage.id);
+                    const batchData = creditBatchDocSnap.data();
+                    const currentRemainingHours = batchData.remainingHours || 0;
+                    const newRemainingHours = currentRemainingHours + (usage.hoursUsed || 0);
                     if (creditBatchDocSnap && creditBatchDocSnap.exists()) {
                         transaction.update(creditBatchDocSnap.ref, {
-                            remainingHours: FieldValue.increment(usage.hoursUsed || 0), // Add back
+                            remainingHours: newRemainingHours
                         });
                     } else {
                         console.warn(`Original court credit batch ${usage.id} not found during revert. Skipping.`);
@@ -722,10 +722,14 @@ export const addSessionAndUpdateInventory = async (sessionData, existingSessionI
                 }
                 // 2.3 Revert Player Costs
                 for (const player of originalSessionData.players || []) {
+                console.log("playerasdfasdfsdf ==> ", player);
                     const playerDocSnap = playerDocs.get(player.id);
+                    const batchData = playerDocSnap.data();
+                    const currentBalance = batchData.balance || 0;
+                    const newBalance = currentBalance + (player.cost || 0);
                     if (playerDocSnap && playerDocSnap.exists()) {
                         transaction.update(playerDocSnap.ref, {
-                            balance: FieldValue.increment(player.cost || 0), // Add back cost
+                            balance: newBalance, // Add back cost
                         });
                     } else {
                         console.warn(`Original player ${player.userId} not found during revert. Skipping.`);
@@ -735,7 +739,12 @@ export const addSessionAndUpdateInventory = async (sessionData, existingSessionI
 
             //create new session document
             if (isUpdate) {
-                transaction.set(newSessionRef, { ...sessionData, updatedAt: serverTimestamp() }, { merge: true });
+                originalSessionData.players.forEach((player) => {
+                    const playerIndex = sessionData.players.findIndex((p) => p.id === player.id);
+                    sessionData.players[playerIndex].paid = player.paid;
+                    sessionData.players[playerIndex].highlighted = player.highlighted;
+                });
+                transaction.update(newSessionRef, { ...sessionData, updatedAt: serverTimestamp() }, { merge: true });
             } else {
                 transaction.set(newSessionRef, { ...sessionData, id: sessionId, createdAt: serverTimestamp() });
             }
@@ -777,17 +786,35 @@ export const addSessionAndUpdateInventory = async (sessionData, existingSessionI
                 //log birdie usage transaction
                 const birdieCostforBatch =
                     batchUsage.quantity * (batchData.costPerTube / (batchData.birdsPerTube || 1));
-                const transactionDocRef = doc(transcationsRef);
+                if (isUpdate) {
+                    const birdieUsageTransactionDoc = query(
+                        transcationsRef,
+                        where("resourceType", "==", "birdie"),
+                        where("batchId", "==", batchUsage.id),
+                        where("sessionId", "==", existingSessionId)
+                    );
+                    const querySnapshot = await getDocs(birdieUsageTransactionDoc);
+                    const transactionDoc = querySnapshot.docs[0];
+                    if (transactionDoc) {
+                        transaction.update(transactionDoc.ref, {
+                            quantityUsed: batchUsage.quantity,
+                            cost: birdieCostforBatch,
+                            updatedAt: serverTimestamp(),
+                        });
+                    }
+                } else {
+                    const transactionDocRef = doc(transcationsRef);
 
-                transaction.set(transactionDocRef, {
-                    resourceType: "birdie",
-                    batchId: batchUsage.id,
-                    quantityUsed: batchUsage.quantity,
-                    cost: birdieCostforBatch,
-                    sessionId: sessionId, // Assuming sessionData has an id field
-                    createdAt: serverTimestamp(),
-                    date: sessionData.date ? Timestamp.fromDate(new Date(sessionData.date)) : serverTimestamp(),
-                });
+                    transaction.set(transactionDocRef, {
+                        resourceType: "birdie",
+                        batchId: batchUsage.id,
+                        quantityUsed: batchUsage.quantity,
+                        cost: birdieCostforBatch,
+                        sessionId: sessionId, // Assuming sessionData has an id field
+                        createdAt: serverTimestamp(),
+                        date: sessionData.date ? Timestamp.fromDate(new Date(sessionData.date)) : serverTimestamp(),
+                    });
+                }
             }
             //update court credits usage
             for (const courtUsage of sessionData.courtCreditUsage) {
@@ -815,6 +842,25 @@ export const addSessionAndUpdateInventory = async (sessionData, existingSessionI
                 transaction.update(courtCreditDoc.ref, { remainingHours: newRemainingHours });
                 const courtCostforBatch = courtUsage.hoursUsed * (courtCreditData.costPerHour || 0);
                 //log court credit transaction
+
+                if (isUpdate) {
+                    const courtCreditTransactionDoc = query(
+                        transcationsRef,
+                        where("resourceType", "==", "courtCredit"),
+                        where("batchId", "==", courtUsage.id),
+                        where("sessionId", "==", existingSessionId)
+                    );
+                    const querySnapshot = await getDocs(courtCreditTransactionDoc);
+                    const transactionDoc = querySnapshot.docs[0];
+                    if (transactionDoc) {
+                        transaction.update(transactionDoc.ref, {
+                            hoursUsed: courtUsage.hoursUsed,
+                            cost: courtCostforBatch,
+                            updatedAt: serverTimestamp(),
+                        });
+                    }
+                }
+
                 const transactionDocRef = doc(transcationsRef);
                 transaction.set(transactionDocRef, {
                     resourceType: "courtCredit",
@@ -841,8 +887,14 @@ export const addSessionAndUpdateInventory = async (sessionData, existingSessionI
                 }
                 const playerData = playerDoc.data();
                 const currentBalance = playerData.balance || 0;
+                if(isUpdate && originalSessionData) {
+                    
+                }
                 const newBalance = currentBalance - player.cost;
-                const newAttendedSessionIds = (playerData.attendedSessionIds || []).concat(sessionId);
+                const newAttendedSessionIds = (playerData.attendedSessionIds || [])
+                if(!isUpdate){
+                    newAttendedSessionIds.concat(sessionId);
+                }
                 transaction.update(playerDoc.ref, { balance: newBalance, attendedSessionIds: newAttendedSessionIds });
             }
         });
@@ -955,23 +1007,31 @@ export async function togglePlayerPaidStatus(sessionId, playerId) {
     try {
         await runTransaction(db, async (transaction) => {
             const sessionDoc = await transaction.get(sessionDocRef);
+            const playerDoc = await transaction.get(doc(playersRef, playerId));
             if (!sessionDoc.exists()) {
                 throw new Error(`Session with ID ${sessionId} not found.`);
             }
             const sessionData = sessionDoc.data();
             const players = sessionData.players || [];
             let playerFound = false;
+            let newPlayerPaidStatus = null;
+            let playerCost = 0;
             const updatedPlayers = players.map((player) => {
                 if (player.id === playerId) {
                     playerFound = true;
+                    newPlayerPaidStatus = !player.paid;
+                    playerCost = player.cost || 0;
                     return { ...player, paid: !player.paid };
                 }
                 return player;
             });
-            if (!playerFound) {
+            if (!playerFound || newPlayerPaidStatus === null) {
                 throw new Error(`Player with userId ${playerId} not found in session ${sessionId}.`);
             }
             transaction.update(sessionDocRef, { players: updatedPlayers });
+            transaction.update(playerDoc.ref, {
+                balance: FieldValue.increment(newPlayerPaidStatus ? playerCost : -playerCost),
+            });
         });
         return { message: `Player payment status updated successfully.` };
     } catch (error) {

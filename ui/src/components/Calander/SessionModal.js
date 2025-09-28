@@ -33,7 +33,6 @@ function SessionModal({
     onSaveSession,
     onOpenAddUserModal,
 }) {
-    console.log("sessionsssss ==> ", session);
     const dispatch = useDispatch();
     const modalMode = useSelector(selectModalMode);
 
@@ -352,7 +351,7 @@ function SessionModal({
             case MODALMODE.ADDDETAILS:
             case MODALMODE.EDIT:
                 return (
-                    <SessionDetails onHide={onHide} handleSessionSubmit={modalMode=== handleSessionSubmit} session={session || {}} />
+                    <SessionDetails onHide={onHide} handleSessionSubmit={handleSessionSubmit} session={session || {}} />
                 );
             default:
                 console.log("default");
