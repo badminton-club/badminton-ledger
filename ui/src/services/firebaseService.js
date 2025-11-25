@@ -90,6 +90,44 @@ export const onAuthStateChangedListener = (callback) => {
     return onAuthStateChanged(auth, callback);
 };
 
+/**
+ * Checks whether a user is an admin by looking for their UID in the
+ * `admins` collection (document id = uid). Falls back to a `users` document
+ * with an `isAdmin` boolean or `role === 'admin'` field.
+ *
+ * @param {string|null} uid - optional UID to check; defaults to current user
+ * @returns {Promise<boolean>} true if user is admin
+ */
+export const checkIfAdmin = async (uid = null) => {
+    if (!db) {
+        console.error("Firestore not initialized.");
+        return false;
+    }
+    const userId = uid || (auth && auth.currentUser && auth.currentUser.uid);
+    if (!userId) return false;
+
+    try {
+        const adminDocRef = doc(db, "admins", userId);
+        const adminSnap = await getDoc(adminDocRef);
+        if (adminSnap && adminSnap.exists()) {
+            return true; // presence in `admins` collection grants admin
+        }
+
+        // Fallback: check `users/{uid}` for an admin flag or role
+        const userDocRef = doc(db, "users", userId);
+        const userSnap = await getDoc(userDocRef);
+        if (userSnap && userSnap.exists()) {
+            const data = userSnap.data();
+            return !!(data && (data.isAdmin === true || data.role === "admin"));
+        }
+
+        return false;
+    } catch (error) {
+        console.error("checkIfAdmin error:", error);
+        return false;
+    }
+};
+
 const sessionsRef = db ? collection(db, "sessions") : null;
 const playersRef = db ? collection(db, "players") : null;
 const birdieInventoryRef = db ? collection(db, "birdieInventory") : null;

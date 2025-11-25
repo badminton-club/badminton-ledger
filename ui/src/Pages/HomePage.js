@@ -17,6 +17,7 @@ function HomePage() {
         const fetchedSessions = await fetchSessions({ limitCount: 1, orderDirection: "desc" });
         setLatestSession(fetchedSessions[0]);
     };
+    
     useEffect(() => {
         fetchSessionFromFirebase();
     }, []);

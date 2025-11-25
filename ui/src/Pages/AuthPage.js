@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { signInWithGoogle, signOutUser, onAuthStateChangedListener, checkIfAdmin } from "../services/firebaseService";
+import { signInWithGoogle, signOutUser, onAuthStateChangedListener } from "../services/firebaseService";
 
 const AuthPage = () => {
     const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
     useEffect(() => {
         const unsubscribe = onAuthStateChangedListener((currentUser) => {
             setUser(currentUser);;
@@ -26,8 +25,6 @@ const AuthPage = () => {
             alert("Sign out failed: " + error.message);
         }
     };
-
-    if (loading) return <div>Loading...</div>;
 
     return (
         <div style={{ maxWidth: 400, margin: "40px auto", padding: 24, border: "1px solid #eee", borderRadius: 8, boxShadow: "0 2px 8px #eee" }}>
