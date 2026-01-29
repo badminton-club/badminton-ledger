@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useEffect, useState, use } from "react";
+import React, { useMemo, useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { setAddError, setMatchedPlayers } from "../../../../features/SessionModal/sessionModalSlice";
 import { fetchBirdieInventory, fetchCourtCredits } from "../../../../services/firebaseService";
@@ -139,6 +139,12 @@ function SessionDetails({ handleSessionSubmit, onHide, session = {} }) {
     };
 
     const { courtCreditUsage, totalCourtCostFromCredits } = useMemo(() => {
+        if (!useCourtCredits) {
+            return {
+                courtCreditUsage: [],
+                totalCourtCostFromCredits: parseFloat(Number(courtCostInput) * Number(courtNumInput)) || 0,
+            };
+        }
         const totalHoursUsed = parseFloat(courtNumInput) * 2; // Assuming 2 hours per court
         if (totalHoursUsed <= 0) {
             return [];
@@ -176,14 +182,14 @@ function SessionDetails({ handleSessionSubmit, onHide, session = {} }) {
             courtCreditUsage: usageDetails,
             totalCourtCostFromCredits: totalCostOfUsage,
         };
-    }, [courtCredits, courtNumInput]);
+    }, [courtCostInput, courtCredits, courtNumInput, useCourtCredits]);
 
     const totalCourtCost = useMemo(
         () =>
-            useCourtCredits
-                ? totalCourtCostFromCredits
-                : parseFloat(Number(courtCostInput) * Number(courtNumInput)) || 0,
-        [courtCostInput, courtNumInput, totalCourtCostFromCredits, useCourtCredits]
+            useCourtCredits ? totalCourtCostFromCredits : (
+                parseFloat(Number(courtCostInput) * Number(courtNumInput)) || 0
+            ),
+        [courtCostInput, courtNumInput, totalCourtCostFromCredits, useCourtCredits],
     );
 
     const totalBirdieCost = useMemo(() => {
@@ -219,15 +225,16 @@ function SessionDetails({ handleSessionSubmit, onHide, session = {} }) {
         <Form
             onSubmit={(e) => {
                 e.preventDefault();
-                handleSessionSubmit(
-                    courtNumInput,
-                    totalBirdieCost,
-                    totalSessionCost,
-                    totalCourtCost,
-                    birdieUsage,
-                    playerCosts,
-                    courtCreditUsage
-                );
+                // handleSessionSubmit(
+                //     courtNumInput,
+                //     totalBirdieCost,
+                //     totalSessionCost,
+                //     totalCourtCost,
+                //     birdieUsage,
+                //     playerCosts,
+                //     courtCreditUsage
+                // );
+                console.log({ courtCreditUsage });
             }}
         >
             {addError && <Alert variant="danger">{addError}</Alert>}
@@ -274,7 +281,7 @@ function SessionDetails({ handleSessionSubmit, onHide, session = {} }) {
                 <Form.Check
                     type={"switch"}
                     id="custom-switch"
-                    label="Check this switch"
+                    label="Use pre-purchased court credits"
                     checked={useCourtCredits}
                     onChange={() => setUseCourtCredits(!useCourtCredits)}
                 />
