@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert, Button, Col, Form, InputGroup, Row,
 } from 'react-bootstrap';
+import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { useAppDispatch, useAppSelector } from '../../../hooks';
 import {
@@ -101,6 +102,14 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
     }
     return allocs;
   }, [useCredits, courtCount, courtCredits]);
+
+  // Each court is 2 hours. Warn if the requested courts exceed the remaining credit balance.
+  const totalRemainingHours = useMemo(
+    () => courtCredits.reduce((sum, b) => sum + b.remainingHours, 0),
+    [courtCredits],
+  );
+  const requiredCourtHours = (parseFloat(courtCount) || 0) * 2;
+  const notEnoughCredits = useCredits && requiredCourtHours > totalRemainingHours;
 
   const totalCourtCost = useMemo(() => {
     if (useCredits) return courtCreditAllocation.reduce((s, a) => s + a.costFromBatch, 0);
@@ -227,6 +236,14 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
             — {alloc.hoursLeft} hrs remaining in batch
           </div>
         ))}
+
+        {notEnoughCredits && (
+          <Alert variant="warning" className="mt-2 mb-0 py-2 small">
+            Not enough court credits — {requiredCourtHours} hrs needed for {courtCount} court
+            {Number(courtCount) === 1 ? '' : 's'}, but only {totalRemainingHours} hrs left.{' '}
+            <Alert.Link as={Link} to="/credits">Add more here</Alert.Link>.
+          </Alert>
+        )}
       </Form.Group>
 
       {/* ── Birdies ─────────────────────────────────────────────────────── */}
