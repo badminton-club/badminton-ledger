@@ -347,9 +347,9 @@ export default function CourtCreditsPage() {
                                     )}
                                   </td>
                                   <td style={style}>
-                                    {item.type === 'sessionUsage' && item.sessionId ? (
-                                      <Link to={`/sessions/${item.sessionId as string}`}>
-                                        {(item.sessionId as string).substring(0, 8)}…
+                                    {item.type === 'sessionUsage' ? (
+                                      <Link to={`/?date=${format(item.eventDate as Date, 'yyyy-MM-dd')}`}>
+                                        View on calendar
                                       </Link>
                                     ) : item.type === 'adjustment' ? (item.userName as string) : ''}
                                   </td>

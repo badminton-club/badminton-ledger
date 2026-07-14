@@ -3,6 +3,7 @@ import { Button, ButtonGroup, Spinner } from "react-bootstrap";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { getMonth, getYear, lastDayOfMonth } from "date-fns";
+import { useSearchParams } from "react-router-dom";
 
 import { useAppSelector } from "../../hooks";
 import { selectModalMode } from "../../features/SessionModal/sessionModalSlice";
@@ -25,6 +26,7 @@ export default function SessionCalendar() {
     const [showModal, setShowModal] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const modalMode = useAppSelector(selectModalMode);
+    const [searchParams, setSearchParams] = useSearchParams();
 
     const loadMonth = useCallback(async () => {
         setIsLoading(true);
@@ -47,6 +49,19 @@ export default function SessionCalendar() {
     useEffect(() => {
         loadMonth();
     }, [loadMonth]);
+
+    // Deep link: /?date=YYYY-MM-DD opens the calendar on that month and selects the day.
+    useEffect(() => {
+        const dateParam = searchParams.get("date");
+        if (!dateParam) return;
+        const [y, m, d] = dateParam.split("-").map(Number);
+        if (!y || !m || !d) return;
+        setCurrentDate(new Date(y, m - 1, d));
+        setSelectedDate(new Date(y, m - 1, d));
+        searchParams.delete("date");
+        setSearchParams(searchParams, { replace: true });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const handleDayClick = (date: Date, session: Session | undefined) => {
         setSelectedDate(date);
