@@ -105,10 +105,12 @@ console.log("selectedPlayer ==> ", selectedPlayer);
       const q = query(
         collection(db, 'balanceLedger'),
         where('playerId', '==', playerId),
-        orderBy('createdAt', 'desc'),
       );
       const snap = await getDocs(q);
-      setLedger(snap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry)));
+      const entries = snap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry));
+      // Sort client-side to avoid needing a composite (playerId + createdAt) index.
+      entries.sort((a, b) => (b.createdAt?.toDate().getTime() ?? 0) - (a.createdAt?.toDate().getTime() ?? 0));
+      setLedger(entries);
     } catch {
       setLedgerError('Failed to load balance history.');
     } finally {
