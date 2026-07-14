@@ -165,9 +165,20 @@ export async function addSession(data: NewSessionData): Promise<string> {
 
       // ── 6. Update player balances + session counts ────────────────────────────────
       data.players.forEach((player, i) => {
+        const before = (playerDocs[i].data()?.balance as number) ?? 0;
         tx.update(playerDocs[i].ref, {
           balance:      increment(-player.cost),  // debit the cost
           sessionCount: increment(1),             // replaces pushing to attendedSessionIds
+        });
+        tx.set(doc(refs.balanceLedger), {
+          playerId:      player.id,
+          sessionId:     sessionRef.id,
+          delta:         -player.cost,
+          balanceBefore: before,
+          balanceAfter:  before - player.cost,
+          reason:        'session',
+          note:          `Session on ${data.date.toLocaleDateString()}`,
+          createdAt:     serverTimestamp(),
         });
       });
     });
@@ -331,10 +342,22 @@ export async function togglePlayerPaidStatus(
       const updatedPlayers = players.map(p =>
         p.id === playerId ? { ...p, paid: nowPaid } : p
       );
+      const before = (playerSnap.data()?.balance as number) ?? 0;
+      const delta  = nowPaid ? target.cost : -target.cost;
 
       tx.update(sessionRef, { players: updatedPlayers });
       // Marking paid increases their balance back (they've settled up); unpaying reverses it
-      tx.update(playerRef, { balance: increment(nowPaid ? target.cost : -target.cost) });
+      tx.update(playerRef, { balance: increment(delta) });
+      tx.set(doc(refs.balanceLedger), {
+        playerId:      playerId,
+        sessionId:     sessionId,
+        delta,
+        balanceBefore: before,
+        balanceAfter:  before + delta,
+        reason:        'payment',
+        note:          nowPaid ? 'Marked paid' : 'Marked unpaid',
+        createdAt:     serverTimestamp(),
+      });
     });
   });
 }

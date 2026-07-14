@@ -14,7 +14,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { getMonthYear } from '../utils/dateUtils';
 import AddPlayerModal from '../components/AddPlayerModal';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { db, refs } from '../services/firebase';
+import { db, refs, togglePlayerPaidStatus } from '../services/firebase';
 import { addPlayer } from '../services/firebase/players';
 import {
   collection, query, where, getDocs, orderBy,
@@ -176,6 +176,18 @@ console.log("selectedPlayer ==> ", selectedPlayer);
       setAttendedSessions([]);
     }
   }, [selectedPlayerId, fetchLedger, fetchAttendedSessions]);
+
+  const handleMarkPaid = async (sessionId: string) => {
+    if (!selectedPlayerId) return;
+    setSessionsError('');
+    try {
+      await togglePlayerPaidStatus(sessionId, selectedPlayerId);
+      await fetchAttendedSessions();
+      await fetchLedger(selectedPlayerId);
+    } catch (err) {
+      setSessionsError(err instanceof Error ? err.message : 'Failed to mark as paid.');
+    }
+  };
 
   // Balance adjustment
   const handleBalanceSubmit = async (e: React.FormEvent) => {
@@ -508,9 +520,21 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                               <div className="text-end">
                                 <div>${playerInSession?.cost?.toFixed(2) ?? 'N/A'}</div>
                                 {playerInSession && (
-                                  <Badge bg={playerInSession.paid ? 'success' : 'danger'} style={{ fontSize: 10 }}>
-                                    {playerInSession.paid ? 'Paid' : 'Unpaid'}
-                                  </Badge>
+                                  <div className="mt-1 d-flex flex-column align-items-end gap-1">
+                                    <Badge bg={playerInSession.paid ? 'success' : 'danger'} style={{ fontSize: 10 }}>
+                                      {playerInSession.paid ? 'Paid' : 'Unpaid'}
+                                    </Badge>
+                                    {!playerInSession.paid && (
+                                      <Button
+                                        variant="outline-success"
+                                        size="sm"
+                                        style={{ fontSize: 11, padding: '1px 8px' }}
+                                        onClick={() => handleMarkPaid(s.id)}
+                                      >
+                                        Mark as paid
+                                      </Button>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             </div>
