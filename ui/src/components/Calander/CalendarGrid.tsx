@@ -9,11 +9,10 @@ interface Props {
     currentDate: Date;
     sessions: Session[];
     selectedDate: Date | null;
-    onDayClick: (date: Date, session: Session | undefined) => void;
+    onDayClick: (date: Date) => void;
 }
 
 export default function CalendarGrid({ currentDate, sessions, selectedDate, onDayClick }: Props) {
-    console.log("sessions ==> ", sessions);
     const totalDays = getTotalDaysInMonth(currentDate);
     const startDay = getFirstDayOfMonthWeekday(currentDate);
     const year = getYear(currentDate);
@@ -27,21 +26,22 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, onDa
 
     for (let day = 1; day <= totalDays; day++) {
         const date = new Date(year, month, day);
-        const session = sessions.find((s) => +s.date === +date);
+        const daySessions = sessions.filter((s) => +s.date === +date);
         const today = isToday(date);
         const selected = selectedDate && +selectedDate === +date;
-        const allPaid = session ? session.players.length > 0 && session.players.every((p) => p.paid) : false;
+        const allPaid =
+            daySessions.length > 0 &&
+            daySessions.every((s) => s.players.length > 0 && s.players.every((p) => p.paid));
 
         cells.push(
             <DayCell
                 key={day}
                 day={day}
-                date={date}
-                session={session}
+                sessionCount={daySessions.length}
                 today={today}
                 selected={!!selected}
                 allPaid={allPaid}
-                onClick={() => onDayClick(date, session)}
+                onClick={() => onDayClick(date)}
             />,
         );
     }
@@ -76,16 +76,14 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, onDa
 
 function DayCell({
     day,
-    date,
-    session,
+    sessionCount,
     today,
     selected,
     allPaid,
     onClick,
 }: {
     day: number;
-    date: Date;
-    session: Session | undefined;
+    sessionCount: number;
     today: boolean;
     selected: boolean;
     allPaid: boolean;
@@ -119,7 +117,7 @@ function DayCell({
             </div>
 
             {/* Session indicator bar at bottom */}
-            {session && (
+            {sessionCount > 0 && (
                 <div
                     style={{
                         position: "absolute",
@@ -131,6 +129,20 @@ function DayCell({
                         background: allPaid ? "var(--color-text-success)" : "var(--color-text-danger)",
                     }}
                 />
+            )}
+            {sessionCount > 1 && (
+                <div
+                    style={{
+                        position: "absolute",
+                        top: 8,
+                        right: 8,
+                        fontSize: 10,
+                        fontWeight: 600,
+                        color: "var(--color-text-secondary)",
+                    }}
+                >
+                    ×{sessionCount}
+                </div>
             )}
         </div>
     );

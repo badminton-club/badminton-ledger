@@ -8,29 +8,36 @@ import type { RootState } from "../../store";
 
 interface Props {
     date: Date;
-    session: Session | undefined;
+    sessions: Session[];
     onAddSession: () => void;
-    onOpenModal: () => void;
+    onOpenModal: (session: Session) => void;
 }
 
-export default function SessionQuickView({ date, session, onAddSession, onOpenModal }: Props) {
-    if (!session) {
+export default function SessionQuickView({ date, sessions, onAddSession, onOpenModal }: Props) {
+    const [activeIndex, setActiveIndex] = React.useState(0);
+    React.useEffect(() => {
+        setActiveIndex(0);
+    }, [date, sessions.length]);
+
+    if (sessions.length === 0) {
         return (
             <div style={styles.wrap}>
-                <p style={styles.dateLabel}>{format(date, "EEEE, MMMM d")}</p>
-                <div style={styles.empty}>
-                    <p style={styles.emptyText}>No session this day</p>
+                <div style={styles.header}>
+                    <p style={styles.dateLabel}>{format(date, "EEEE, MMMM d")}</p>
                     <Button size="sm" variant="primary" onClick={onAddSession}>
                         + Add Session
                     </Button>
+                </div>
+                <div style={styles.empty}>
+                    <p style={styles.emptyText}>No session this day</p>
                 </div>
             </div>
         );
     }
 
+    const session = sessions[Math.min(activeIndex, sessions.length - 1)];
     const totalPlayers = session.players.length;
     const unpaidPlayers = session.players.filter((p) => !p.paid).length;
-    const paidPlayers = totalPlayers - unpaidPlayers;
     const totalBirds = session.birdieUsage.reduce((s, u) => s + u.quantity, 0);
     const allPaid = unpaidPlayers === 0 && totalPlayers > 0;
 
@@ -49,10 +56,30 @@ export default function SessionQuickView({ date, session, onAddSession, onOpenMo
                         {allPaid ? "Fully paid" : `${unpaidPlayers} unpaid`}
                     </div>
                 </div>
-                <Button size="sm" variant="outline-secondary" onClick={onOpenModal}>
-                    View details
-                </Button>
+                <div className="d-flex gap-2">
+                    <Button size="sm" variant="primary" onClick={onAddSession}>
+                        + Add
+                    </Button>
+                    <Button size="sm" variant="outline-secondary" onClick={() => onOpenModal(session)}>
+                        View details
+                    </Button>
+                </div>
             </div>
+
+            {sessions.length > 1 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                    {sessions.map((s, i) => (
+                        <Button
+                            key={s.id}
+                            size="sm"
+                            variant={i === activeIndex ? "secondary" : "outline-secondary"}
+                            onClick={() => setActiveIndex(i)}
+                        >
+                            Session {i + 1}
+                        </Button>
+                    ))}
+                </div>
+            )}
 
             <div style={styles.statsGrid}>
                 <StatCard

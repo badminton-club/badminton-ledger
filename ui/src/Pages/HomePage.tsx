@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Container, Row, Col, Button } from "react-bootstrap";
 import { format } from "date-fns";
+import { Link } from "react-router-dom";
 // import "./HomePage.css";
 import SessionCalendar from "components/Calander/SessionCalendar";
 import { fetchSessions } from "services/firebase/sessions";
@@ -63,7 +64,11 @@ export default function HomePage() {
                                         </Button>
                                     </div>
                                 </div>
-                                <p className="session-date">{format(currentSession.date, "MMMM d, yyyy")}</p>
+                                <p className="session-date">
+                                    <Link to={`/?date=${format(currentSession.date, "yyyy-MM-dd")}`}>
+                                        {format(currentSession.date, "MMMM d, yyyy")}
+                                    </Link>
+                                </p>
                                 <div className="session-details">
                                     <p className="session-info">Players: {currentSession.players?.length ?? 0}</p>
                                     <p className="session-info">

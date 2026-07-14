@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, ButtonGroup, Spinner } from "react-bootstrap";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -19,7 +19,6 @@ import SessionQuickView from "./SessionQuickView";
 export default function SessionCalendar() {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-    const [selectedSession, setSelectedSession] = useState<Session | undefined>();
     const [clickedDate, setClickedDate] = useState<Date | null>(null);
     const [sessions, setSessions] = useState<Session[]>([]);
     const [modalSession, setModalSession] = useState<Session | undefined>();
@@ -27,6 +26,11 @@ export default function SessionCalendar() {
     const [isLoading, setIsLoading] = useState(false);
     const modalMode = useAppSelector(selectModalMode);
     const [searchParams, setSearchParams] = useSearchParams();
+
+    const selectedSessions = useMemo(
+        () => (selectedDate ? sessions.filter((s) => +s.date === +selectedDate) : []),
+        [selectedDate, sessions],
+    );
 
     const loadMonth = useCallback(async () => {
         setIsLoading(true);
@@ -36,9 +40,6 @@ export default function SessionCalendar() {
                 endDate: lastDayOfMonth(currentDate),
             });
             setSessions(result);
-            if (selectedDate) {
-                setSelectedSession(result.find((s) => +s.date === +selectedDate));
-            }
         } catch (err) {
             console.error("Failed to load sessions:", err);
         } finally {
@@ -61,17 +62,16 @@ export default function SessionCalendar() {
         searchParams.delete("date");
         setSearchParams(searchParams, { replace: true });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [searchParams]);
 
-    const handleDayClick = (date: Date, session: Session | undefined) => {
+    const handleDayClick = (date: Date) => {
         setSelectedDate(date);
-        setSelectedSession(session);
     };
 
-    const handleOpenModal = () => {
+    const handleOpenModal = (session: Session) => {
         if (!selectedDate) return;
         setClickedDate(selectedDate);
-        setModalSession(selectedSession);
+        setModalSession(session);
         setShowModal(true);
     };
 
@@ -86,7 +86,6 @@ export default function SessionCalendar() {
         try {
             const updated = await fetchSessionById(sessionId);
             setModalSession(updated);
-            setSelectedSession(updated);
             setSessions((prev) => prev.map((s) => (s.id === sessionId ? updated : s)));
         } catch (err) {
             console.error("Failed to refresh session:", err);
@@ -161,7 +160,7 @@ export default function SessionCalendar() {
                 {selectedDate ?
                     <SessionQuickView
                         date={selectedDate}
-                        session={selectedSession}
+                        sessions={selectedSessions}
                         onAddSession={handleAddSession}
                         onOpenModal={handleOpenModal}
                     />
