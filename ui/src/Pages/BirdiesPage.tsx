@@ -54,6 +54,19 @@ function totalRemainingBirds(batch: Partial<BirdieBatch>): number {
   return unopenedTubesRemaining * birdsPerTube + birdsInOpenTube;
 }
 
+// Value of the remaining stock: (unopened tubes + open-tube fraction) * cost/tube.
+function totalBatchValue(batch: Partial<BirdieBatch>): number {
+  const { unopenedTubesRemaining = 0, birdsPerTube = 0, birdsInOpenTube = 0, costPerTube = 0 } = batch;
+  if (
+    typeof unopenedTubesRemaining !== 'number' ||
+    typeof birdsPerTube !== 'number' ||
+    typeof birdsInOpenTube !== 'number' ||
+    typeof costPerTube !== 'number'
+  ) return 0;
+  const tubesEquivalent = unopenedTubesRemaining + (birdsPerTube ? birdsInOpenTube / birdsPerTube : 0);
+  return tubesEquivalent * costPerTube;
+}
+
 const ADJUSTMENT_ROW_STYLE: React.CSSProperties = { backgroundColor: '#f2bd6d' };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -243,6 +256,7 @@ export default function BirdiesPage() {
                 {sortIndicator(key)}
               </th>
             ))}
+            <th>Total Cost</th>
           </tr>
         </thead>
         <tbody>
@@ -257,6 +271,7 @@ export default function BirdiesPage() {
               <td>{format(batch.purchaseDate, 'yyyy-MM-dd')}</td>
               <td>${batch.costPerTube.toFixed(2)}</td>
               <td>{batch.unopenedTubesRemaining}</td>
+              <td>${totalBatchValue(batch).toFixed(2)}</td>
             </tr>
           ))}
         </tbody>
@@ -398,9 +413,9 @@ export default function BirdiesPage() {
                         )}
                       </td>
                       <td style={style}>
-                        {item.type === 'sessionUsage' && item.sessionId ? (
-                          <Link to={`/sessions/${item.sessionId as string}`}>
-                            {(item.sessionId as string).substring(0, 8)}…
+                        {item.type === 'sessionUsage' ? (
+                          <Link to={`/?date=${format(item.eventDate as Date, 'yyyy-MM-dd')}`}>
+                            View on calendar
                           </Link>
                         ) : item.type === 'adjustment' ? (item.userName as string) : ''}
                       </td>

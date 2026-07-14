@@ -9,7 +9,7 @@ import {
 } from 'date-fns';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 
 import { getMonthYear } from '../utils/dateUtils';
 import AddPlayerModal from '../components/AddPlayerModal';
@@ -460,12 +460,21 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                     <ListGroup variant="flush" style={{ maxHeight: 200, overflowY: 'auto' }}>
                       {attendedSessions.map(s => {
                         const playerInSession = s.players.find(p => p.id === selectedPlayerId);
-                        console.log(`Session ${s.date} ==> `, typeof(s.date) );
+                        const sessionDate =
+                          s.date instanceof Date
+                            ? s.date
+                            : (s.date as any)?.toDate?.() ?? (s.date ? new Date(s.date as any) : null);
                         return (
                           <ListGroup.Item key={s.id}>
                             <div className="d-flex justify-content-between align-items-center">
                               <div>
-                                <strong>{s.date instanceof Date ? format(s.date, 'MMM d, yyyy') : '—'}</strong>
+                                {sessionDate ? (
+                                  <Link to={`/?date=${format(sessionDate, 'yyyy-MM-dd')}`} className="fw-bold">
+                                    {format(sessionDate, 'MMM d, yyyy')}
+                                  </Link>
+                                ) : (
+                                  <strong>—</strong>
+                                )}
                                 {s.location && <span className="text-muted small ms-2">at {s.location}</span>}
                               </div>
                               <div className="text-end">
