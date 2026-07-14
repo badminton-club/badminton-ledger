@@ -5,7 +5,7 @@ import {
   Dropdown, DropdownButton, Table, Badge,
 } from 'react-bootstrap';
 import {
-  format, startOfMonth, endOfMonth, addMonths, subMonths,
+  format, startOfMonth, endOfMonth, addMonths, subMonths, startOfYear, endOfYear,
 } from 'date-fns';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
@@ -70,6 +70,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
   console.log("attendedSessions ==> ", attendedSessions);
   const [isLoadingSessions,  setIsLoadingSessions]   = useState(false);
   const [sessionsError,      setSessionsError]       = useState('');
+  const [sessionsThisYear,   setSessionsThisYear]    = useState(0);
   const [ledger,             setLedger]              = useState<LedgerEntry[]>([]);
   const [isLoadingLedger,    setIsLoadingLedger]     = useState(false);
   const [ledgerError,        setLedgerError]         = useState('');
@@ -117,6 +118,30 @@ console.log("selectedPlayer ==> ", selectedPlayer);
       setIsLoadingLedger(false);
     }
   }, []);
+
+  // Sessions attended in the current calendar year (for the player detail stat).
+  useEffect(() => {
+    if (!selectedPlayerId) { setSessionsThisYear(0); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDocs(query(
+          refs.sessions,
+          where('date', '>=', startOfYear(new Date())),
+          where('date', '<=', endOfYear(new Date())),
+        ));
+        const count = snap.docs
+          .map(d => d.data())
+          .filter((s: any) => Array.isArray(s.players) && s.players.some((p: any) => p.id === selectedPlayerId))
+          .length;
+        if (!cancelled) setSessionsThisYear(count);
+      } catch {
+        if (!cancelled) setSessionsThisYear(0);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPlayerId]);
 
   // Attended sessions
   const fetchAttendedSessions = useCallback(async () => {
@@ -228,7 +253,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
   return (
     <Container fluid className="mt-4">
       <Row className="mb-3">
-        <Col>
+        <Col className="text-end">
           <Button variant="success" onClick={() => setShowAddModal(true)}>+ Add New Player</Button>
         </Col>
       </Row>
@@ -317,6 +342,9 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                       </h4>
                       <p className="small text-muted mb-0">
                         Total Sessions attended: {selectedPlayer.sessionCount ?? 0}
+                      </p>
+                      <p className="small text-muted mb-0">
+                        Sessions attended in {new Date().getFullYear()}: {sessionsThisYear}
                       </p>
                       {selectedPlayer.description && (
                         <p className="small text-muted mt-1">{selectedPlayer.description}</p>

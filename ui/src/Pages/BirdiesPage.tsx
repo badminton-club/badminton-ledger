@@ -433,7 +433,7 @@ export default function BirdiesPage() {
   return (
     <Container fluid className="mt-4">
       <Row className="mb-3">
-        <Col>
+        <Col className="text-end">
           <Button variant="success" onClick={() => setShowAddModal(true)}>+ Add New Batch</Button>
         </Col>
       </Row>
