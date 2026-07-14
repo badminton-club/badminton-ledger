@@ -177,7 +177,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
     }
   }, [selectedPlayerId, fetchLedger, fetchAttendedSessions]);
 
-  const handleMarkPaid = async (sessionId: string) => {
+  const handleTogglePaid = async (sessionId: string) => {
     if (!selectedPlayerId) return;
     setSessionsError('');
     try {
@@ -185,7 +185,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
       await fetchAttendedSessions();
       await fetchLedger(selectedPlayerId);
     } catch (err) {
-      setSessionsError(err instanceof Error ? err.message : 'Failed to mark as paid.');
+      setSessionsError(err instanceof Error ? err.message : 'Failed to update payment status.');
     }
   };
 
@@ -524,16 +524,14 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                                     <Badge bg={playerInSession.paid ? 'success' : 'danger'} style={{ fontSize: 10 }}>
                                       {playerInSession.paid ? 'Paid' : 'Unpaid'}
                                     </Badge>
-                                    {!playerInSession.paid && (
-                                      <Button
-                                        variant="outline-success"
-                                        size="sm"
-                                        style={{ fontSize: 11, padding: '1px 8px' }}
-                                        onClick={() => handleMarkPaid(s.id)}
-                                      >
-                                        Mark as paid
-                                      </Button>
-                                    )}
+                                    <Button
+                                      variant={playerInSession.paid ? 'outline-secondary' : 'outline-success'}
+                                      size="sm"
+                                      style={{ fontSize: 11, padding: '1px 8px' }}
+                                      onClick={() => handleTogglePaid(s.id)}
+                                    >
+                                      {playerInSession.paid ? 'Mark as unpaid' : 'Mark as paid'}
+                                    </Button>
                                   </div>
                                 )}
                               </div>
