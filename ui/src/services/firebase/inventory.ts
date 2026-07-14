@@ -37,11 +37,14 @@ export async function fetchBirdieBatchById(batchId: string): Promise<BirdieBatch
 }
 
 export async function addBirdieBatch(
-  data: Omit<BirdieBatch, 'id' | 'createdAt'>
+  data: Omit<BirdieBatch, 'id' | 'createdAt' | 'unopenedTubesRemaining' | 'birdsInOpenTube'>
 ): Promise<string> {
   return serviceCall('addBirdieBatch', async () => {
     const ref = await addDoc(refs.birdieInventory, {
       ...data,
+      // Initialize remaining stock to the full purchase: tubes * birds/tube.
+      unopenedTubesRemaining: data.tubesPurchased,
+      birdsInOpenTube:        0,
       purchaseDate: toTimestamp(data.purchaseDate),
       createdAt:    serverTimestamp(),
     });

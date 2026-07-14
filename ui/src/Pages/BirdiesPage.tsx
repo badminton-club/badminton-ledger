@@ -144,7 +144,7 @@ export default function BirdiesPage() {
     sortConfig.key === key ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : '';
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
-  const handleAddBatch = async (data: Omit<BirdieBatch, 'id' | 'createdAt'>) => {
+  const handleAddBatch = async (data: Omit<BirdieBatch, 'id' | 'createdAt' | 'unopenedTubesRemaining' | 'birdsInOpenTube'>) => {
     const id = await addBirdieBatch(data);
     await loadInventory(id);
     setShowAddModal(false);
