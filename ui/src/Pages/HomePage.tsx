@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Container, Row, Col, Button } from "react-bootstrap";
 import { format } from "date-fns";
 import { Link } from "react-router-dom";
@@ -15,11 +15,13 @@ export default function HomePage() {
     const [sessionIndex, setSessionIndex] = useState(0);
     const players = useAppSelector(selectAllPlayers);
 
-    useEffect(() => {
+    const loadSessions = useCallback(() => {
         fetchSessions({ orderDirection: "desc", limitCount: 60 })
             .then((s) => { setSessions(s); setSessionIndex(0); })
             .catch(console.error);
     }, []);
+
+    useEffect(() => { loadSessions(); }, [loadSessions]);
 
     const currentSession = sessions[sessionIndex] ?? null;
 
@@ -117,7 +119,7 @@ export default function HomePage() {
                 </Row>
 
                 <Row>
-                    <SessionCalendar />
+                    <SessionCalendar onSessionsChanged={loadSessions} />
                 </Row>
             </Container>
         </div>

@@ -5,8 +5,8 @@ import "react-datepicker/dist/react-datepicker.css";
 import { getMonth, getYear, lastDayOfMonth } from "date-fns";
 import { useSearchParams } from "react-router-dom";
 
-import { useAppSelector } from "../../hooks";
-import { selectModalMode } from "../../features/SessionModal/sessionModalSlice";
+import { useAppDispatch, useAppSelector } from "../../hooks";
+import { selectModalMode, setMode } from "../../features/SessionModal/sessionModalSlice";
 import { fetchSessions, fetchSessionById, addSession, editSession } from "../../services/firebase";
 import { getMonthYear, getNextMonth, getPrevMonth } from "../../utils/dateUtils";
 import type { Session } from "../../types";
@@ -16,7 +16,7 @@ import CalendarGrid from "./CalendarGrid";
 import SessionModal from "./SessionModal";
 import SessionQuickView from "./SessionQuickView";
 
-export default function SessionCalendar() {
+export default function SessionCalendar({ onSessionsChanged }: { onSessionsChanged?: () => void }) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [clickedDate, setClickedDate] = useState<Date | null>(null);
@@ -25,6 +25,7 @@ export default function SessionCalendar() {
     const [showModal, setShowModal] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const modalMode = useAppSelector(selectModalMode);
+    const dispatch = useAppDispatch();
     const [searchParams, setSearchParams] = useSearchParams();
 
     const selectedSessions = useMemo(
@@ -72,6 +73,7 @@ export default function SessionCalendar() {
         if (!selectedDate) return;
         setClickedDate(selectedDate);
         setModalSession(session);
+        dispatch(setMode("view"));
         setShowModal(true);
     };
 
@@ -79,6 +81,7 @@ export default function SessionCalendar() {
         if (!selectedDate) return;
         setClickedDate(selectedDate);
         setModalSession(undefined);
+        dispatch(setMode("paste"));
         setShowModal(true);
     };
 
@@ -87,10 +90,11 @@ export default function SessionCalendar() {
             const updated = await fetchSessionById(sessionId);
             setModalSession(updated);
             setSessions((prev) => prev.map((s) => (s.id === sessionId ? updated : s)));
+            onSessionsChanged?.();
         } catch (err) {
             console.error("Failed to refresh session:", err);
         }
-    }, []);
+    }, [onSessionsChanged]);
 
     const handleSaveSession = async (data: NewSessionData) => {
         if (!clickedDate) return;
@@ -101,6 +105,7 @@ export default function SessionCalendar() {
             await addSession(sessionData);
         }
         await loadMonth();
+        onSessionsChanged?.();
         setShowModal(false);
     };
 
