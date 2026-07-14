@@ -7,6 +7,7 @@ import BirdiesPage from './Pages/BirdiesPage';
 import CourtCreditsPage from './Pages/CourtCreditsPage';
 import PlayersPage from './Pages/PlayersPage';
 import SettingsPage from './Pages/SettingsPage';
+import AuthPage from './Pages/AuthPage';
 import { Container } from 'react-bootstrap';
 import { subscribeToPlayers } from './features/players/playersSlice';
 import { useAppDispatch } from './hooks';
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="/credits" element={<CourtCreditsPage />} />
           <Route path="/players" element={<PlayersPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/auth" element={<AuthPage />} />
         </Routes>
       </Container>
     </div>

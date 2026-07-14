@@ -1,8 +1,18 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Navbar, Nav, Container } from "react-bootstrap";
 import { Link } from "react-router-dom";
+import { checkIfAdmin, onAuthStateChangedListener } from "../services/firebase/auth";
 
 export default function AppNavbar() {
+    const [isAdmin, setIsAdmin] = useState(false);
+
+    useEffect(() => {
+        const unsubscribe = onAuthStateChangedListener(async (user) => {
+            setIsAdmin(await checkIfAdmin(user?.uid ?? null));
+        });
+        return () => unsubscribe();
+    }, []);
+
     return (
         <Navbar bg="primary" variant="dark" expand="lg" sticky="top" style={{ marginBottom: 20, paddingBottom: 10 }}>
             <Container>
@@ -12,17 +22,24 @@ export default function AppNavbar() {
                 <Navbar.Toggle aria-controls="main-nav" />
                 <Navbar.Collapse id="main-nav">
                     <Nav className="ms-auto">
-                        <Nav.Link as={Link} to="/birdies">
-                            Birdies
-                        </Nav.Link>
-                        <Nav.Link as={Link} to="/credits">
-                            Credits
-                        </Nav.Link>
-                        <Nav.Link as={Link} to="/players">
-                            Players
-                        </Nav.Link>
-                        <Nav.Link as={Link} to="/settings">
-                            Settings
+                        {isAdmin && (
+                            <>
+                                <Nav.Link as={Link} to="/birdies">
+                                    Birdies
+                                </Nav.Link>
+                                <Nav.Link as={Link} to="/credits">
+                                    Credits
+                                </Nav.Link>
+                                <Nav.Link as={Link} to="/players">
+                                    Players
+                                </Nav.Link>
+                                <Nav.Link as={Link} to="/settings">
+                                    Settings
+                                </Nav.Link>
+                            </>
+                        )}
+                        <Nav.Link as={Link} to="/auth">
+                            Account
                         </Nav.Link>
                     </Nav>
                 </Navbar.Collapse>

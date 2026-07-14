@@ -1,14 +1,25 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Container, Card, Button, Form, Alert, Spinner, ListGroup } from 'react-bootstrap';
 import { clearAllData, CLEARABLE_COLLECTIONS, type ClearSummary } from '../services/firebase/admin';
+import { onAuthStateChangedListener, checkIfAdmin } from '../services/firebase/auth';
 
 const CONFIRM_PHRASE = 'CLEAR ALL DATA';
 
 export default function SettingsPage() {
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [confirmText, setConfirmText] = useState('');
   const [clearing, setClearing] = useState(false);
   const [result, setResult] = useState<ClearSummary | null>(null);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChangedListener(async (user) => {
+      setIsAdmin(await checkIfAdmin(user?.uid ?? null));
+      setCheckingAdmin(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleClear = async () => {
     setError('');
@@ -31,6 +42,22 @@ export default function SettingsPage() {
       setClearing(false);
     }
   };
+
+  if (checkingAdmin) {
+    return (
+      <Container className="mt-4 text-center">
+        <Spinner animation="border" role="status" />
+      </Container>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <Container className="mt-4">
+        <Alert variant="danger">You do not have permission to view this page.</Alert>
+      </Container>
+    );
+  }
 
   return (
     <Container className="mt-4" style={{ maxWidth: 640 }}>

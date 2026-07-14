@@ -3,3 +3,4 @@ export * from './players';
 export * from './sessions';
 export * from './inventory';
 export * from './admin';
+export * from './auth';

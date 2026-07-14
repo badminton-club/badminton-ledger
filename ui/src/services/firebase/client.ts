@@ -1,5 +1,6 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore, collection, CollectionReference } from 'firebase/firestore';
+import { getAuth, Auth } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey:            process.env.REACT_APP_FIREBASE_API_KEY,
@@ -13,10 +14,12 @@ const firebaseConfig = {
 
 let app: FirebaseApp;
 let db: Firestore;
+let auth: Auth;
 
 try {
   app = initializeApp(firebaseConfig);
   db  = getFirestore(app);
+  auth = getAuth(app);
 } catch (error) {
   console.error('Firebase initialization failed:', error);
   throw error; // fail loudly at startup rather than silently producing null refs
@@ -32,4 +35,4 @@ export const refs = {
   transactions:         collection(db, 'transactions'),        // was "transcations" — fixed
 };
 
-export { db };
+export { db, auth };
