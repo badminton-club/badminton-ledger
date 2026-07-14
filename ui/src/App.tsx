@@ -6,6 +6,7 @@ import HomePage from './Pages/HomePage';
 import BirdiesPage from './Pages/BirdiesPage';
 import CourtCreditsPage from './Pages/CourtCreditsPage';
 import PlayersPage from './Pages/PlayersPage';
+import SettingsPage from './Pages/SettingsPage';
 import { Container } from 'react-bootstrap';
 import { subscribeToPlayers } from './features/players/playersSlice';
 import { useAppDispatch } from './hooks';
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="/birdies" element={<BirdiesPage />} />
           <Route path="/credits" element={<CourtCreditsPage />} />
           <Route path="/players" element={<PlayersPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </Container>
     </div>
