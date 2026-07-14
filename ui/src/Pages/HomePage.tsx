@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Container, Row, Col } from "react-bootstrap";
+import { Container, Row, Col, Button } from "react-bootstrap";
 import { format } from "date-fns";
 // import "./HomePage.css";
 import SessionCalendar from "components/Calander/SessionCalendar";
@@ -10,14 +10,17 @@ import type { Session } from "../types";
 import type { RootState } from "../store";
 
 export default function HomePage() {
-    const [latestSession, setLatestSession] = useState<Session | null>(null);
+    const [sessions, setSessions] = useState<Session[]>([]);
+    const [sessionIndex, setSessionIndex] = useState(0);
     const players = useAppSelector(selectAllPlayers);
 
     useEffect(() => {
-        fetchSessions({ limitCount: 1, orderDirection: "desc" })
-            .then((sessions) => setLatestSession(sessions[0] ?? null))
+        fetchSessions({ orderDirection: "desc", limitCount: 60 })
+            .then((s) => { setSessions(s); setSessionIndex(0); })
             .catch(console.error);
     }, []);
+
+    const currentSession = sessions[sessionIndex] ?? null;
 
     const maxDisplay = 5;
     const negativeBalancePlayers = players.filter((p) => p.balance < 0);
@@ -30,24 +33,50 @@ export default function HomePage() {
                 <Row className="mb-3">
                     {/* ── Latest session summary ── */}
                     <Col md={6}>
-                        {latestSession && latestSession.players.length > 0 && (
+                        {currentSession && (
                             <div className="session-card">
-                                <h2 className="session-title">Previous Session</h2>
-                                <p className="session-date">{format(latestSession.date, "MMMM d, yyyy")}</p>
+                                <div className="d-flex align-items-center justify-content-between">
+                                    <h2 className="session-title mb-0">
+                                        {sessionIndex === 0 ? "Latest Session" : "Previous Session"}
+                                    </h2>
+                                    <div className="d-flex align-items-center gap-2">
+                                        <Button
+                                            size="sm"
+                                            variant="outline-secondary"
+                                            title="Older session"
+                                            disabled={sessionIndex >= sessions.length - 1}
+                                            onClick={() => setSessionIndex((i) => Math.min(sessions.length - 1, i + 1))}
+                                        >
+                                            ‹
+                                        </Button>
+                                        <small className="text-muted">
+                                            {sessionIndex + 1} / {sessions.length}
+                                        </small>
+                                        <Button
+                                            size="sm"
+                                            variant="outline-secondary"
+                                            title="Newer session"
+                                            disabled={sessionIndex <= 0}
+                                            onClick={() => setSessionIndex((i) => Math.max(0, i - 1))}
+                                        >
+                                            ›
+                                        </Button>
+                                    </div>
+                                </div>
+                                <p className="session-date">{format(currentSession.date, "MMMM d, yyyy")}</p>
                                 <div className="session-details">
-                                    <p className="session-info">Players: {latestSession.players.length}</p>
+                                    <p className="session-info">Players: {currentSession.players?.length ?? 0}</p>
                                     <p className="session-info">
-                                        Birdies Used: {latestSession.birdieUsage.reduce((s, u) => s + u.quantity, 0)}
+                                        Birdies Used: {(currentSession.birdieUsage ?? []).reduce((s, u) => s + u.quantity, 0)}
                                     </p>
                                 </div>
                                 <div className="mt-3">
                                     <h3 className="unpaid-title">Unpaid Players:</h3>
-                                    {latestSession.players.filter((p) => !p.paid).length > 0 ?
+                                    {(currentSession.players ?? []).filter((p) => !p.paid).length > 0 ?
                                         <ul className="list-disc list-inside">
-                                            {latestSession.players
+                                            {(currentSession.players ?? [])
                                                 .filter((p) => !p.paid)
                                                 .map((p) => (
-                                                    // Resolve name from Redux — not stored in session
                                                     <UnpaidPlayerItem key={p.id} playerId={p.id} />
                                                 ))}
                                         </ul>
