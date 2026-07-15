@@ -14,9 +14,11 @@ import {
 
 import { selectPlayerById, selectAllPlayers } from '../../../features/players/playersSlice';
 import { fetchBirdieInventory, fetchCourtCredits } from '../../../services/firebase';
+import { addPlayer } from '../../../services/firebase/players';
+import AddPlayerModal from '../../AddPlayerModal';
 import type {
   BirdieBatch, CourtCreditBatch, Session,
-  BirdieUsage, CourtCreditUsage, SessionPlayer,
+  BirdieUsage, CourtCreditUsage, SessionPlayer, NewPlayerInput,
 } from 'types';
 import type { RootState } from '../../../store';
 import { useAppSelector as useSelector } from '../../../hooks';
@@ -57,6 +59,7 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
   const addError          = useAppSelector(selectAddError);
   const allPlayers        = useAppSelector(selectAllPlayers);
   const [playerToAdd, setPlayerToAdd] = useState('');
+  const [showNewPlayerModal, setShowNewPlayerModal] = useState(false);
 
   const [courtCount,      setCourtCount]      = useState(session ? String(
     Math.round((session.courtCreditUsage?.reduce((s, c) => s + c.hoursUsed, 0) ?? 0) / 2)
@@ -164,7 +167,7 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
   };
 
   const handlePercentageChange = (id: string, value: string) => {
-    const num = Math.min(1, Math.max(0, parseFloat(value) || 0));
+    const num = Math.max(0, parseFloat(value) || 0);
     dispatch(setConfirmedPlayers(
       confirmedPlayers.map(p => p.id === id ? { ...p, percentage: num } : p)
     ));
@@ -174,6 +177,11 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
     if (!playerToAdd || confirmedPlayers.some(p => p.id === playerToAdd)) return;
     dispatch(setConfirmedPlayers([...confirmedPlayers, { id: playerToAdd, percentage: 1 }]));
     setPlayerToAdd('');
+  };
+
+  const handleCreatePlayer = async (data: NewPlayerInput) => {
+    const id = await addPlayer(data);
+    dispatch(setConfirmedPlayers([...confirmedPlayers, { id, percentage: 1 }]));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -190,6 +198,7 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
   };
 
   return (
+    <>
     <Form onSubmit={handleSubmit}>
       {addError && <Alert variant="danger">{addError}</Alert>}
 
@@ -210,10 +219,10 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
       ))}
 
       <Row className="mb-3">
-        <Col md={8}>
+        <Col md={9}>
           <InputGroup size="sm">
             <Form.Select value={playerToAdd} onChange={e => setPlayerToAdd(e.target.value)}>
-              <option value="">+ Add player…</option>
+              <option value="">+ Add existing player…</option>
               {allPlayers
                 .filter(p => !confirmedPlayers.some(cp => cp.id === p.id))
                 .map(p => (
@@ -224,6 +233,9 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
             </Form.Select>
             <Button variant="outline-primary" disabled={!playerToAdd} onClick={handleAddPlayer}>
               Add
+            </Button>
+            <Button variant="outline-success" onClick={() => setShowNewPlayerModal(true)}>
+              + New player
             </Button>
           </InputGroup>
         </Col>
@@ -344,6 +356,14 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
         <Button variant="primary"   type="submit">Save Session</Button>
       </div>
     </Form>
+
+    <AddPlayerModal
+      show={showNewPlayerModal}
+      onHide={() => setShowNewPlayerModal(false)}
+      onAddPlayer={handleCreatePlayer}
+      existingPlayers={allPlayers}
+    />
+    </>
   );
 }
 
@@ -369,7 +389,7 @@ function PlayerRow({
         <InputGroup size="sm">
           <InputGroup.Text>${cost.toFixed(2)}</InputGroup.Text>
           <Form.Control
-            type="number" min="0" max="1" step="0.25"
+            type="number" min="0" step="0.25"
             value={percentage}
             onChange={e => onPercentageChange(e.target.value)}
             style={{ maxWidth: 90 }}
