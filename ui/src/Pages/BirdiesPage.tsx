@@ -277,7 +277,7 @@ export default function BirdiesPage() {
         <thead>
           <tr>
             {(['name', 'purchaseDate', 'costPerTube', 'unopenedTubesRemaining'] as SortKey[]).map(key => (
-              <th key={key} onClick={() => requestSort(key)} style={{ cursor: 'pointer' }}>
+              <th key={key} onClick={(e) =>{e.stopPropagation(); requestSort(key)}} style={{ cursor: 'pointer' }}>
                 {{ name: 'Name', purchaseDate: 'Purchase Date', costPerTube: 'Cost/Tube', unopenedTubesRemaining: 'Unopened' }[key]}
                 {sortIndicator(key)}
               </th>
@@ -289,7 +289,7 @@ export default function BirdiesPage() {
           {sorted.map(batch => (
             <tr
               key={batch.id}
-              onClick={() => handleSelectBatch(batch)}
+              onClick={(e) => { e.stopPropagation(); handleSelectBatch(batch); }}
               style={{ cursor: 'pointer' }}
               className={selectedBatch?.id === batch.id ? 'table-primary' : ''}
             >
@@ -482,7 +482,7 @@ export default function BirdiesPage() {
         <Col md={5} lg={4} className="mb-3 mb-md-0">
           <Card>
             <Card.Header><h5 className="mb-0">Birdie Batches</h5></Card.Header>
-            <Card.Body style={{ maxHeight: '80vh', overflowY: 'auto' }}>{renderTable()}</Card.Body>
+            <Card.Body style={{ maxHeight: '80vh', overflowY: 'auto' }} onClick={ ()=>handleSelectBatch(null) }>{renderTable()}</Card.Body>
           </Card>
         </Col>
         <Col md={7} lg={8}>{renderDetail()}</Col>
