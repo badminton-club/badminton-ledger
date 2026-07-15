@@ -102,7 +102,10 @@ export default function HomePage() {
                                     <ul className="list-disc list-inside">
                                         {displayedPlayers.map((player) => (
                                             <li key={player.id} className="player-balance">
-                                                {player.firstName} {player.lastName ?? ""} —{" "}
+                                                <Link to={`/players?playerId=${player.id}`}>
+                                                    {player.firstName} {player.lastName ?? ""}
+                                                </Link>{" "}
+                                                —{" "}
                                                 <strong>${Math.abs(player.balance).toFixed(2)}</strong>
                                             </li>
                                         ))}
