@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "badminton-ledger"
-  }
+    "default": "badminton-ledger",
+    "prod": "badminton-ledger-prod"
+  },
+  "targets": {},
+  "etags": {}
 }
