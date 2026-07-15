@@ -186,3 +186,33 @@ export interface ConfirmedPlayer {
 }
 
 export type ModalMode = 'view' | 'paste' | 'resolve' | 'details' | 'edit';
+
+// ─── Clubs (multi-tenant) ──────────────────────────────────────────────────────
+
+export type ClubRole = 'admin' | 'member';
+
+// clubs/{clubId}
+export interface Club {
+  id: string;
+  name: string;
+  createdAt?: Timestamp;
+}
+
+// clubs/{clubId}/members/{uid}
+export interface ClubMembership {
+  role: ClubRole;
+  addedAt?: Timestamp;
+}
+
+// users/{uid} — the signed-in user's global profile (their saved club list + default)
+export interface UserProfile {
+  clubs: string[];            // club ids the user has saved
+  lastVisitedClub: string | null;
+}
+
+// A club as presented in the UI: the club plus this user's role in it.
+export interface UserClub {
+  id: string;
+  name: string;
+  role: ClubRole | null;      // null = saved but membership not (yet) granted
+}

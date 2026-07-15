@@ -1,17 +1,22 @@
-import React, { useEffect, useState } from "react";
-import { Navbar, Nav, Container } from "react-bootstrap";
+import React from "react";
+import { Navbar, Nav, NavDropdown, Container, Badge } from "react-bootstrap";
 import { Link } from "react-router-dom";
-import { checkIfAdmin, onAuthStateChangedListener } from "../services/firebase/auth";
+import { useAppDispatch, useAppSelector } from "../hooks";
+import {
+    selectUserClubs,
+    selectCurrentClub,
+    selectCurrentClubId,
+    selectClubRole,
+    setCurrentClub,
+} from "../features/club/clubSlice";
 
 export default function AppNavbar() {
-    const [isAdmin, setIsAdmin] = useState(false);
-
-    useEffect(() => {
-        const unsubscribe = onAuthStateChangedListener(async (user) => {
-            setIsAdmin(await checkIfAdmin(user?.uid ?? null));
-        });
-        return () => unsubscribe();
-    }, []);
+    const dispatch = useAppDispatch();
+    const clubs = useAppSelector(selectUserClubs);
+    const currentClub = useAppSelector(selectCurrentClub);
+    const currentClubId = useAppSelector(selectCurrentClubId);
+    const role = useAppSelector(selectClubRole);
+    const isAdmin = role === "admin";
 
     return (
         <Navbar bg="primary" variant="dark" expand="lg" sticky="top" style={{ marginBottom: 20, paddingBottom: 10 }}>
@@ -21,6 +26,29 @@ export default function AppNavbar() {
                 </Navbar.Brand>
                 <Navbar.Toggle aria-controls="main-nav" />
                 <Navbar.Collapse id="main-nav">
+                    <Nav className="me-auto">
+                        {clubs.length > 0 && (
+                            <NavDropdown
+                                title={currentClub ? currentClub.name : "Select club"}
+                                id="club-switcher"
+                            >
+                                {clubs.map((c) => (
+                                    <NavDropdown.Item
+                                        key={c.id}
+                                        active={c.id === currentClubId}
+                                        onClick={() => dispatch(setCurrentClub(c.id))}
+                                    >
+                                        {c.name}
+                                        {c.role && (
+                                            <Badge bg={c.role === "admin" ? "success" : "secondary"} className="ms-2">
+                                                {c.role}
+                                            </Badge>
+                                        )}
+                                    </NavDropdown.Item>
+                                ))}
+                            </NavDropdown>
+                        )}
+                    </Nav>
                     <Nav className="ms-auto">
                         {isAdmin && (
                             <>

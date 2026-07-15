@@ -1,5 +1,5 @@
-import { getDocs, writeBatch, doc, Timestamp } from 'firebase/firestore';
-import { db, refs } from './client';
+import { getDocs, writeBatch, doc, collection, setDoc, serverTimestamp, arrayUnion, Timestamp } from 'firebase/firestore';
+import { db, refs, clubDoc, memberDoc, userDoc, clubCollection, CLUB_DATA_COLLECTIONS } from './client';
 import { serviceCall } from './utils';
 
 /** Data collections that `clearAllData` empties. Auth-related collections are deliberately excluded. */
@@ -134,6 +134,62 @@ export async function restoreAllData(backup: BackupData): Promise<ClearSummary> 
 
       if (pending > 0) await batch.commit();
       summary[name] = written;
+    }
+
+    return summary;
+  });
+}
+
+// ─── Club setup / migration ─────────────────────────────────────────────────────
+
+export type MigrationSummary = Record<ClearableCollection, number>;
+
+/**
+ * One-time setup for multi-club: creates the club, makes the given user its admin,
+ * and copies the existing top-level (pre-club) data into `clubs/{clubId}/...`.
+ * The original flat collections are left in place, so this is non-destructive and
+ * can be re-run. Returns a per-collection copied-doc count.
+ */
+export async function setUpClubFromExistingData(
+  clubId: string,
+  clubName: string,
+  adminUid: string
+): Promise<MigrationSummary> {
+  return serviceCall('setUpClubFromExistingData', async () => {
+    // 1. Club + admin membership. ownerUid lets Firestore rules bootstrap the first
+    //    admin (no one is an admin of a brand-new club yet).
+    await setDoc(clubDoc(clubId), { name: clubName, ownerUid: adminUid, createdAt: serverTimestamp() }, { merge: true });
+    await setDoc(memberDoc(clubId, adminUid), { role: 'admin', addedAt: serverTimestamp() }, { merge: true });
+
+    // 2. Save the club onto the admin's profile and make it their default
+    await setDoc(
+      userDoc(adminUid),
+      { clubs: arrayUnion(clubId), lastVisitedClub: clubId },
+      { merge: true }
+    );
+
+    // 3. Copy each flat collection into the club subcollection (batched)
+    const summary = {} as MigrationSummary;
+    for (const name of CLUB_DATA_COLLECTIONS) {
+      const flatSnap = await getDocs(collection(db, name)); // old top-level data
+      const target = clubCollection(name, clubId);
+      let copied = 0;
+      let pending = 0;
+      let batch = writeBatch(db);
+
+      for (const docSnap of flatSnap.docs) {
+        batch.set(doc(target, docSnap.id), docSnap.data());
+        pending += 1;
+        copied += 1;
+        if (pending === BATCH_LIMIT) {
+          await batch.commit();
+          batch = writeBatch(db);
+          pending = 0;
+        }
+      }
+
+      if (pending > 0) await batch.commit();
+      summary[name] = copied;
     }
 
     return summary;

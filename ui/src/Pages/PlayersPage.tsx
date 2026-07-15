@@ -104,7 +104,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
     setLedgerError('');
     try {
       const q = query(
-        collection(db, 'balanceLedger'),
+        refs.balanceLedger,
         where('playerId', '==', playerId),
       );
       const snap = await getDocs(q);
@@ -221,7 +221,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
         if (!playerSnap.exists()) throw new Error('Player not found.');
         const before = playerSnap.data().balance ?? 0;
         tx.update(playerRef, { balance: increment(delta) });
-        tx.set(doc(collection(db, 'balanceLedger')), {
+        tx.set(doc(refs.balanceLedger), {
           playerId:      selectedPlayer.id,
           sessionId:     null,
           delta,

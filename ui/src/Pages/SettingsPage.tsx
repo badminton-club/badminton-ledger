@@ -1,13 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Container, Card, Button, Form, Alert, Spinner, ListGroup } from 'react-bootstrap';
 import { clearAllData, exportAllData, restoreAllData, CLEARABLE_COLLECTIONS, type ClearSummary, type BackupData } from '../services/firebase/admin';
-import { onAuthStateChangedListener, checkIfAdmin } from '../services/firebase/auth';
+import { useAppSelector } from '../hooks';
+import { selectIsClubAdmin } from '../features/club/clubSlice';
 
 const CONFIRM_PHRASE = 'CLEAR ALL DATA';
 
 export default function SettingsPage() {
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [checkingAdmin, setCheckingAdmin] = useState(true);
+  const isAdmin = useAppSelector(selectIsClubAdmin);
+  const checkingAdmin = false;
   const [confirmText, setConfirmText] = useState('');
   const [clearing, setClearing] = useState(false);
   const [result, setResult] = useState<ClearSummary | null>(null);
@@ -16,14 +17,6 @@ export default function SettingsPage() {
   const [restoring, setRestoring] = useState(false);
   const [restoreResult, setRestoreResult] = useState<ClearSummary | null>(null);
   const [ioError, setIoError] = useState('');
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChangedListener(async (user) => {
-      setIsAdmin(await checkIfAdmin(user?.uid ?? null));
-      setCheckingAdmin(false);
-    });
-    return () => unsubscribe();
-  }, []);
 
   const handleClear = async () => {
     setError('');
