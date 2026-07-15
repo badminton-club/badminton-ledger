@@ -10,6 +10,8 @@ export const CLEARABLE_COLLECTIONS = [
   'courtCredits',
   'inventoryAdjustments',
   'transactions',
+  'balanceLedger',
+  'archivedSessions',
 ] as const;
 
 export type ClearableCollection = (typeof CLEARABLE_COLLECTIONS)[number];

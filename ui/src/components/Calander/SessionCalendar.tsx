@@ -7,7 +7,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { selectModalMode, setMode } from "../../features/SessionModal/sessionModalSlice";
-import { fetchSessions, fetchSessionById, addSession, editSession } from "../../services/firebase";
+import { fetchSessions, fetchSessionById, addSession, editSession, deleteSession } from "../../services/firebase";
 import { getMonthYear, getNextMonth, getPrevMonth } from "../../utils/dateUtils";
 import type { Session } from "../../types";
 import type { NewSessionData } from "../../services/firebase/sessions";
@@ -109,6 +109,13 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
         setShowModal(false);
     };
 
+    const handleDeleteSession = async (sessionId: string) => {
+        await deleteSession(sessionId);
+        setShowModal(false);
+        await loadMonth();
+        onSessionsChanged?.();
+    };
+
     return (
         <div style={styles.outerWrap}>
             {/* ── Calendar panel ───────────────────────────────────────────── */}
@@ -181,6 +188,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
                 session={modalSession}
                 onSessionUpdate={handleSessionUpdate}
                 onSaveSession={handleSaveSession}
+                onDeleteSession={handleDeleteSession}
             />
         </div>
     );

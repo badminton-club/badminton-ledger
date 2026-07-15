@@ -27,6 +27,7 @@ interface Props {
     session?: Session;
     onSessionUpdate: (sessionId: string) => void;
     onSaveSession: (data: unknown) => Promise<void>;
+    onDeleteSession: (sessionId: string) => Promise<void>;
 }
 
 const MODAL_TITLES: Record<string, string> = {
@@ -37,7 +38,7 @@ const MODAL_TITLES: Record<string, string> = {
     view: "Session Details",
 };
 
-export default function SessionModal({ show, onHide, session, onSessionUpdate, onSaveSession }: Props) {
+export default function SessionModal({ show, onHide, session, onSessionUpdate, onSaveSession, onDeleteSession }: Props) {
     const dispatch = useAppDispatch();
     const mode = useAppSelector(selectModalMode);
 
@@ -131,6 +132,7 @@ export default function SessionModal({ show, onHide, session, onSessionUpdate, o
                     <ExistingSessionView
                         session={session}
                         onSessionUpdate={onSessionUpdate}
+                        onDelete={onDeleteSession}
                         onEdit={() => {
                             dispatch(
                                 setConfirmedPlayers(

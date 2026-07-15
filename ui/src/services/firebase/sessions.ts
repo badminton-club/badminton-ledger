@@ -395,3 +395,81 @@ export async function togglePlayerHighlightStatus(
     });
   });
 }
+
+// ─── Delete session ───────────────────────────────────────────────────────────
+
+/**
+ * Reverses a session's effects (refunds birds, court hours and player balances,
+ * and decrements session counts), archives a copy to `archivedSessions`, then
+ * deletes the session document — all in one transaction.
+ */
+export async function deleteSession(sessionId: string): Promise<void> {
+  return serviceCall('deleteSession', async () => {
+    const sessionRef = doc(refs.sessions, sessionId);
+
+    await runTransaction(db, async (tx) => {
+      const sessionSnap = await tx.get(sessionRef);
+      if (!sessionSnap.exists()) throw new Error(`Session ${sessionId} not found`);
+      const session = sessionSnap.data() as Session;
+
+      const birdieUsage = session.birdieUsage ?? [];
+      const courtUsage  = session.courtCreditUsage ?? [];
+      const players     = session.players ?? [];
+
+      const [birdieSnaps, courtSnaps, playerSnaps] = await Promise.all([
+        Promise.all(birdieUsage.map(u => tx.get(doc(refs.birdieInventory, u.id)))),
+        Promise.all(courtUsage.map(u  => tx.get(doc(refs.courtCredits, u.id)))),
+        Promise.all(players.map(p     => tx.get(doc(refs.players, p.id)))),
+      ]);
+
+      // Refund birds to each batch.
+      birdieUsage.forEach((u, i) => {
+        const snap = birdieSnaps[i];
+        if (!snap.exists()) return;
+        const d = snap.data()!;
+        const perTube = d.birdsPerTube || 1;
+        const total = d.unopenedTubesRemaining * perTube + d.birdsInOpenTube + u.quantity;
+        tx.update(snap.ref, {
+          unopenedTubesRemaining: Math.floor(total / perTube),
+          birdsInOpenTube:        total % perTube,
+        });
+      });
+
+      // Refund court hours.
+      courtUsage.forEach((u, i) => {
+        const snap = courtSnaps[i];
+        if (!snap.exists()) return;
+        const d = snap.data()!;
+        tx.update(snap.ref, { remainingHours: d.remainingHours + u.hoursUsed });
+      });
+
+      // Refund player balances, decrement session counts, log the reversal.
+      players.forEach((p, i) => {
+        const snap = playerSnaps[i];
+        if (!snap.exists()) return;
+        const before = (snap.data()?.balance as number) ?? 0;
+        tx.update(snap.ref, {
+          balance:      increment(p.cost),
+          sessionCount: increment(-1),
+        });
+        tx.set(doc(refs.balanceLedger), {
+          playerId:      p.id,
+          sessionId,
+          delta:         p.cost,
+          balanceBefore: before,
+          balanceAfter:  before + p.cost,
+          reason:        'session-deleted',
+          note:          'Session deleted',
+          createdAt:     serverTimestamp(),
+        });
+      });
+
+      // Archive a copy, then delete the original.
+      tx.set(doc(refs.archivedSessions, sessionId), {
+        ...session,
+        archivedAt: serverTimestamp(),
+      });
+      tx.delete(sessionRef);
+    });
+  });
+}

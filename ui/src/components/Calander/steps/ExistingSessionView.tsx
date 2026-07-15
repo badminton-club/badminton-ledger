@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Button, Col, ListGroup, Row } from 'react-bootstrap';
+import React, { useMemo, useState } from 'react';
+import { Alert, Button, Col, Form, ListGroup, Row } from 'react-bootstrap';
 import { format } from 'date-fns';
 import { useAppSelector } from 'hooks';
 import { selectPlayerById } from '../../../features/players/playersSlice';
@@ -11,9 +11,26 @@ interface Props {
   session:         Session;
   onSessionUpdate: (id: string) => void;
   onEdit:          () => void;
+  onDelete:        (id: string) => Promise<void>;
 }
 
-export default function ExistingSessionView({ session, onSessionUpdate, onEdit }: Props) {
+export default function ExistingSessionView({ session, onSessionUpdate, onEdit, onDelete }: Props) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteText, setDeleteText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
+  const handleDelete = async () => {
+    setDeleteError('');
+    setDeleting(true);
+    try {
+      await onDelete(session.id);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete session.');
+      setDeleting(false);
+    }
+  };
+
   const paidTotal = useMemo(
     () => session.players.filter(p => p.paid).reduce((s, p) => s + p.cost, 0),
     [session.players]
@@ -65,9 +82,44 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit }
         />
       </div>
 
-      <div className="d-flex justify-content-end mt-3">
+      <div className="d-flex justify-content-end mt-3 gap-2">
+        <Button variant="outline-danger" onClick={() => setConfirmingDelete(true)} disabled={confirmingDelete}>
+          Delete
+        </Button>
         <Button variant="primary" onClick={onEdit}>Edit</Button>
       </div>
+
+      {confirmingDelete && (
+        <div className="mt-3 p-3 border border-danger rounded">
+          <p className="mb-2 text-danger">
+            This permanently deletes the session and reverses its inventory and balance
+            effects (a copy is archived). Type <strong>DELETE</strong> to confirm.
+          </p>
+          <Form.Control
+            className="mb-2"
+            value={deleteText}
+            onChange={e => setDeleteText(e.target.value)}
+            placeholder="DELETE"
+            disabled={deleting}
+          />
+          {deleteError && <Alert variant="danger" className="py-1 small mb-2">{deleteError}</Alert>}
+          <div className="d-flex justify-content-end gap-2">
+            <Button
+              variant="secondary" size="sm" disabled={deleting}
+              onClick={() => { setConfirmingDelete(false); setDeleteText(''); setDeleteError(''); }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger" size="sm"
+              disabled={deleteText !== 'DELETE' || deleting}
+              onClick={handleDelete}
+            >
+              {deleting ? 'Deleting…' : 'Delete permanently'}
+            </Button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
