@@ -9,6 +9,7 @@ import 'react-datepicker/dist/react-datepicker.css';
 import { Link } from 'react-router-dom';
 
 import AddBirdieBatchModal from 'components/AddBirdieBatchModal';
+import BirdieUsageChart from 'components/BirdieUsageChart';
 import {
   fetchBirdieInventory,
   addBirdieBatch,
@@ -16,6 +17,7 @@ import {
   fetchBirdieBatchById,
   fetchInventoryAdjustmentsForBatch,
   fetchBirdieUsageForBatch,
+  fetchSessions,
 } from '../services/firebase';
 import type { BirdieBatch, InventoryAdjustment } from '../types';
 
@@ -87,6 +89,7 @@ export default function BirdiesPage() {
   const [isSaving,         setIsSaving]         = useState(false);
   const [history,          setHistory]          = useState<HistoryItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [usagePoints,      setUsagePoints]      = useState<{ date: Date; value: number }[]>([]);
 
   // ── Fetch history when selected batch changes ────────────────────────────────
   useEffect(() => {
@@ -131,6 +134,22 @@ export default function BirdiesPage() {
   }, [selectedBatch?.id]);
 
   useEffect(() => { loadInventory(); }, []);
+
+  // ── Birds-used-per-session trend ────────────────────────────────────
+  useEffect(() => {
+    fetchSessions({ orderDirection: 'asc' })
+      .then(sessions => {
+        setUsagePoints(
+          sessions
+            .map(s => ({
+              date:  s.date instanceof Date ? s.date : new Date(s.date as unknown as string),
+              value: (s.birdieUsage ?? []).reduce((sum, u) => sum + (u.quantity ?? 0), 0),
+            }))
+            .filter(p => p.value > 0),
+        );
+      })
+      .catch(console.error);
+  }, []);
 
   // ── Sorting ──────────────────────────────────────────────────────────────────
   const sorted = useMemo(() => {
@@ -283,8 +302,12 @@ export default function BirdiesPage() {
     if (!selectedBatch) {
       return (
         <Card className="h-100">
-          <Card.Body className="d-flex align-items-center justify-content-center">
-            <p className="text-muted">Select a batch to view details.</p>
+          <Card.Header><Card.Title className="h6 mb-0">Birds used per session</Card.Title></Card.Header>
+          <Card.Body>
+            <BirdieUsageChart points={usagePoints} />
+            <p className="text-muted small text-center mt-2 mb-0">
+              Select a batch above to view its details.
+            </p>
           </Card.Body>
         </Card>
       );
