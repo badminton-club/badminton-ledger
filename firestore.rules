@@ -41,14 +41,15 @@ service cloud.firestore {
       allow delete: if isClubSuperAdmin(clubId);
 
       // Membership roster. Only superadmins may create/change/remove elevated roles
-      // (admin/superAdmin); regular admins may manage plain members (incl. player links).
+      // (admin/superAdmin). Regular admins may add plain members and edit any
+      // member's non-role fields (e.g. player links) — they just can't change roles.
       match /members/{uid} {
         allow read:   if isSignedIn() && (request.auth.uid == uid || isClubAdmin(clubId));
         allow create: if isClubSuperAdmin(clubId)
           || (request.auth.uid == uid && isClubOwner(clubId))
           || (isClubAdmin(clubId) && request.resource.data.role == 'member');
         allow update: if isClubSuperAdmin(clubId)
-          || (isClubAdmin(clubId) && request.resource.data.role == 'member' && resource.data.role == 'member');
+          || (isClubAdmin(clubId) && request.resource.data.role == resource.data.role);
         allow delete: if isClubSuperAdmin(clubId);
       }
 
