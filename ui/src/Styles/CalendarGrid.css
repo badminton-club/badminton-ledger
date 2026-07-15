@@ -1,0 +1,27 @@
+.calendar-grid .calendar-day {
+    min-height: 160px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: flex-start;
+    position: relative;
+}
+
+.calendar-grid .calendar-day .empty {
+    background-color: #f8f9fa;
+    cursor: default;
+}
+
+.calendar-grid .calendar-day.border {
+    border: 1px solid #dee2e6 !important;
+}
+
+.calendar-grid .calendar-day.has-session:hover {
+    background-color: #e9ecef;
+}
+
+.calendar-day .badge {
+    font-size: 0.65em;
+    padding: 0.2em 0.4em;
+}
+

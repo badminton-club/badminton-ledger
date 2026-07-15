@@ -1,0 +1,46 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Canonical admin check: the user's UID has a document in `admins`.
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ── Application data: admins only ──────────────────────────────────────────
+    match /sessions/{doc}              { allow read, write: if isAdmin(); }
+    match /players/{doc}               { allow read, write: if isAdmin(); }
+    match /birdieInventory/{doc}       { allow read, write: if isAdmin(); }
+    match /courtCredits/{doc}          { allow read, write: if isAdmin(); }
+    match /inventoryAdjustments/{doc}  { allow read, write: if isAdmin(); }
+    match /transactions/{doc}          { allow read, write: if isAdmin(); }
+    match /balanceLedger/{doc}         { allow read, write: if isAdmin(); }
+    match /archivedSessions/{doc}      { allow read, write: if isAdmin(); }
+
+    // ── Admin membership ───────────────────────────────────────────────────────
+    // Signed-in users may read (so the app can check their own admin status),
+    // but membership can only be changed from the Firebase console / a backend.
+    match /admins/{uid} {
+      allow read:  if isSignedIn();
+      allow write: if false;
+    }
+
+    // ── User profiles ──────────────────────────────────────────────────────────
+    // A user can read their own profile; admins can read/write all profiles.
+    match /users/{uid} {
+      allow read:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // ── Deny everything else ───────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,38 +1,277 @@
+:root {
+    --color-background-primary: #ffffff;
+    --color-background-secondary: #f8f9fa;
+    --color-background-tertiary: #f1f3f4;
+    --color-background-info: #e8f0fe;
+    --color-background-success: #e6f4ea;
+    --color-background-danger: #fce8e6;
+    --color-background-warning: #fef7e0;
+    --color-text-primary: #1a1a1a;
+    --color-text-secondary: #6c757d;
+    --color-text-tertiary: #adb5bd;
+    --color-text-info: #1a73e8;
+    --color-text-success: #137333;
+    --color-text-danger: #c5221f;
+    --color-text-warning: #b06000;
+    --color-border-tertiary: rgba(0, 0, 0, 0.12);
+    --color-border-secondary: rgba(0, 0, 0, 0.24);
+    --color-border-primary: rgba(0, 0, 0, 0.38);
+    --color-border-info: #1a73e8;
+    --color-border-success: #137333;
+    --color-border-danger: #c5221f;
+    --border-radius-md: 8px;
+    --border-radius-lg: 12px;
+    --border-radius-xl: 16px;
+}
+
+/* @media (prefers-color-scheme: dark) {
+    :root {
+        --color-background-primary: #1e1e1e;
+        --color-background-secondary: #2a2a2a;
+        --color-background-tertiary: #121212;
+        --color-background-info: #1a2e4a;
+        --color-background-success: #1a2e1a;
+        --color-background-danger: #3c1a1a;
+        --color-background-warning: #3c2e00;
+        --color-text-primary: #e8eaed;
+        --color-text-secondary: #9aa0a6;
+        --color-text-tertiary: #5f6368;
+        --color-text-info: #8ab4f8;
+        --color-text-success: #81c995;
+        --color-text-danger: #f28b82;
+        --color-text-warning: #fdd663;
+        --color-border-tertiary: rgba(255, 255, 255, 0.12);
+        --color-border-secondary: rgba(255, 255, 255, 0.24);
+        --color-border-primary: rgba(255, 255, 255, 0.38);
+        --color-border-info: #8ab4f8;
+        --color-border-success: #81c995;
+        --color-border-danger: #f28b82;
+    }
+} */
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+
+body {
+    background-color: var(--color-background-tertiary);
+    color: var(--color-text-primary);
+}
+
 .App {
-  text-align: center;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+    background-color: var(--color-background-tertiary);
+    padding: 20px;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+/* ── Birdie buttons ───────────────────────────────────────────────────────── */
+
+.birdie-button-column {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    align-items: center;
+    padding: 8px;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+.birdie-button-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 17px;
+    background: var(--color-background-primary);
+    box-shadow: 0 1px 3px var(--color-border-tertiary);
+    border-radius: var(--border-radius-lg);
+    cursor: pointer;
+    transition: background 0.15s;
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+.birdie-button-wrapper:hover {
+    background: var(--color-background-secondary);
 }
 
-.App-link {
-  color: #61dafb;
+.birdie-button {
+    background: none;
+    border: none;
+    padding: 16px;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.birdie-image {
+    width: 60px;
+    height: 60px;
+}
+
+/* ── Session cards (HomePage) ─────────────────────────────────────────────── */
+
+.session-card {
+    background: var(--color-background-primary);
+    box-shadow: 0 1px 3px var(--color-border-tertiary);
+    border-radius: var(--border-radius-lg);
+    padding: 20px;
+    width: 100%;
+    max-width: 500px;
+}
+
+.session-title {
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+.session-date {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+}
+
+.session-details {
+    margin-top: 8px;
+}
+
+.session-info {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+    margin-bottom: 8px;
+}
+
+.unpaid-title {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--color-text-danger);
+}
+
+.unpaid-player {
+    font-size: 14px;
+    color: var(--color-text-primary);
+}
+
+.no-unpaid {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+}
+
+.player-balance {
+    font-size: 14px;
+    color: var(--color-text-primary);
+    margin-bottom: 4px;
+}
+
+.more-players-info {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+}
+
+.no-players {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+}
+
+/* ── Bootstrap overrides ──────────────────────────────────────────────────── */
+
+.card {
+    background-color: var(--color-background-primary);
+    border: 0.5px solid var(--color-border-tertiary);
+    border-radius: var(--border-radius-lg);
+}
+
+.card-header {
+    background-color: var(--color-background-primary);
+    border-bottom: 0.5px solid var(--color-border-tertiary);
+}
+
+.list-group-item {
+    background-color: var(--color-background-primary);
+    border-color: var(--color-border-tertiary);
+    color: var(--color-text-primary);
+}
+
+.list-group-item.active {
+    background-color: var(--color-background-info);
+    border-color: var(--color-border-info);
+    color: var(--color-text-info);
+}
+
+.table {
+    color: var(--color-text-primary);
+    border-color: var(--color-border-tertiary);
+}
+
+.table-striped > tbody > tr:nth-of-type(odd) > * {
+    background-color: var(--color-background-secondary);
+    color: var(--color-text-primary);
+}
+
+.modal-content {
+    background-color: var(--color-background-primary);
+    border: 0.5px solid var(--color-border-secondary);
+    border-radius: var(--border-radius-lg);
+}
+
+.modal-header,
+.modal-footer {
+    border-color: var(--color-border-tertiary);
+}
+
+.form-control,
+.form-select {
+    background-color: var(--color-background-primary);
+    border-color: var(--color-border-secondary);
+    color: var(--color-text-primary);
+}
+
+.form-control:focus,
+.form-select:focus {
+    background-color: var(--color-background-primary);
+    border-color: var(--color-border-info);
+    color: var(--color-text-primary);
+    box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.15);
+}
+
+.form-control::placeholder {
+    color: var(--color-text-tertiary);
+}
+
+.alert-danger {
+    background-color: var(--color-background-danger);
+    border-color: var(--color-border-danger);
+    color: var(--color-text-danger);
+}
+
+.alert-success {
+    background-color: var(--color-background-success);
+    border-color: var(--color-border-success);
+    color: var(--color-text-success);
+}
+
+.alert-info {
+    background-color: var(--color-background-info);
+    border-color: var(--color-border-info);
+    color: var(--color-text-info);
+}
+
+.accordion-item {
+    background-color: var(--color-background-primary);
+    border-color: var(--color-border-tertiary);
+}
+
+.accordion-button {
+    background-color: var(--color-background-primary);
+    color: var(--color-text-primary);
+}
+
+.accordion-button:not(.collapsed) {
+    background-color: var(--color-background-secondary);
+    color: var(--color-text-primary);
+    box-shadow: none;
+}
+
+.accordion-body {
+    background-color: var(--color-background-primary);
+}
+
+/* ── Calendar ─────────────────────────────────────────────────────────────── */
+
+.calendar-day.has-session {
+    background-color: var(--color-background-secondary);
 }
