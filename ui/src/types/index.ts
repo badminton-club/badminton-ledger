@@ -45,7 +45,6 @@ export interface SessionPlayer {
   cost: number;
   paid: boolean;
   comped?: boolean; // player settled directly with the owner — excluded from owner payout
-  highlighted: boolean;
 }
 
 export interface BirdieUsage {

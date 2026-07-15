@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { useAppSelector } from 'hooks';
 import { selectPlayerById } from '../../../features/players/playersSlice';
 import { selectIsClubAdmin } from '../../../features/club/clubSlice';
-import { togglePlayerHighlightStatus, togglePlayerPaidStatus, togglePlayerCompStatus } from '../../../services/firebase';
+import { togglePlayerPaidStatus, togglePlayerCompStatus } from '../../../services/firebase';
 import type { Session, SessionPlayer } from 'types';
 import type { RootState } from '../../../store';
 
@@ -37,8 +37,8 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
     () => session.players.filter(p => p.paid).reduce((s, p) => s + p.cost, 0),
     [session.players]
   );
-  const highlightedTotal = useMemo(
-    () => session.players.filter(p => p.highlighted).reduce((s, p) => s + p.cost, 0),
+  const compedTotal = useMemo(
+    () => session.players.filter(p => p.comped).reduce((s, p) => s + p.cost, 0),
     [session.players]
   );
   const totalBirds = session.birdieUsage?.reduce((s, u) => s + u.quantity, 0) ?? 0;
@@ -66,7 +66,6 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
             isAdmin={isAdmin}
             onTogglePaid={() => refresh(() => togglePlayerPaidStatus(session.id, player.id))}
             onToggleComp={() => refresh(() => togglePlayerCompStatus(session.id, player.id))}
-            onToggleHighlight={() => refresh(() => togglePlayerHighlightStatus(session.id, player.id))}
           />
         ))}
       </ListGroup>
@@ -81,8 +80,8 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
         <SummaryRow label="Total Paid"                    value={`$${paidTotal.toFixed(2)}`} />
         <SummaryRow label="Total Due"                     value={`$${(session.totalSessionCost - paidTotal).toFixed(2)}`} />
         <SummaryRow
-          label="Total Due (excl. highlighted)"
-          value={`$${(session.totalSessionCost - highlightedTotal).toFixed(2)}`}
+          label="Total Due (excl. comped players)"
+          value={`$${(session.totalSessionCost - compedTotal).toFixed(2)}`}
         />
       </div>
 
@@ -131,13 +130,12 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
 }
 
 function PlayerRow({
-  player, isAdmin, onTogglePaid, onToggleComp, onToggleHighlight,
+  player, isAdmin, onTogglePaid, onToggleComp
 }: {
   player:            SessionPlayer;
   isAdmin:           boolean;
   onTogglePaid:      () => void;
   onToggleComp:      () => void;
-  onToggleHighlight: () => void;
 }) {
   const stored = useAppSelector((s: RootState) => selectPlayerById(s, player.id));
   const name   = stored
@@ -148,7 +146,6 @@ function PlayerRow({
     <ListGroup.Item
       className="d-flex justify-content-between align-items-center"
       style={{
-        backgroundColor: player.highlighted ? '#fff3cd' : 'transparent',
         transition:      'background-color 0.2s',
       }}
     >
@@ -157,9 +154,7 @@ function PlayerRow({
         <span className={player.paid ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
         {isAdmin ? (
           <>
-            <Button size="sm" variant={player.highlighted ? 'warning' : 'outline-secondary'} onClick={onToggleHighlight}>
-              {player.highlighted ? '★' : '☆'}
-            </Button>
+
             <Button
               size="sm"
               variant="warning"

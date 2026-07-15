@@ -31,7 +31,7 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, onDa
         const selected = selectedDate && +selectedDate === +date;
         const allPaid =
             daySessions.length > 0 &&
-            daySessions.every((s) => s.players.length > 0 && s.players.every((p) => p.paid));
+            daySessions.every((s) => s.players.length > 0 && s.players.filter((p) => !p.paid && !p.comped).length === 0);
 
         cells.push(
             <DayCell

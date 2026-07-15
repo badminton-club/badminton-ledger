@@ -139,7 +139,7 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
       percentage: p.percentage,
       cost:       parseFloat((perUnit * p.percentage).toFixed(2)),
       paid:       false,
-      highlighted: false,
+      comped:     false,
     }));
   }, [confirmedPlayers, totalSessionCost]);
 

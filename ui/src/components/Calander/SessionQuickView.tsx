@@ -41,7 +41,7 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
 
     const session = sessions[Math.min(activeIndex, sessions.length - 1)];
     const totalPlayers = session.players.length;
-    const unpaidPlayers = session.players.filter((p) => !p.paid).length;
+    const unpaidPlayers = session.players.filter((p) => !p.paid && !p.comped).length;
     const totalBirds = session.birdieUsage.reduce((s, u) => s + u.quantity, 0);
     const allPaid = unpaidPlayers === 0 && totalPlayers > 0;
 
@@ -133,7 +133,7 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
             <p style={styles.sectionLabel}>Players</p>
             <div style={styles.playerList}>
                 {session.players.map((p) => (
-                    <PlayerRow key={p.id} playerId={p.id} cost={p.cost} paid={p.paid} highlighted={p.highlighted} />
+                    <PlayerRow key={p.id} playerId={p.id} cost={p.cost} paid={p.paid} comped={p.comped}/>
                 ))}
             </div>
         </div>
@@ -150,18 +150,18 @@ function StatCard({ label, value, sub, subColor }: { label: string; value: strin
     );
 }
 
-function PlayerRow({ playerId, cost, paid, highlighted }: { playerId: string; cost: number; paid: boolean; highlighted?: boolean }) {
+function PlayerRow({ playerId, cost, paid, comped }: { playerId: string; cost: number; paid: boolean; comped: boolean; }) {
     const player = useAppSelector((s: RootState) => selectPlayerById(s, playerId));
     const name = player ? [player.firstName, player.lastName].filter(Boolean).join(" ") : playerId;
 
     return (
-        <div style={{...styles.playerRow, background: highlighted ? "#fff3cd" : ""}}>
+        <div style={{...styles.playerRow}}>
             <div style={styles.playerAvatar}>{(player?.firstName?.[0] ?? "?").toUpperCase()}</div>
             <span style={styles.playerName}>{name}</span>
             <span
                 style={{
                     ...styles.playerCost,
-                    color: paid ? "var(--color-text-success)" : "var(--color-text-danger)",
+                    color: paid||comped ? "var(--color-text-success)": "var(--color-text-danger)",
                 }}
             >
                 ${cost.toFixed(2)}
@@ -169,11 +169,11 @@ function PlayerRow({ playerId, cost, paid, highlighted }: { playerId: string; co
             <span
                 style={{
                     ...styles.paidPill,
-                    background: paid ? "var(--color-background-success)" : "var(--color-background-danger)",
-                    color: paid ? "var(--color-text-success)" : "var(--color-text-danger)",
+                    background: paid ||comped  ? "var(--color-background-success)" : "var(--color-background-danger)",
+                    color: paid ||comped  ? "var(--color-text-success)" : "var(--color-text-danger)",
                 }}
             >
-                {paid ? "Paid" : "Unpaid"}
+                {paid ||comped ? "Paid" : "Unpaid"}
             </span>
         </div>
     );

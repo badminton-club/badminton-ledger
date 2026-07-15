@@ -445,25 +445,6 @@ export async function togglePlayerCompStatus(
   });
 }
 
-export async function togglePlayerHighlightStatus(
-  sessionId: string,
-  playerId: string
-): Promise<void> {
-  return serviceCall('togglePlayerHighlightStatus', async () => {
-    const sessionRef = doc(refs.sessions, sessionId);
-
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(sessionRef);
-      if (!snap.exists()) throw new Error(`Session ${sessionId} not found`);
-
-      const players = (snap.data().players as SessionPlayer[]).map(p =>
-        p.id === playerId ? { ...p, highlighted: !p.highlighted } : p
-      );
-      tx.update(sessionRef, { players });
-    });
-  });
-}
-
 // ─── Delete session ───────────────────────────────────────────────────────────
 
 /**
