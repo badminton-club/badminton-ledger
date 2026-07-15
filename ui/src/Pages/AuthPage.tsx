@@ -9,6 +9,8 @@ import {
   addClubToUser,
   removeClubFromUser,
   createClub,
+  fetchMemberPlayerId,
+  updatePlayerProfile,
 } from '../services/firebase';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import {
@@ -17,6 +19,8 @@ import {
   setClubs,
   setCurrentClub,
 } from '../features/club/clubSlice';
+import { selectPlayerById } from '../features/players/playersSlice';
+import type { RootState } from '../store';
 
 // Accepts a full club link (…?club=abc), a query fragment, or a raw club id.
 function parseClubId(input: string): string | null {
@@ -52,10 +56,55 @@ export default function AuthPage() {
   const [setupError, setSetupError] = useState('');
   const [setupDone, setSetupDone] = useState('');
 
+  const [linkedPlayerId, setLinkedPlayerId] = useState<string | null>(null);
+  const [pFirst, setPFirst] = useState('');
+  const [pLast, setPLast] = useState('');
+  const [pEmail, setPEmail] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState('');
+  const [profileSaved, setProfileSaved] = useState(false);
+
+  const player = useAppSelector((s: RootState) =>
+    linkedPlayerId ? selectPlayerById(s, linkedPlayerId) : undefined
+  );
+
   useEffect(() => {
     const unsubscribe = onAuthStateChangedListener(setUser);
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user || !currentClubId) { setLinkedPlayerId(null); return; }
+    let cancelled = false;
+    fetchMemberPlayerId(currentClubId, user.uid).then((pid) => { if (!cancelled) setLinkedPlayerId(pid); });
+    return () => { cancelled = true; };
+  }, [user, currentClubId]);
+
+  useEffect(() => {
+    if (player) {
+      setPFirst(player.firstName ?? '');
+      setPLast(player.lastName ?? '');
+      setPEmail(player.email ?? '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player?.id]);
+
+  const handleSaveProfile = async () => {
+    if (!linkedPlayerId) return;
+    const first = pFirst.trim();
+    if (!first) { setProfileError('First name is required.'); return; }
+    setProfileError('');
+    setProfileSaved(false);
+    setSavingProfile(true);
+    try {
+      await updatePlayerProfile(linkedPlayerId, { firstName: first, lastName: pLast.trim() || null, email: pEmail.trim() || null });
+      setProfileSaved(true);
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : 'Failed to save your details.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   const refreshClubs = async (uid: string) => {
     dispatch(setClubs(await fetchUserClubs(uid)));
@@ -236,6 +285,34 @@ export default function AuthPage() {
               </Button>
             </InputGroup>
             {clubError && <Alert variant="danger" className="mt-2 mb-0 py-2">{clubError}</Alert>}
+          </Card.Body>
+        </Card>
+      )}
+
+      {user && linkedPlayerId && (
+        <Card className="mt-3">
+          <Card.Body>
+            <Card.Title>My details</Card.Title>
+            <Card.Text className="text-muted">
+              Your player details for {clubs.find((c) => c.id === currentClubId)?.name ?? 'this club'}.
+            </Card.Text>
+            <Form.Group className="mb-2">
+              <Form.Label>First name</Form.Label>
+              <Form.Control value={pFirst} onChange={(e) => setPFirst(e.target.value)} disabled={savingProfile} />
+            </Form.Group>
+            <Form.Group className="mb-2">
+              <Form.Label>Last name</Form.Label>
+              <Form.Control value={pLast} onChange={(e) => setPLast(e.target.value)} disabled={savingProfile} />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label>Email</Form.Label>
+              <Form.Control type="email" value={pEmail} onChange={(e) => setPEmail(e.target.value)} disabled={savingProfile} />
+            </Form.Group>
+            <Button variant="primary" onClick={handleSaveProfile} disabled={savingProfile || !pFirst.trim()}>
+              {savingProfile ? <Spinner size="sm" animation="border" /> : 'Save details'}
+            </Button>
+            {profileSaved && <span className="text-success small ms-2">Saved.</span>}
+            {profileError && <Alert variant="danger" className="mt-2 mb-0 py-2">{profileError}</Alert>}
           </Card.Body>
         </Card>
       )}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Container, Card, Table, Spinner, Alert, Badge, Tabs, Tab, Form, Button, Row, Col } from 'react-bootstrap';
+import { Container, Card, Table, Spinner, Alert, Badge, Tabs, Tab, Form, Button, Row, Col, Modal, ListGroup } from 'react-bootstrap';
 import { format } from 'date-fns';
-import { fetchMemberPlayerId, fetchPlayerLedger, fetchMyLinkRequest, submitLinkRequest, fetchSessions, updatePlayerProfile } from '../services/firebase';
+import { fetchMemberPlayerId, fetchPlayerLedger, fetchMyLinkRequest, submitLinkRequest, fetchSessions } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { toJSDate } from '../services/firebase/utils';
 import { useAppSelector } from '../hooks';
@@ -37,12 +37,7 @@ export default function AttendancePage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  const [pFirst, setPFirst] = useState('');
-  const [pLast, setPLast] = useState('');
-  const [pEmail, setPEmail] = useState('');
-  const [savingProfile, setSavingProfile] = useState(false);
-  const [profileError, setProfileError] = useState('');
-  const [profileSaved, setProfileSaved] = useState(false);
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
 
   const player = useAppSelector((s: RootState) =>
     playerId ? selectPlayerById(s, playerId) : undefined
@@ -97,33 +92,6 @@ export default function AttendancePage() {
       setSubmitError(err instanceof Error ? err.message : 'Failed to send request.');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  // Populate the edit-my-details form when the linked player first loads.
-  useEffect(() => {
-    if (player) {
-      setPFirst(player.firstName ?? '');
-      setPLast(player.lastName ?? '');
-      setPEmail(player.email ?? '');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player?.id]);
-
-  const handleSaveProfile = async () => {
-    if (!playerId) return;
-    const first = pFirst.trim();
-    if (!first) { setProfileError('First name is required.'); return; }
-    setProfileError('');
-    setProfileSaved(false);
-    setSavingProfile(true);
-    try {
-      await updatePlayerProfile(playerId, { firstName: first, lastName: pLast.trim() || null, email: pEmail.trim() || null });
-      setProfileSaved(true);
-    } catch (err) {
-      setProfileError(err instanceof Error ? err.message : 'Failed to save your details.');
-    } finally {
-      setSavingProfile(false);
     }
   };
 
@@ -194,35 +162,6 @@ export default function AttendancePage() {
             </Card.Body>
           </Card>
 
-          <Card className="mb-3">
-            <Card.Body>
-              <Card.Title className="h6">My details</Card.Title>
-              <Row>
-                <Col sm={6}>
-                  <Form.Group className="mb-2">
-                    <Form.Label>First name</Form.Label>
-                    <Form.Control value={pFirst} onChange={(e) => setPFirst(e.target.value)} disabled={savingProfile} />
-                  </Form.Group>
-                </Col>
-                <Col sm={6}>
-                  <Form.Group className="mb-2">
-                    <Form.Label>Last name</Form.Label>
-                    <Form.Control value={pLast} onChange={(e) => setPLast(e.target.value)} disabled={savingProfile} />
-                  </Form.Group>
-                </Col>
-              </Row>
-              <Form.Group className="mb-2">
-                <Form.Label>Email</Form.Label>
-                <Form.Control type="email" value={pEmail} onChange={(e) => setPEmail(e.target.value)} disabled={savingProfile} />
-              </Form.Group>
-              <Button variant="primary" size="sm" onClick={handleSaveProfile} disabled={savingProfile || !pFirst.trim()}>
-                {savingProfile ? <Spinner size="sm" animation="border" /> : 'Save details'}
-              </Button>
-              {profileSaved && <span className="text-success small ms-2">Saved.</span>}
-              {profileError && <Alert variant="danger" className="mt-2 mb-0 py-2">{profileError}</Alert>}
-            </Card.Body>
-          </Card>
-
           <Tabs defaultActiveKey="sessions" className="mb-3">
             <Tab eventKey="sessions" title="Sessions attended">
               {attended.length === 0 ? (
@@ -242,7 +181,7 @@ export default function AttendancePage() {
                           ? { label: 'Paid', bg: 'success' }
                           : { label: 'Unpaid', bg: 'danger' };
                       return (
-                        <tr key={s.id}>
+                        <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedSession(s)}>
                           <td>{d ? format(d, 'MMM d, yyyy') : '—'}</td>
                           <td>{money(sp?.cost ?? 0)}</td>
                           <td className="text-end"><Badge bg={status.bg}>{status.label}</Badge></td>
@@ -287,6 +226,48 @@ export default function AttendancePage() {
           </Tabs>
         </>
       )}
+
+      <Modal show={!!selectedSession} onHide={() => setSelectedSession(null)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>
+            {(() => {
+              const d = selectedSession ? toJSDate(selectedSession.date) : null;
+              return d ? format(d, 'MMMM d, yyyy') : 'Session';
+            })()}
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {selectedSession && (() => {
+            const sp = (selectedSession.players ?? []).find((p) => p.id === playerId);
+            const numPlayers = selectedSession.players?.length ?? 0;
+            const courtCost = selectedSession.totalCourtCost ?? 0;
+            const birdieCost = selectedSession.totalBirdieCost ?? 0;
+            const total = selectedSession.totalSessionCost ?? courtCost + birdieCost;
+            const perPlayer = numPlayers ? total / numPlayers : 0;
+            return (
+              <ListGroup variant="flush">
+                <ListGroup.Item className="d-flex justify-content-between"><span>Court cost</span><span>{money(courtCost)}</span></ListGroup.Item>
+                {birdieCost > 0 && (
+                  <ListGroup.Item className="d-flex justify-content-between"><span>Birdie cost</span><span>{money(birdieCost)}</span></ListGroup.Item>
+                )}
+                <ListGroup.Item className="d-flex justify-content-between fw-bold"><span>Total session cost</span><span>{money(total)}</span></ListGroup.Item>
+                <ListGroup.Item className="d-flex justify-content-between"><span>Players</span><span>{numPlayers}</span></ListGroup.Item>
+                <ListGroup.Item className="d-flex justify-content-between"><span>Split per player</span><span>{money(perPlayer)}</span></ListGroup.Item>
+                <ListGroup.Item className="d-flex justify-content-between fw-bold">
+                  <span>You owe</span>
+                  <span>
+                    {money(sp?.cost ?? 0)}{' '}
+                    {sp?.comped ? <Badge bg="warning">Comped</Badge> : sp?.paid ? <Badge bg="success">Paid</Badge> : <Badge bg="danger">Unpaid</Badge>}
+                  </span>
+                </ListGroup.Item>
+              </ListGroup>
+            );
+          })()}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setSelectedSession(null)}>Close</Button>
+        </Modal.Footer>
+      </Modal>
     </Container>
   );
 }
