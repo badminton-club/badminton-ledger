@@ -6,6 +6,7 @@ import {
   fetchUserClubs,
   fetchUserProfile,
   fetchMemberRole,
+  fetchClub,
   addClubToUser,
   setLastVisitedClub,
 } from '../../services/firebase';
@@ -14,6 +15,7 @@ import {
   setClubs,
   setCurrentClub,
   setRole,
+  setBirdiesEnabled,
   setReady,
   resetClub,
   selectCurrentClubId,
@@ -82,6 +84,7 @@ export function useClubBootstrap(): void {
     setCurrentClubId(currentClubId);
     if (!currentClubId) {
       dispatch(setRole(null));
+      dispatch(setBirdiesEnabled(true));
       return;
     }
     localStorage.setItem(LS_KEY, currentClubId);
@@ -89,5 +92,6 @@ export function useClubBootstrap(): void {
     if (!user) return;
     setLastVisitedClub(user.uid, currentClubId).catch(() => { /* ignore */ });
     fetchMemberRole(currentClubId, user.uid).then((role) => dispatch(setRole(role)));
+    fetchClub(currentClubId).then((club) => dispatch(setBirdiesEnabled(club?.birdiesEnabled !== false)));
   }, [currentClubId, dispatch]);
 }

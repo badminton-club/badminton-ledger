@@ -7,6 +7,7 @@ import {
     selectCurrentClub,
     selectCurrentClubId,
     selectClubRole,
+    selectBirdiesEnabled,
     setCurrentClub,
 } from "../features/club/clubSlice";
 
@@ -16,6 +17,7 @@ export default function AppNavbar() {
     const currentClub = useAppSelector(selectCurrentClub);
     const currentClubId = useAppSelector(selectCurrentClubId);
     const role = useAppSelector(selectClubRole);
+    const birdiesEnabled = useAppSelector(selectBirdiesEnabled);
     const isAdmin = role === "admin";
 
     return (
@@ -52,9 +54,11 @@ export default function AppNavbar() {
                     <Nav className="ms-auto">
                         {isAdmin && (
                             <>
-                                <Nav.Link as={Link} to="/birdies">
-                                    Birdies
-                                </Nav.Link>
+                                {birdiesEnabled && (
+                                    <Nav.Link as={Link} to="/birdies">
+                                        Birdies
+                                    </Nav.Link>
+                                )}
                                 <Nav.Link as={Link} to="/credits">
                                     Credits
                                 </Nav.Link>

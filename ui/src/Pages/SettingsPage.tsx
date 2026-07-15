@@ -1,13 +1,26 @@
 import React, { useState } from 'react';
-import { Container, Card, Button, Form, Alert, Spinner, ListGroup } from 'react-bootstrap';
+import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup } from 'react-bootstrap';
 import { clearAllData, exportAllData, restoreAllData, CLEARABLE_COLLECTIONS, type ClearSummary, type BackupData } from '../services/firebase/admin';
-import { useAppSelector } from '../hooks';
-import { selectIsClubAdmin } from '../features/club/clubSlice';
+import { addClubMember, setClubBirdiesEnabled, deleteClub, fetchUserClubs } from '../services/firebase';
+import { auth } from '../services/firebase/client';
+import { useAppDispatch, useAppSelector } from '../hooks';
+import {
+  selectIsClubAdmin,
+  selectCurrentClubId,
+  selectBirdiesEnabled,
+  setBirdiesEnabled,
+  setClubs,
+  setCurrentClub,
+} from '../features/club/clubSlice';
 
 const CONFIRM_PHRASE = 'CLEAR ALL DATA';
 
 export default function SettingsPage() {
+  const dispatch = useAppDispatch();
   const isAdmin = useAppSelector(selectIsClubAdmin);
+  const clubId = useAppSelector(selectCurrentClubId);
+  const birdiesEnabled = useAppSelector(selectBirdiesEnabled);
+  const uid = auth.currentUser?.uid ?? null;
   const checkingAdmin = false;
   const [confirmText, setConfirmText] = useState('');
   const [clearing, setClearing] = useState(false);
@@ -17,6 +30,69 @@ export default function SettingsPage() {
   const [restoring, setRestoring] = useState(false);
   const [restoreResult, setRestoreResult] = useState<ClearSummary | null>(null);
   const [ioError, setIoError] = useState('');
+
+  const [newAdminUid, setNewAdminUid] = useState('');
+  const [addingAdmin, setAddingAdmin] = useState(false);
+  const [adminMsg, setAdminMsg] = useState('');
+  const [adminError, setAdminError] = useState('');
+
+  const [togglingBirdies, setTogglingBirdies] = useState(false);
+  const [birdiesError, setBirdiesError] = useState('');
+
+  const [deleteClubText, setDeleteClubText] = useState('');
+  const [deletingClub, setDeletingClub] = useState(false);
+  const [deleteClubError, setDeleteClubError] = useState('');
+
+  const handleAddAdmin = async () => {
+    if (!clubId) return;
+    setAdminError('');
+    setAdminMsg('');
+    const target = newAdminUid.trim();
+    if (!target) { setAdminError('Enter a user ID.'); return; }
+    setAddingAdmin(true);
+    try {
+      await addClubMember(clubId, target, 'admin');
+      setAdminMsg(`Added ${target} as an admin.`);
+      setNewAdminUid('');
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : 'Failed to add admin.');
+    } finally {
+      setAddingAdmin(false);
+    }
+  };
+
+  const handleToggleBirdies = async () => {
+    if (!clubId) return;
+    setBirdiesError('');
+    setTogglingBirdies(true);
+    const next = !birdiesEnabled;
+    try {
+      await setClubBirdiesEnabled(clubId, next);
+      dispatch(setBirdiesEnabled(next));
+    } catch (err) {
+      setBirdiesError(err instanceof Error ? err.message : 'Failed to update the Birdies setting.');
+    } finally {
+      setTogglingBirdies(false);
+    }
+  };
+
+  const handleDeleteClub = async () => {
+    if (!clubId || !uid || deleteClubText !== clubId) return;
+    if (!window.confirm(`Permanently delete the club "${clubId}"? This cannot be undone.`)) return;
+    setDeleteClubError('');
+    setDeletingClub(true);
+    try {
+      await deleteClub(clubId, uid);
+      const next = await fetchUserClubs(uid);
+      dispatch(setClubs(next));
+      dispatch(setCurrentClub(next[0]?.id ?? null));
+      setDeleteClubText('');
+    } catch (err) {
+      setDeleteClubError(err instanceof Error ? err.message : 'Failed to delete club.');
+    } finally {
+      setDeletingClub(false);
+    }
+  };
 
   const handleClear = async () => {
     setError('');
@@ -150,6 +226,42 @@ export default function SettingsPage() {
         </Card.Body>
       </Card>
 
+      <Card className="mt-3">
+        <Card.Header>Club settings</Card.Header>
+        <Card.Body>
+          <Form.Check
+            type="switch"
+            id="birdies-toggle"
+            label="Show the Birdies tab"
+            checked={birdiesEnabled}
+            disabled={togglingBirdies || !clubId}
+            onChange={handleToggleBirdies}
+          />
+          {birdiesError && <Alert variant="danger" className="mt-2 mb-0 py-2">{birdiesError}</Alert>}
+
+          <hr />
+
+          <Card.Title className="h6">Add an admin</Card.Title>
+          <Card.Text className="text-muted">
+            Enter a user's ID (they can find it on their Account page after signing in). They'll get
+            full admin access to this club.
+          </Card.Text>
+          <InputGroup>
+            <Form.Control
+              placeholder="User ID"
+              value={newAdminUid}
+              onChange={(e) => setNewAdminUid(e.target.value)}
+              disabled={addingAdmin}
+            />
+            <Button variant="primary" onClick={handleAddAdmin} disabled={addingAdmin || !newAdminUid.trim()}>
+              {addingAdmin ? <Spinner size="sm" animation="border" /> : 'Add admin'}
+            </Button>
+          </InputGroup>
+          {adminMsg && <Alert variant="success" className="mt-2 mb-0 py-2">{adminMsg}</Alert>}
+          {adminError && <Alert variant="danger" className="mt-2 mb-0 py-2">{adminError}</Alert>}
+        </Card.Body>
+      </Card>
+
       <Card border="danger" className="mt-3">
         <Card.Header className="bg-danger text-white">Danger zone</Card.Header>
         <Card.Body>
@@ -208,6 +320,43 @@ export default function SettingsPage() {
                   </li>
                 ))}
               </ul>
+            </Alert>
+          )}
+        </Card.Body>
+      </Card>
+
+      <Card border="danger" className="mt-3">
+        <Card.Header className="bg-danger text-white">Delete this club</Card.Header>
+        <Card.Body>
+          <Card.Text>
+            Permanently deletes this club and its membership roster. Only allowed once every data
+            collection above is empty — use <strong>Clear all data</strong> first. Type the club id{' '}
+            <strong>{clubId}</strong> to confirm.
+          </Card.Text>
+          <Form.Control
+            className="mb-3"
+            value={deleteClubText}
+            onChange={(e) => setDeleteClubText(e.target.value)}
+            placeholder={clubId ?? ''}
+            disabled={deletingClub}
+          />
+          <Button
+            variant="danger"
+            onClick={handleDeleteClub}
+            disabled={deletingClub || !clubId || deleteClubText !== clubId}
+          >
+            {deletingClub ? (
+              <>
+                <Spinner as="span" animation="border" size="sm" className="me-2" />
+                Deleting…
+              </>
+            ) : (
+              'Delete club'
+            )}
+          </Button>
+          {deleteClubError && (
+            <Alert variant="danger" className="mt-3">
+              {deleteClubError}
             </Alert>
           )}
         </Card.Body>

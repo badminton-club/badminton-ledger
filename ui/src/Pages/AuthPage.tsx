@@ -8,7 +8,7 @@ import {
   fetchUserClubs,
   addClubToUser,
   removeClubFromUser,
-  setUpClubFromExistingData,
+  createClub,
 } from '../services/firebase';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import {
@@ -116,7 +116,7 @@ export default function AuthPage() {
     }
   };
 
-  const handleCreateClub = async () => {
+  const handleCreateEmptyClub = async () => {
     if (!user) return;
     setSetupError('');
     setSetupDone('');
@@ -126,11 +126,10 @@ export default function AuthPage() {
 
     setSetupBusy(true);
     try {
-      const summary = await setUpClubFromExistingData(clubId, name, user.uid);
-      const copied = Object.values(summary).reduce((s, n) => s + n, 0);
+      await createClub(clubId, name, user.uid);
       dispatch(setClubs(await fetchUserClubs(user.uid)));
       dispatch(setCurrentClub(clubId));
-      setSetupDone(`Created "${name}" and imported ${copied} existing records.`);
+      setSetupDone(`Created "${name}". It's empty and ready to use.`);
     } catch (err) {
       setSetupError(err instanceof Error ? err.message : 'Failed to create club.');
     } finally {
@@ -147,6 +146,10 @@ export default function AuthPage() {
             <>
               <p className="mb-3">
                 Signed in as <strong>{user.displayName || user.email}</strong>
+              </p>
+              <p className="text-muted small mb-3">
+                Your user ID (share this with a club admin so they can add you):<br />
+                <code>{user.uid}</code>
               </p>
               <Button variant="outline-secondary" onClick={handleSignOut}>
                 Sign out
@@ -240,25 +243,24 @@ export default function AuthPage() {
       {user && (
         <Card className="mt-3">
           <Card.Body>
-            <Card.Title>Set up a new club</Card.Title>
+            <Card.Title>Create a new club</Card.Title>
             <Card.Text className="text-muted">
-              Creates a club, makes you its admin, and imports the existing (pre-club) data into it.
-              Run this once for your existing data.
+              Makes a new, empty club and adds you as its admin.
             </Card.Text>
             <Form.Label>Club name</Form.Label>
-            <InputGroup>
-              <Form.Control
-                value={setupName}
-                onChange={(e) => setSetupName(e.target.value)}
-                disabled={setupBusy}
-              />
-              <Button variant="success" onClick={handleCreateClub} disabled={setupBusy || !setupName.trim()}>
-                {setupBusy ? <Spinner size="sm" animation="border" /> : 'Create & import'}
-              </Button>
-            </InputGroup>
+            <Form.Control
+              value={setupName}
+              onChange={(e) => setSetupName(e.target.value)}
+              disabled={setupBusy}
+            />
             {setupName.trim() && (
               <Form.Text className="text-muted">Club id: {slugify(setupName) || '—'}</Form.Text>
             )}
+            <div className="d-flex gap-2 mt-2">
+              <Button variant="success" onClick={handleCreateEmptyClub} disabled={setupBusy || !setupName.trim()}>
+                {setupBusy ? <Spinner size="sm" animation="border" /> : 'Create new club'}
+              </Button>
+            </div>
             {setupDone && <Alert variant="success" className="mt-2 mb-0 py-2">{setupDone}</Alert>}
             {setupError && <Alert variant="danger" className="mt-2 mb-0 py-2">{setupError}</Alert>}
           </Card.Body>

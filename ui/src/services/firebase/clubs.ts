@@ -1,16 +1,40 @@
 import {
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
+  writeBatch,
   arrayUnion,
   arrayRemove,
   serverTimestamp,
 } from 'firebase/firestore';
-import { userDoc, clubDoc, memberDoc } from './client';
+import {
+  db,
+  userDoc,
+  clubDoc,
+  memberDoc,
+  membersRef,
+  clubCollection,
+  CLUB_DATA_COLLECTIONS,
+} from './client';
 import { serviceCall } from './utils';
 import type { UserProfile, Club, ClubRole, UserClub } from 'types';
 
 const EMPTY_PROFILE: UserProfile = { clubs: [], lastVisitedClub: null };
+
+/**
+ * Creates a brand-new, empty club: the club doc, the creator's admin membership,
+ * and saves it to their profile as the current club. No data is imported.
+ * `ownerUid` lets the Firestore rules bootstrap the first admin.
+ */
+export async function createClub(clubId: string, name: string, uid: string): Promise<void> {
+  return serviceCall('createClub', async () => {
+    await setDoc(clubDoc(clubId), { name, ownerUid: uid, createdAt: serverTimestamp() }, { merge: true });
+    await setDoc(memberDoc(clubId, uid), { role: 'admin', addedAt: serverTimestamp() }, { merge: true });
+    await setDoc(userDoc(uid), { clubs: arrayUnion(clubId), lastVisitedClub: clubId }, { merge: true });
+  });
+}
+
 
 /** Reads the user's global profile, creating an empty one on first sign-in. */
 export async function fetchUserProfile(uid: string): Promise<UserProfile> {
@@ -92,5 +116,43 @@ export async function setLastVisitedClub(uid: string, clubId: string): Promise<v
   return serviceCall('setLastVisitedClub', async () => {
     await fetchUserProfile(uid);
     await updateDoc(userDoc(uid), { lastVisitedClub: clubId });
+  });
+}
+
+/** Adds or updates a club member with the given role. Admin-only (enforced by rules). */
+export async function addClubMember(clubId: string, uid: string, role: ClubRole): Promise<void> {
+  return serviceCall('addClubMember', async () => {
+    await setDoc(memberDoc(clubId, uid), { role, addedAt: serverTimestamp() }, { merge: true });
+  });
+}
+
+/** Toggles whether the Birdies tab is shown for a club. */
+export async function setClubBirdiesEnabled(clubId: string, enabled: boolean): Promise<void> {
+  return serviceCall('setClubBirdiesEnabled', async () => {
+    await setDoc(clubDoc(clubId), { birdiesEnabled: enabled }, { merge: true });
+  });
+}
+
+/**
+ * Permanently deletes a club. Refuses unless every data subcollection is already
+ * empty (clear the data first). Removes the membership roster + club doc and drops
+ * the club from the caller's profile.
+ */
+export async function deleteClub(clubId: string, uid: string): Promise<void> {
+  return serviceCall('deleteClub', async () => {
+    for (const name of CLUB_DATA_COLLECTIONS) {
+      const snap = await getDocs(clubCollection(name, clubId));
+      if (!snap.empty) {
+        throw new Error(`Clear all club data first — "${name}" still has ${snap.size} document(s).`);
+      }
+    }
+
+    const members = await getDocs(membersRef(clubId));
+    const batch = writeBatch(db);
+    members.docs.forEach((d) => batch.delete(d.ref));
+    batch.delete(clubDoc(clubId));
+    await batch.commit();
+
+    await removeClubFromUser(uid, clubId);
   });
 }

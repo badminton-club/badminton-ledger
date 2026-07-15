@@ -195,6 +195,7 @@ export type ClubRole = 'admin' | 'member';
 export interface Club {
   id: string;
   name: string;
+  birdiesEnabled?: boolean;   // undefined = enabled (default); false = Birdies tab hidden
   createdAt?: Timestamp;
 }
 
