@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
 import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup } from 'react-bootstrap';
 import { clearAllData, exportAllData, restoreAllData, CLEARABLE_COLLECTIONS, type ClearSummary, type BackupData } from '../services/firebase/admin';
-import { addClubMember, setClubBirdiesEnabled, deleteClub, fetchUserClubs } from '../services/firebase';
+import { addClubMember, setClubTabEnabled, deleteClub, fetchUserClubs } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import {
   selectIsClubAdmin,
   selectCurrentClubId,
-  selectBirdiesEnabled,
-  setBirdiesEnabled,
+  selectDisabledTabs,
+  setDisabledTabs,
   setClubs,
   setCurrentClub,
 } from '../features/club/clubSlice';
+import { TOGGLEABLE_TABS } from '../features/club/tabs';
 
 const CONFIRM_PHRASE = 'CLEAR ALL DATA';
 
@@ -19,7 +20,7 @@ export default function SettingsPage() {
   const dispatch = useAppDispatch();
   const isAdmin = useAppSelector(selectIsClubAdmin);
   const clubId = useAppSelector(selectCurrentClubId);
-  const birdiesEnabled = useAppSelector(selectBirdiesEnabled);
+  const disabledTabs = useAppSelector(selectDisabledTabs);
   const uid = auth.currentUser?.uid ?? null;
   const checkingAdmin = false;
   const [confirmText, setConfirmText] = useState('');
@@ -36,8 +37,8 @@ export default function SettingsPage() {
   const [adminMsg, setAdminMsg] = useState('');
   const [adminError, setAdminError] = useState('');
 
-  const [togglingBirdies, setTogglingBirdies] = useState(false);
-  const [birdiesError, setBirdiesError] = useState('');
+  const [togglingTab, setTogglingTab] = useState<string | null>(null);
+  const [tabsError, setTabsError] = useState('');
 
   const [deleteClubText, setDeleteClubText] = useState('');
   const [deletingClub, setDeletingClub] = useState(false);
@@ -61,18 +62,20 @@ export default function SettingsPage() {
     }
   };
 
-  const handleToggleBirdies = async () => {
+  const handleToggleTab = async (tabKey: string, enabled: boolean) => {
     if (!clubId) return;
-    setBirdiesError('');
-    setTogglingBirdies(true);
-    const next = !birdiesEnabled;
+    setTabsError('');
+    setTogglingTab(tabKey);
     try {
-      await setClubBirdiesEnabled(clubId, next);
-      dispatch(setBirdiesEnabled(next));
+      await setClubTabEnabled(clubId, tabKey, enabled);
+      const next = enabled
+        ? disabledTabs.filter((k) => k !== tabKey)
+        : [...disabledTabs, tabKey];
+      dispatch(setDisabledTabs(next));
     } catch (err) {
-      setBirdiesError(err instanceof Error ? err.message : 'Failed to update the Birdies setting.');
+      setTabsError(err instanceof Error ? err.message : 'Failed to update the tab.');
     } finally {
-      setTogglingBirdies(false);
+      setTogglingTab(null);
     }
   };
 
@@ -174,7 +177,53 @@ export default function SettingsPage() {
 
   return (
     <Container className="mt-4" style={{ maxWidth: 640 }}>
-      <h3>Settings</h3>
+      <h3>Club settings</h3>
+      <p className="text-muted">Settings for the club you currently have open.</p>
+
+      <Card className="mt-3">
+        <Card.Header>Tabs</Card.Header>
+        <Card.Body>
+          <Card.Text className="text-muted">
+            Show or hide navbar tabs for this club. Settings, Account, and the calendar are always
+            available.
+          </Card.Text>
+          {TOGGLEABLE_TABS.map((t) => (
+            <Form.Check
+              key={t.key}
+              type="switch"
+              id={`tab-toggle-${t.key}`}
+              label={`Show the ${t.label} tab`}
+              checked={!disabledTabs.includes(t.key)}
+              disabled={togglingTab === t.key || !clubId}
+              onChange={(e) => handleToggleTab(t.key, e.target.checked)}
+            />
+          ))}
+          {tabsError && <Alert variant="danger" className="mt-2 mb-0 py-2">{tabsError}</Alert>}
+        </Card.Body>
+      </Card>
+
+      <Card className="mt-3">
+        <Card.Header>Admins</Card.Header>
+        <Card.Body>
+          <Card.Text className="text-muted">
+            Enter a user's ID (they can find it on their Account page after signing in). They'll get
+            full admin access to this club.
+          </Card.Text>
+          <InputGroup>
+            <Form.Control
+              placeholder="User ID"
+              value={newAdminUid}
+              onChange={(e) => setNewAdminUid(e.target.value)}
+              disabled={addingAdmin}
+            />
+            <Button variant="primary" onClick={handleAddAdmin} disabled={addingAdmin || !newAdminUid.trim()}>
+              {addingAdmin ? <Spinner size="sm" animation="border" /> : 'Add admin'}
+            </Button>
+          </InputGroup>
+          {adminMsg && <Alert variant="success" className="mt-2 mb-0 py-2">{adminMsg}</Alert>}
+          {adminError && <Alert variant="danger" className="mt-2 mb-0 py-2">{adminError}</Alert>}
+        </Card.Body>
+      </Card>
 
       <Card className="mt-3">
         <Card.Header>Backup &amp; restore</Card.Header>
@@ -223,42 +272,6 @@ export default function SettingsPage() {
               </ul>
             </Alert>
           )}
-        </Card.Body>
-      </Card>
-
-      <Card className="mt-3">
-        <Card.Header>Club settings</Card.Header>
-        <Card.Body>
-          <Form.Check
-            type="switch"
-            id="birdies-toggle"
-            label="Show the Birdies tab"
-            checked={birdiesEnabled}
-            disabled={togglingBirdies || !clubId}
-            onChange={handleToggleBirdies}
-          />
-          {birdiesError && <Alert variant="danger" className="mt-2 mb-0 py-2">{birdiesError}</Alert>}
-
-          <hr />
-
-          <Card.Title className="h6">Add an admin</Card.Title>
-          <Card.Text className="text-muted">
-            Enter a user's ID (they can find it on their Account page after signing in). They'll get
-            full admin access to this club.
-          </Card.Text>
-          <InputGroup>
-            <Form.Control
-              placeholder="User ID"
-              value={newAdminUid}
-              onChange={(e) => setNewAdminUid(e.target.value)}
-              disabled={addingAdmin}
-            />
-            <Button variant="primary" onClick={handleAddAdmin} disabled={addingAdmin || !newAdminUid.trim()}>
-              {addingAdmin ? <Spinner size="sm" animation="border" /> : 'Add admin'}
-            </Button>
-          </InputGroup>
-          {adminMsg && <Alert variant="success" className="mt-2 mb-0 py-2">{adminMsg}</Alert>}
-          {adminError && <Alert variant="danger" className="mt-2 mb-0 py-2">{adminError}</Alert>}
         </Card.Body>
       </Card>
 

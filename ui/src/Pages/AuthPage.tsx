@@ -148,7 +148,7 @@ export default function AuthPage() {
                 Signed in as <strong>{user.displayName || user.email}</strong>
               </p>
               <p className="text-muted small mb-3">
-                Your user ID (share this with a club admin so they can add you):<br />
+                Your user ID:<br />
                 <code>{user.uid}</code>
               </p>
               <Button variant="outline-secondary" onClick={handleSignOut}>

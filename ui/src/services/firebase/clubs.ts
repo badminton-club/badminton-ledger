@@ -126,10 +126,14 @@ export async function addClubMember(clubId: string, uid: string, role: ClubRole)
   });
 }
 
-/** Toggles whether the Birdies tab is shown for a club. */
-export async function setClubBirdiesEnabled(clubId: string, enabled: boolean): Promise<void> {
-  return serviceCall('setClubBirdiesEnabled', async () => {
-    await setDoc(clubDoc(clubId), { birdiesEnabled: enabled }, { merge: true });
+/** Shows or hides a navbar tab for a club (admin-only, enforced by rules). */
+export async function setClubTabEnabled(clubId: string, tabKey: string, enabled: boolean): Promise<void> {
+  return serviceCall('setClubTabEnabled', async () => {
+    await setDoc(
+      clubDoc(clubId),
+      { disabledTabs: enabled ? arrayRemove(tabKey) : arrayUnion(tabKey) },
+      { merge: true }
+    );
   });
 }
 

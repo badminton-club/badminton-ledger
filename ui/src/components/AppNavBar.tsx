@@ -7,9 +7,10 @@ import {
     selectCurrentClub,
     selectCurrentClubId,
     selectClubRole,
-    selectBirdiesEnabled,
+    selectDisabledTabs,
     setCurrentClub,
 } from "../features/club/clubSlice";
+import { TOGGLEABLE_TABS } from "../features/club/tabs";
 
 export default function AppNavbar() {
     const dispatch = useAppDispatch();
@@ -17,7 +18,7 @@ export default function AppNavbar() {
     const currentClub = useAppSelector(selectCurrentClub);
     const currentClubId = useAppSelector(selectCurrentClubId);
     const role = useAppSelector(selectClubRole);
-    const birdiesEnabled = useAppSelector(selectBirdiesEnabled);
+    const disabledTabs = useAppSelector(selectDisabledTabs);
     const isAdmin = role === "admin";
 
     return (
@@ -54,20 +55,11 @@ export default function AppNavbar() {
                     <Nav className="ms-auto">
                         {isAdmin && (
                             <>
-                                {birdiesEnabled && (
-                                    <Nav.Link as={Link} to="/birdies">
-                                        Birdies
+                                {TOGGLEABLE_TABS.filter((t) => !disabledTabs.includes(t.key)).map((t) => (
+                                    <Nav.Link key={t.key} as={Link} to={t.path}>
+                                        {t.label}
                                     </Nav.Link>
-                                )}
-                                <Nav.Link as={Link} to="/credits">
-                                    Credits
-                                </Nav.Link>
-                                <Nav.Link as={Link} to="/players">
-                                    Players
-                                </Nav.Link>
-                                <Nav.Link as={Link} to="/payout">
-                                    Payout
-                                </Nav.Link>
+                                ))}
                                 <Nav.Link as={Link} to="/settings">
                                     Settings
                                 </Nav.Link>
