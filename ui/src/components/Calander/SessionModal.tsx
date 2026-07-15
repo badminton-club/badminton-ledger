@@ -60,10 +60,9 @@ export default function SessionModal({ show, onHide, session, onSessionUpdate, o
                 .filter(Boolean);
             const nameRegex = /^\s*\d+\s*\.\s*(.*)$/;
             const names = lines
-                .flatMap((l) => {
+                .map((l) => {
                     const m = l.match(nameRegex);
-                    if (m) return m[1].trim();
-                    return [];
+                    return m ? m[1].trim() : l;
                 })
                 .filter(Boolean);
 
