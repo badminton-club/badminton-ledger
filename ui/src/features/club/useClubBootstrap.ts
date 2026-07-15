@@ -16,6 +16,7 @@ import {
   setCurrentClub,
   setRole,
   setDisabledTabs,
+  setSignedIn,
   setReady,
   resetClub,
   selectCurrentClubId,
@@ -43,6 +44,8 @@ export function useClubBootstrap(): void {
         dispatch(resetClub());
         return;
       }
+
+      dispatch(setSignedIn(true));
 
       const clubParam = searchParams.get('club');
       if (clubParam) {
