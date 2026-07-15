@@ -316,7 +316,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <Container className="mt-4" style={{ maxWidth: 640 }}>
+    <Container className="mt-4" style={{ maxWidth: 900 }}>
       <h3>Club settings</h3>
       <p className="text-muted">Settings for the club you currently have open.</p>
 
@@ -431,8 +431,8 @@ export default function SettingsPage() {
             <ListGroup variant="flush">
               {members.map((m) => (
                 <ListGroup.Item key={m.uid} className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                  <span className="text-truncate" style={{ maxWidth: 180 }} title={m.uid}>
-                    <code>{m.uid.slice(0, 10)}…</code>
+                  <span title={m.uid} style={{ minWidth: 0 }}>
+                    <code style={{ wordBreak: 'break-all' }}>{m.uid}</code>
                     <Badge bg={m.role === 'member' ? 'secondary' : 'success'} className="ms-2">{m.role}</Badge>
                   </span>
                   <span className="d-flex align-items-center gap-2">
