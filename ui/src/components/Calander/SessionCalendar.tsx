@@ -7,6 +7,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { selectModalMode, setMode } from "../../features/SessionModal/sessionModalSlice";
+import { selectCurrentClubId } from "../../features/club/clubSlice";
 import { fetchSessions, fetchSessionById, addSession, editSession, deleteSession } from "../../services/firebase";
 import { getMonthYear, getNextMonth, getPrevMonth } from "../../utils/dateUtils";
 import type { Session } from "../../types";
@@ -25,6 +26,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
     const [showModal, setShowModal] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const modalMode = useAppSelector(selectModalMode);
+    const currentClubId = useAppSelector(selectCurrentClubId);
     const dispatch = useAppDispatch();
     const [searchParams, setSearchParams] = useSearchParams();
 
@@ -34,6 +36,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
     );
 
     const loadMonth = useCallback(async () => {
+        if (!currentClubId) return;
         setIsLoading(true);
         try {
             const result = await fetchSessions({
@@ -46,7 +49,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
         } finally {
             setIsLoading(false);
         }
-    }, [currentDate]);
+    }, [currentDate, currentClubId]);
 
     useEffect(() => {
         loadMonth();

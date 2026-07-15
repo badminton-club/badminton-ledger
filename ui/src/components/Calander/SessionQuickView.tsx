@@ -4,6 +4,7 @@ import { Button } from "react-bootstrap";
 import type { Session } from "../../types";
 import { useAppSelector } from "../../hooks";
 import { selectPlayerById } from "../../features/players/playersSlice";
+import { selectIsClubAdmin } from "../../features/club/clubSlice";
 import type { RootState } from "../../store";
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export default function SessionQuickView({ date, sessions, onAddSession, onOpenModal }: Props) {
+    const isAdmin = useAppSelector(selectIsClubAdmin);
     const [activeIndex, setActiveIndex] = React.useState(0);
     React.useEffect(() => {
         setActiveIndex(0);
@@ -24,9 +26,11 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
             <div style={styles.wrap}>
                 <div style={styles.header}>
                     <p style={styles.dateLabel}>{format(date, "EEEE, MMMM d")}</p>
-                    <Button size="sm" variant="primary" onClick={onAddSession}>
-                        + Add Session
-                    </Button>
+                    {isAdmin && (
+                        <Button size="sm" variant="primary" onClick={onAddSession}>
+                            + Add Session
+                        </Button>
+                    )}
                 </div>
                 <div style={styles.empty}>
                     <p style={styles.emptyText}>No session this day</p>
@@ -57,9 +61,11 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
                     </div>
                 </div>
                 <div className="d-flex gap-2">
-                    <Button size="sm" variant="primary" onClick={onAddSession}>
-                        + Add
-                    </Button>
+                    {isAdmin && (
+                        <Button size="sm" variant="primary" onClick={onAddSession}>
+                            + Add
+                        </Button>
+                    )}
                     <Button size="sm" variant="outline-secondary" onClick={() => onOpenModal(session)}>
                         View details
                     </Button>

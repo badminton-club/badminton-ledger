@@ -3,6 +3,7 @@ import { Alert, Button, Col, Form, ListGroup, Row } from 'react-bootstrap';
 import { format } from 'date-fns';
 import { useAppSelector } from 'hooks';
 import { selectPlayerById } from '../../../features/players/playersSlice';
+import { selectIsClubAdmin } from '../../../features/club/clubSlice';
 import { togglePlayerHighlightStatus, togglePlayerPaidStatus, togglePlayerCompStatus } from '../../../services/firebase';
 import type { Session, SessionPlayer } from 'types';
 import type { RootState } from '../../../store';
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export default function ExistingSessionView({ session, onSessionUpdate, onEdit, onDelete }: Props) {
+  const isAdmin = useAppSelector(selectIsClubAdmin);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteText, setDeleteText] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -61,6 +63,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
           <PlayerRow
             key={player.id}
             player={player}
+            isAdmin={isAdmin}
             onTogglePaid={() => refresh(() => togglePlayerPaidStatus(session.id, player.id))}
             onToggleComp={() => refresh(() => togglePlayerCompStatus(session.id, player.id))}
             onToggleHighlight={() => refresh(() => togglePlayerHighlightStatus(session.id, player.id))}
@@ -83,12 +86,14 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
         />
       </div>
 
-      <div className="d-flex justify-content-end mt-3 gap-2">
-        <Button variant="outline-danger" onClick={() => setConfirmingDelete(true)} disabled={confirmingDelete}>
-          Delete
-        </Button>
-        <Button variant="primary" onClick={onEdit}>Edit</Button>
-      </div>
+      {isAdmin && (
+        <div className="d-flex justify-content-end mt-3 gap-2">
+          <Button variant="outline-danger" onClick={() => setConfirmingDelete(true)} disabled={confirmingDelete}>
+            Delete
+          </Button>
+          <Button variant="primary" onClick={onEdit}>Edit</Button>
+        </div>
+      )}
 
       {confirmingDelete && (
         <div className="mt-3 p-3 border border-danger rounded">
@@ -126,9 +131,10 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
 }
 
 function PlayerRow({
-  player, onTogglePaid, onToggleComp, onToggleHighlight,
+  player, isAdmin, onTogglePaid, onToggleComp, onToggleHighlight,
 }: {
   player:            SessionPlayer;
+  isAdmin:           boolean;
   onTogglePaid:      () => void;
   onToggleComp:      () => void;
   onToggleHighlight: () => void;
@@ -149,25 +155,33 @@ function PlayerRow({
       <span>{name}</span>
       <div className="d-flex align-items-center gap-2">
         <span className={player.paid ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
-        <Button size="sm" variant={player.highlighted ? 'warning' : 'outline-secondary'} onClick={onToggleHighlight}>
-          {player.highlighted ? '★' : '☆'}
-        </Button>
-        <Button
-          size="sm"
-          variant="warning"
-          onClick={onToggleComp}
-          style={{
-            minWidth: 72,
-            backgroundColor: player.comped ? '#b8860b' : 'transparent',
-            borderColor: '#b8860b',
-            color: player.comped ? '#fff' : '#b8860b',
-          }}
-        >
-          {player.comped ? '✓ Comp' : 'Comp'}
-        </Button>
-        <Button size="sm" variant={player.paid ? 'success' : 'outline-secondary'} onClick={onTogglePaid} style={{ minWidth: 110 }}>
-          {player.paid ? '✓ Paid' : 'Mark as Paid'}
-        </Button>
+        {isAdmin ? (
+          <>
+            <Button size="sm" variant={player.highlighted ? 'warning' : 'outline-secondary'} onClick={onToggleHighlight}>
+              {player.highlighted ? '★' : '☆'}
+            </Button>
+            <Button
+              size="sm"
+              variant="warning"
+              onClick={onToggleComp}
+              style={{
+                minWidth: 72,
+                backgroundColor: player.comped ? '#b8860b' : 'transparent',
+                borderColor: '#b8860b',
+                color: player.comped ? '#fff' : '#b8860b',
+              }}
+            >
+              {player.comped ? '✓ Comp' : 'Comp'}
+            </Button>
+            <Button size="sm" variant={player.paid ? 'success' : 'outline-secondary'} onClick={onTogglePaid} style={{ minWidth: 110 }}>
+              {player.paid ? '✓ Paid' : 'Mark as Paid'}
+            </Button>
+          </>
+        ) : (
+          <span className={player.comped ? 'text-info' : player.paid ? 'text-success' : 'text-danger'}>
+            {player.comped ? 'Comped' : player.paid ? 'Paid' : 'Unpaid'}
+          </span>
+        )}
       </div>
     </ListGroup.Item>
   );

@@ -7,36 +7,91 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Canonical admin check: the user's UID has a document in `admins`.
-    function isAdmin() {
+    // ── Club membership helpers ─────────────────────────────────────────────────
+    function isMember(clubId) {
       return isSignedIn()
-        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+        && exists(/databases/$(database)/documents/clubs/$(clubId)/members/$(request.auth.uid));
+    }
+    function memberRole(clubId) {
+      return get(/databases/$(database)/documents/clubs/$(clubId)/members/$(request.auth.uid)).data.role;
+    }
+    function isClubAdmin(clubId) {
+      return isMember(clubId) && (memberRole(clubId) == 'admin' || memberRole(clubId) == 'superAdmin');
+    }
+    function isClubSuperAdmin(clubId) {
+      return isMember(clubId) && memberRole(clubId) == 'superAdmin';
+    }
+    // The player a member is linked to ('' when unlinked) — used so a member can read
+    // only their own balance-ledger entries.
+    function memberPlayerId(clubId) {
+      return get(/databases/$(database)/documents/clubs/$(clubId)/members/$(request.auth.uid)).data.get('playerId', '');
+    }
+    // Bootstrap: whoever created the club (its ownerUid) can grant themselves the
+    // first admin membership before any admin exists.
+    function isClubOwner(clubId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/clubs/$(clubId))
+        && get(/databases/$(database)/documents/clubs/$(clubId)).data.ownerUid == request.auth.uid;
     }
 
-    // ── Application data: admins only ──────────────────────────────────────────
-    match /sessions/{doc}              { allow read, write: if isAdmin(); }
-    match /players/{doc}               { allow read, write: if isAdmin(); }
-    match /birdieInventory/{doc}       { allow read, write: if isAdmin(); }
-    match /courtCredits/{doc}          { allow read, write: if isAdmin(); }
-    match /inventoryAdjustments/{doc}  { allow read, write: if isAdmin(); }
-    match /transactions/{doc}          { allow read, write: if isAdmin(); }
-    match /balanceLedger/{doc}         { allow read, write: if isAdmin(); }
-    match /archivedSessions/{doc}      { allow read, write: if isAdmin(); }
-    match /payouts/{doc}               { allow read, write: if isAdmin(); }
+    match /clubs/{clubId} {
+      allow read:   if isMember(clubId);
+      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isClubAdmin(clubId);
+      allow delete: if isClubSuperAdmin(clubId);
 
-    // ── Admin membership ───────────────────────────────────────────────────────
-    // Signed-in users may read (so the app can check their own admin status),
-    // but membership can only be changed from the Firebase console / a backend.
-    match /admins/{uid} {
-      allow read:  if isSignedIn();
-      allow write: if false;
+      // Membership roster. Only superadmins may create/change/remove elevated roles
+      // (admin/superAdmin). Regular admins may add plain members and edit any
+      // member's non-role fields (e.g. player links) — they just can't change roles.
+      match /members/{uid} {
+        allow read:   if isSignedIn() && (request.auth.uid == uid || isClubAdmin(clubId));
+        allow create: if isClubSuperAdmin(clubId)
+          || (request.auth.uid == uid && isClubOwner(clubId))
+          || (isClubAdmin(clubId) && request.resource.data.role == 'member');
+        allow update: if isClubSuperAdmin(clubId)
+          || (isClubAdmin(clubId) && request.resource.data.role == resource.data.role);
+        allow delete: if isClubSuperAdmin(clubId);
+      }
+
+      // Link requests: a user manages their own request; admins read/resolve any.
+      match /linkRequests/{uid} {
+        allow read:           if isSignedIn() && (request.auth.uid == uid || isClubAdmin(clubId));
+        allow create, update: if isSignedIn() && request.auth.uid == uid;
+        allow delete:         if isClubAdmin(clubId) || request.auth.uid == uid;
+      }
+
+      // Calendar data: any member may read; only admins may write.
+      match /sessions/{doc} { allow read: if isMember(clubId); allow write: if isClubAdmin(clubId); }
+      match /players/{doc} {
+        allow read:           if isMember(clubId);
+        allow create, delete: if isClubAdmin(clubId);
+        // Admins edit any player; a member may edit only their own linked player's
+        // name/email (never balance, sessionCount, etc.).
+        allow update: if isClubAdmin(clubId)
+          || (isMember(clubId) && doc == memberPlayerId(clubId)
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['firstName', 'firstNameLower', 'lastName', 'lastNameLower', 'email']));
+      }
+
+      // Financial / inventory data: admins only.
+      match /birdieInventory/{doc}       { allow read, write: if isClubAdmin(clubId); }
+      match /courtCredits/{doc}          { allow read, write: if isClubAdmin(clubId); }
+      match /inventoryAdjustments/{doc}  { allow read, write: if isClubAdmin(clubId); }
+      match /transactions/{doc}          { allow read, write: if isClubAdmin(clubId); }
+      // Members may read only their own linked player's ledger; admins read/write all.
+      match /balanceLedger/{doc} {
+        allow read: if isClubAdmin(clubId)
+          || (isMember(clubId) && resource.data.playerId == memberPlayerId(clubId));
+        allow write: if isClubAdmin(clubId);
+      }
+      match /archivedSessions/{doc}      { allow read, write: if isClubAdmin(clubId); }
+      match /payouts/{doc}               { allow read, write: if isClubAdmin(clubId); }
     }
 
     // ── User profiles ──────────────────────────────────────────────────────────
-    // A user can read their own profile; admins can read/write all profiles.
+    // Each user reads/writes only their own profile (their saved club list + default).
     match /users/{uid} {
-      allow read:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
-      allow write: if isAdmin();
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
     }
 
     // ── Deny everything else ───────────────────────────────────────────────────

@@ -4,8 +4,8 @@ import {
   createAsyncThunk,
   PayloadAction,
 } from '@reduxjs/toolkit';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
-import { db } from '../../services/firebase';
+import { query, orderBy, onSnapshot } from 'firebase/firestore';
+import { refs } from '../../services/firebase';
 import type { Player } from 'types';
 import type { RootState } from '../../store';
 
@@ -26,8 +26,9 @@ const initialState = playersAdapter.getInitialState<PlayersState>({
 export const subscribeToPlayers = createAsyncThunk(
   'players/subscribeToPlayers',
   async (_, { dispatch, signal }) => {
+    // refs.players resolves to the current club's players subcollection.
     const q = query(
-      collection(db, 'players'),
+      refs.players,
       orderBy('firstName'),
       orderBy('lastName')
     );

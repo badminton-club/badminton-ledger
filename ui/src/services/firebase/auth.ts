@@ -5,8 +5,8 @@ import {
   onAuthStateChanged,
   type User,
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from './client';
+import { getDoc } from 'firebase/firestore';
+import { auth, memberDoc } from './client';
 import { serviceCall } from './utils';
 
 /** Opens the Google sign-in popup and resolves with the signed-in user. */
@@ -31,24 +31,17 @@ export function onAuthStateChangedListener(
 }
 
 /**
- * Returns true if the given (or current) user is an admin: their UID exists in
- * the `admins` collection, or `users/{uid}` has `isAdmin: true` / `role: 'admin'`.
- * Never throws — resolves to false on any error so callers can gate UI safely.
+ * Returns true if the given (or current) user is an admin of the given club:
+ * `clubs/{clubId}/members/{uid}` exists with `role: 'admin'`. Never throws —
+ * resolves to false on any error so callers can gate UI safely.
  */
-export async function checkIfAdmin(uid?: string | null): Promise<boolean> {
+export async function checkIfAdmin(clubId: string | null, uid?: string | null): Promise<boolean> {
   const userId = uid ?? auth.currentUser?.uid ?? null;
-  if (!userId) return false;
+  if (!userId || !clubId) return false;
 
   try {
-    const adminSnap = await getDoc(doc(db, 'admins', userId));
-    if (adminSnap.exists()) return true;
-
-    const userSnap = await getDoc(doc(db, 'users', userId));
-    if (userSnap.exists()) {
-      const data = userSnap.data();
-      return data?.isAdmin === true || data?.role === 'admin';
-    }
-    return false;
+    const snap = await getDoc(memberDoc(clubId, userId));
+    return snap.exists() && snap.data().role === 'admin';
   } catch (err) {
     console.error('[checkIfAdmin]', err);
     return false;

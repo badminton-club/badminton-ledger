@@ -15,7 +15,7 @@ import { getMonthYear } from '../utils/dateUtils';
 import AddPlayerModal from '../components/AddPlayerModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { db, refs, togglePlayerPaidStatus, togglePlayerCompStatus } from '../services/firebase';
-import { addPlayer } from '../services/firebase/players';
+import { addPlayer, updatePlayerProfile } from '../services/firebase/players';
 import {
   collection, query, where, getDocs, orderBy,
   doc, runTransaction, increment, serverTimestamp, updateDoc, deleteDoc,
@@ -104,7 +104,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
     setLedgerError('');
     try {
       const q = query(
-        collection(db, 'balanceLedger'),
+        refs.balanceLedger,
         where('playerId', '==', playerId),
       );
       const snap = await getDocs(q);
@@ -221,7 +221,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
         if (!playerSnap.exists()) throw new Error('Player not found.');
         const before = playerSnap.data().balance ?? 0;
         tx.update(playerRef, { balance: increment(delta) });
-        tx.set(doc(collection(db, 'balanceLedger')), {
+        tx.set(doc(refs.balanceLedger), {
           playerId:      selectedPlayer.id,
           sessionId:     null,
           delta,
@@ -254,6 +254,39 @@ console.log("selectedPlayer ==> ", selectedPlayer);
       setDeleteError(err instanceof Error ? err.message : 'Failed to delete player.');
     } finally {
       setIsDeletingPlayer(false);
+    }
+  };
+
+  // Edit player details (name / email)
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [edFirst, setEdFirst] = useState('');
+  const [edLast, setEdLast] = useState('');
+  const [edEmail, setEdEmail] = useState('');
+  const [savingDetails, setSavingDetails] = useState(false);
+  const [detailsError, setDetailsError] = useState('');
+
+  const startEditDetails = () => {
+    if (!selectedPlayer) return;
+    setEdFirst(selectedPlayer.firstName ?? '');
+    setEdLast(selectedPlayer.lastName ?? '');
+    setEdEmail(selectedPlayer.email ?? '');
+    setDetailsError('');
+    setEditingDetails(true);
+  };
+
+  const handleSaveDetails = async () => {
+    if (!selectedPlayer) return;
+    const first = edFirst.trim();
+    if (!first) { setDetailsError('First name is required.'); return; }
+    setDetailsError('');
+    setSavingDetails(true);
+    try {
+      await updatePlayerProfile(selectedPlayer.id, { firstName: first, lastName: edLast.trim() || null, email: edEmail.trim() || null });
+      setEditingDetails(false);
+    } catch (err) {
+      setDetailsError(err instanceof Error ? err.message : 'Failed to save details.');
+    } finally {
+      setSavingDetails(false);
     }
   };
 
@@ -343,15 +376,51 @@ console.log("selectedPlayer ==> ", selectedPlayer);
               <Card className="mb-3">
                 <Card.Header className="d-flex justify-content-between align-items-center">
                   <h5 className="mb-0">{formatPlayerName(selectedPlayer)}</h5>
-                  <Button
-                    variant="outline-danger"
-                    size="sm"
-                    onClick={() => setShowDeleteConfirm(true)}
-                  >
-                    Remove Player
-                  </Button>
+                  <div className="d-flex gap-2">
+                    <Button variant="outline-secondary" size="sm" onClick={startEditDetails}>
+                      Edit
+                    </Button>
+                    <Button
+                      variant="outline-danger"
+                      size="sm"
+                      onClick={() => setShowDeleteConfirm(true)}
+                    >
+                      Remove Player
+                    </Button>
+                  </div>
                 </Card.Header>
                 <Card.Body>
+                  {editingDetails && (
+                    <div className="mb-3 p-3 border rounded">
+                      {detailsError && <Alert variant="danger" className="small py-1">{detailsError}</Alert>}
+                      <Row>
+                        <Col md={6}>
+                          <Form.Group className="mb-2">
+                            <Form.Label>First name</Form.Label>
+                            <Form.Control value={edFirst} onChange={(e) => setEdFirst(e.target.value)} disabled={savingDetails} />
+                          </Form.Group>
+                        </Col>
+                        <Col md={6}>
+                          <Form.Group className="mb-2">
+                            <Form.Label>Last name</Form.Label>
+                            <Form.Control value={edLast} onChange={(e) => setEdLast(e.target.value)} disabled={savingDetails} />
+                          </Form.Group>
+                        </Col>
+                      </Row>
+                      <Form.Group className="mb-2">
+                        <Form.Label>Email</Form.Label>
+                        <Form.Control type="email" value={edEmail} onChange={(e) => setEdEmail(e.target.value)} disabled={savingDetails} />
+                      </Form.Group>
+                      <div className="d-flex gap-2">
+                        <Button size="sm" variant="primary" onClick={handleSaveDetails} disabled={savingDetails || !edFirst.trim()}>
+                          {savingDetails ? <Spinner size="sm" animation="border" /> : 'Save'}
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => setEditingDetails(false)} disabled={savingDetails}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   <Row>
                     <Col md={6}>
                       <h5>Balance</h5>

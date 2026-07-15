@@ -2,16 +2,16 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Container, Card, Button, Table, Spinner, Alert, Row, Col, Form, Badge } from 'react-bootstrap';
 import { format } from 'date-fns';
 import { fetchOwnerPayoutSummary, payOwner } from '../services/firebase';
-import { onAuthStateChangedListener, checkIfAdmin } from '../services/firebase/auth';
 import { useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
+import { selectIsClubAdmin } from '../features/club/clubSlice';
 import type { OwnerPayoutSummary } from '../types';
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 
 export default function PayoutPage() {
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [checkingAdmin, setCheckingAdmin] = useState(true);
+  const isAdmin = useAppSelector(selectIsClubAdmin);
+  const checkingAdmin = false;
   const [summary, setSummary] = useState<OwnerPayoutSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -25,14 +25,6 @@ export default function PayoutPage() {
     const p = players.find((pl) => pl.id === id);
     return p ? `${p.firstName} ${p.lastName ?? ''}`.trim() : 'Unknown player';
   };
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChangedListener(async (user) => {
-      setIsAdmin(await checkIfAdmin(user?.uid ?? null));
-      setCheckingAdmin(false);
-    });
-    return () => unsubscribe();
-  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
