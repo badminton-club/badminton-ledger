@@ -19,7 +19,7 @@ export default function AppNavbar() {
     const currentClubId = useAppSelector(selectCurrentClubId);
     const role = useAppSelector(selectClubRole);
     const disabledTabs = useAppSelector(selectDisabledTabs);
-    const isAdmin = role === "admin";
+    const isAdmin = role === "admin" || role === "superAdmin";
 
     return (
         <Navbar bg="primary" variant="dark" expand="lg" sticky="top" style={{ marginBottom: 20, paddingBottom: 10 }}>

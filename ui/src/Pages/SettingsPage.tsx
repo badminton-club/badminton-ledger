@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup, Badge } from 'react-bootstrap';
 import { clearAllData, exportAllData, restoreAllData, CLEARABLE_COLLECTIONS, type ClearSummary, type BackupData } from '../services/firebase/admin';
-import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs } from '../services/firebase';
+import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
 import {
   selectIsClubAdmin,
+  selectIsClubSuperAdmin,
   selectCurrentClubId,
   selectDisabledTabs,
   setDisabledTabs,
@@ -14,13 +15,14 @@ import {
   setCurrentClub,
 } from '../features/club/clubSlice';
 import { TOGGLEABLE_TABS } from '../features/club/tabs';
-import type { ClubMember, ClubRole } from '../types';
+import type { ClubMember, ClubRole, LinkRequest } from '../types';
 
 const CONFIRM_PHRASE = 'CLEAR ALL DATA';
 
 export default function SettingsPage() {
   const dispatch = useAppDispatch();
   const isAdmin = useAppSelector(selectIsClubAdmin);
+  const isSuperAdmin = useAppSelector(selectIsClubSuperAdmin);
   const clubId = useAppSelector(selectCurrentClubId);
   const disabledTabs = useAppSelector(selectDisabledTabs);
   const players = useAppSelector(selectAllPlayers);
@@ -44,6 +46,12 @@ export default function SettingsPage() {
   const [assigningUid, setAssigningUid] = useState<string | null>(null);
   const [togglingTab, setTogglingTab] = useState<string | null>(null);
   const [tabsError, setTabsError] = useState('');
+
+  const [requests, setRequests] = useState<LinkRequest[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const [requestsError, setRequestsError] = useState('');
+  const [reqSel, setReqSel] = useState<Record<string, string>>({});
+  const [processingReq, setProcessingReq] = useState<string | null>(null);
 
   const [deleteClubText, setDeleteClubText] = useState('');
   const [deletingClub, setDeletingClub] = useState(false);
@@ -107,6 +115,82 @@ export default function SettingsPage() {
       setMembersError(err instanceof Error ? err.message : 'Failed to remove member.');
     } finally {
       setAssigningUid(null);
+    }
+  };
+
+  const loadRequests = useCallback(async () => {
+    if (!clubId) { setRequests([]); return; }
+    setRequestsLoading(true);
+    setRequestsError('');
+    try {
+      const reqs = await fetchLinkRequests(clubId);
+      setRequests(reqs);
+      // Auto-suggest a matching player by email, then by full name.
+      const suggestions: Record<string, string> = {};
+      reqs.forEach((r) => {
+        const match = players.find(
+          (p) =>
+            (!!p.email && !!r.email && p.email.toLowerCase() === r.email.toLowerCase()) ||
+            `${p.firstName} ${p.lastName ?? ''}`.trim().toLowerCase() === r.name.trim().toLowerCase()
+        );
+        if (match) suggestions[r.uid] = match.id;
+      });
+      setReqSel((prev) => ({ ...suggestions, ...prev }));
+    } catch (err) {
+      setRequestsError(err instanceof Error ? err.message : 'Failed to load requests.');
+    } finally {
+      setRequestsLoading(false);
+    }
+  }, [clubId, players]);
+
+  useEffect(() => { if (isAdmin && clubId) loadRequests(); }, [isAdmin, clubId, loadRequests]);
+
+  const handleApproveRequest = async (req: LinkRequest) => {
+    if (!clubId) return;
+    const pid = reqSel[req.uid];
+    if (!pid) { setRequestsError('Pick a player to link, or create a new one.'); return; }
+    setRequestsError('');
+    setProcessingReq(req.uid);
+    try {
+      await setMemberPlayer(clubId, req.uid, pid);
+      await deleteLinkRequest(clubId, req.uid);
+      await Promise.all([loadRequests(), loadMembers()]);
+    } catch (err) {
+      setRequestsError(err instanceof Error ? err.message : 'Failed to approve request.');
+    } finally {
+      setProcessingReq(null);
+    }
+  };
+
+  const handleCreateAndLink = async (req: LinkRequest) => {
+    if (!clubId) return;
+    setRequestsError('');
+    setProcessingReq(req.uid);
+    try {
+      const parts = req.name.trim().split(/\s+/);
+      const firstName = parts.shift() || req.name.trim();
+      const lastName = parts.join(' ') || null;
+      const playerId = await addPlayer({ firstName, lastName, email: req.email || null, balance: 0, description: '' });
+      await setMemberPlayer(clubId, req.uid, playerId);
+      await deleteLinkRequest(clubId, req.uid);
+      await Promise.all([loadRequests(), loadMembers()]);
+    } catch (err) {
+      setRequestsError(err instanceof Error ? err.message : 'Failed to create player.');
+    } finally {
+      setProcessingReq(null);
+    }
+  };
+
+  const handleDismissRequest = async (req: LinkRequest) => {
+    if (!clubId) return;
+    setProcessingReq(req.uid);
+    try {
+      await deleteLinkRequest(clubId, req.uid);
+      await loadRequests();
+    } catch (err) {
+      setRequestsError(err instanceof Error ? err.message : 'Failed to dismiss request.');
+    } finally {
+      setProcessingReq(null);
     }
   };
 
@@ -251,6 +335,56 @@ export default function SettingsPage() {
       </Card>
 
       <Card className="mt-3">
+        <Card.Header>Link requests</Card.Header>
+        <Card.Body>
+          <Card.Text className="text-muted">
+            People who asked to be linked to a player. Match each to an existing player, or create a
+            new player record from their details.
+          </Card.Text>
+          {requestsError && <Alert variant="danger" className="py-2">{requestsError}</Alert>}
+          {requestsLoading ? (
+            <Spinner animation="border" size="sm" />
+          ) : requests.length === 0 ? (
+            <p className="text-muted mb-0">No pending requests.</p>
+          ) : (
+            <ListGroup variant="flush">
+              {requests.map((r) => (
+                <ListGroup.Item key={r.uid} className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                  <span>
+                    <strong>{r.name || '(no name)'}</strong>
+                    {r.email && <span className="text-muted small ms-2">{r.email}</span>}
+                  </span>
+                  <span className="d-flex align-items-center gap-2 flex-wrap">
+                    <Form.Select
+                      size="sm"
+                      value={reqSel[r.uid] ?? ''}
+                      onChange={(e) => setReqSel((prev) => ({ ...prev, [r.uid]: e.target.value }))}
+                      disabled={processingReq === r.uid}
+                      style={{ minWidth: 160 }}
+                    >
+                      <option value="">— match a player —</option>
+                      {players.map((p) => (
+                        <option key={p.id} value={p.id}>{`${p.firstName} ${p.lastName ?? ''}`.trim()}</option>
+                      ))}
+                    </Form.Select>
+                    <Button size="sm" variant="success" disabled={processingReq === r.uid || !reqSel[r.uid]} onClick={() => handleApproveRequest(r)}>
+                      {processingReq === r.uid ? <Spinner size="sm" animation="border" /> : 'Approve'}
+                    </Button>
+                    <Button size="sm" variant="outline-primary" disabled={processingReq === r.uid} onClick={() => handleCreateAndLink(r)}>
+                      Create player
+                    </Button>
+                    <Button size="sm" variant="outline-secondary" disabled={processingReq === r.uid} onClick={() => handleDismissRequest(r)}>
+                      Dismiss
+                    </Button>
+                  </span>
+                </ListGroup.Item>
+              ))}
+            </ListGroup>
+          )}
+        </Card.Body>
+      </Card>
+
+      <Card className="mt-3">
         <Card.Header>Members &amp; player links</Card.Header>
         <Card.Body>
           <Card.Text className="text-muted">
@@ -272,7 +406,7 @@ export default function SettingsPage() {
               style={{ maxWidth: 130 }}
             >
               <option value="member">Member</option>
-              <option value="admin">Admin</option>
+              {isSuperAdmin && <option value="admin">Admin</option>}
             </Form.Select>
             <Button variant="primary" onClick={handleAddMember} disabled={addingMember || !newMemberUid.trim()}>
               {addingMember ? <Spinner size="sm" animation="border" /> : 'Add'}
@@ -291,7 +425,7 @@ export default function SettingsPage() {
                 <ListGroup.Item key={m.uid} className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
                   <span className="text-truncate" style={{ maxWidth: 180 }} title={m.uid}>
                     <code>{m.uid.slice(0, 10)}…</code>
-                    <Badge bg={m.role === 'admin' ? 'success' : 'secondary'} className="ms-2">{m.role}</Badge>
+                    <Badge bg={m.role === 'member' ? 'secondary' : 'success'} className="ms-2">{m.role}</Badge>
                   </span>
                   <span className="d-flex align-items-center gap-2">
                     <Form.Select
@@ -306,9 +440,11 @@ export default function SettingsPage() {
                         <option key={p.id} value={p.id}>{`${p.firstName} ${p.lastName ?? ''}`.trim()}</option>
                       ))}
                     </Form.Select>
-                    <Button size="sm" variant="outline-danger" disabled={assigningUid === m.uid} onClick={() => handleRemoveMember(m.uid)}>
-                      Remove
-                    </Button>
+                    {isSuperAdmin && (
+                      <Button size="sm" variant="outline-danger" disabled={assigningUid === m.uid} onClick={() => handleRemoveMember(m.uid)}>
+                        Remove
+                      </Button>
+                    )}
                   </span>
                 </ListGroup.Item>
               ))}
@@ -367,6 +503,8 @@ export default function SettingsPage() {
         </Card.Body>
       </Card>
 
+      {isSuperAdmin && (
+      <>
       <Card border="danger" className="mt-3">
         <Card.Header className="bg-danger text-white">Danger zone</Card.Header>
         <Card.Body>
@@ -466,6 +604,8 @@ export default function SettingsPage() {
           )}
         </Card.Body>
       </Card>
+      </>
+      )}
     </Container>
   );
 }

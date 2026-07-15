@@ -189,7 +189,7 @@ export type ModalMode = 'view' | 'paste' | 'resolve' | 'details' | 'edit';
 
 // ─── Clubs (multi-tenant) ──────────────────────────────────────────────────────
 
-export type ClubRole = 'admin' | 'member';
+export type ClubRole = 'superAdmin' | 'admin' | 'member';
 
 // clubs/{clubId}
 export interface Club {
@@ -211,6 +211,14 @@ export interface ClubMember {
   uid: string;
   role: ClubRole;
   playerId: string | null;
+}
+
+// clubs/{clubId}/linkRequests/{uid} — a user's request for an admin to link them to a player.
+export interface LinkRequest {
+  uid: string;
+  name: string;
+  email: string;
+  createdAt?: Timestamp;
 }
 
 // clubs/{clubId}/balanceLedger/{id} — one balance change for a player.

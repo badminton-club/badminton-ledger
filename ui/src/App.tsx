@@ -39,7 +39,7 @@ function RequireAdmin({ children }: { children: React.ReactElement }) {
   const ready = useAppSelector(selectClubReady);
   const role = useAppSelector(selectClubRole);
   if (!ready) return <ClubLoading />;
-  if (role !== 'admin') return <Navigate to="/" replace />;
+  if (role !== 'admin' && role !== 'superAdmin') return <Navigate to="/" replace />;
   return children;
 }
 

@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Container, Card, Table, Spinner, Alert, Badge } from 'react-bootstrap';
+import { Container, Card, Table, Spinner, Alert, Badge, Tabs, Tab, Form, Button } from 'react-bootstrap';
 import { format } from 'date-fns';
-import { fetchMemberPlayerId, fetchPlayerLedger } from '../services/firebase';
+import { fetchMemberPlayerId, fetchPlayerLedger, fetchMyLinkRequest, submitLinkRequest, fetchSessions } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { toJSDate } from '../services/firebase/utils';
 import { useAppSelector } from '../hooks';
 import { selectCurrentClubId } from '../features/club/clubSlice';
 import { selectPlayerById } from '../features/players/playersSlice';
-import type { BalanceLedgerEntry } from '../types';
+import type { BalanceLedgerEntry, Session, LinkRequest } from '../types';
 import type { RootState } from '../store';
 
 const REASON_LABELS: Record<string, string> = {
@@ -26,8 +26,15 @@ export default function AttendancePage() {
   const uid = auth.currentUser?.uid ?? null;
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [ledger, setLedger] = useState<BalanceLedgerEntry[]>([]);
+  const [attended, setAttended] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const [myRequest, setMyRequest] = useState<LinkRequest | null>(null);
+  const [reqName, setReqName] = useState('');
+  const [reqEmail, setReqEmail] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   const player = useAppSelector((s: RootState) =>
     playerId ? selectPlayerById(s, playerId) : undefined
@@ -43,7 +50,19 @@ export default function AttendancePage() {
         const pid = await fetchMemberPlayerId(clubId, uid);
         if (cancelled) return;
         setPlayerId(pid);
-        setLedger(pid ? await fetchPlayerLedger(pid) : []);
+        if (pid) {
+          const [entries, sessions] = await Promise.all([fetchPlayerLedger(pid), fetchSessions({})]);
+          if (cancelled) return;
+          setLedger(entries);
+          setAttended(sessions.filter((s) => (s.players ?? []).some((p) => p.id === pid)));
+        } else {
+          const req = await fetchMyLinkRequest(clubId, uid);
+          if (cancelled) return;
+          setMyRequest(req);
+          const u = auth.currentUser;
+          setReqName((prev) => prev || u?.displayName || '');
+          setReqEmail((prev) => prev || u?.email || '');
+        }
       } catch {
         if (!cancelled) setError('Failed to load your attendance.');
       } finally {
@@ -52,6 +71,22 @@ export default function AttendancePage() {
     })();
     return () => { cancelled = true; };
   }, [clubId, uid]);
+
+  const handleSubmitRequest = async () => {
+    if (!clubId || !uid) return;
+    const name = reqName.trim();
+    if (!name) { setSubmitError('Enter your name.'); return; }
+    setSubmitError('');
+    setSubmitting(true);
+    try {
+      await submitLinkRequest(clubId, uid, name, reqEmail.trim());
+      setMyRequest({ uid, name, email: reqEmail.trim() });
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Failed to send request.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -67,10 +102,33 @@ export default function AttendancePage() {
       {error && <Alert variant="danger">{error}</Alert>}
 
       {!playerId ? (
-        <Alert variant="info">
-          You're not linked to a player in this club yet. Ask a club admin to link your account —
-          share your user ID (find it on the Account page).
-        </Alert>
+        myRequest ? (
+          <Alert variant="success">
+            Your request to be linked was sent. An admin will match you to a player soon.
+          </Alert>
+        ) : (
+          <Card>
+            <Card.Body>
+              <Card.Title className="h6">Request to be linked</Card.Title>
+              <Card.Text className="text-muted">
+                You're not linked to a player in this club yet. Send your details and an admin will
+                link you (or create a player for you).
+              </Card.Text>
+              <Form.Group className="mb-2">
+                <Form.Label>Name</Form.Label>
+                <Form.Control value={reqName} onChange={(e) => setReqName(e.target.value)} disabled={submitting} />
+              </Form.Group>
+              <Form.Group className="mb-3">
+                <Form.Label>Email</Form.Label>
+                <Form.Control type="email" value={reqEmail} onChange={(e) => setReqEmail(e.target.value)} disabled={submitting} />
+              </Form.Group>
+              <Button variant="primary" onClick={handleSubmitRequest} disabled={submitting || !reqName.trim()}>
+                {submitting ? <Spinner size="sm" animation="border" /> : 'Send request'}
+              </Button>
+              {submitError && <Alert variant="danger" className="mt-3 mb-0 py-2">{submitError}</Alert>}
+            </Card.Body>
+          </Card>
+        )
       ) : (
         <>
           <Card className="mb-3">
@@ -87,13 +145,41 @@ export default function AttendancePage() {
             </Card.Body>
           </Card>
 
-          <Card>
-            <Card.Header>Transactions</Card.Header>
-            <Card.Body>
-              {ledger.length === 0 ? (
-                <p className="text-muted mb-0">No transactions yet.</p>
+          <Tabs defaultActiveKey="sessions" className="mb-3">
+            <Tab eventKey="sessions" title="Sessions attended">
+              {attended.length === 0 ? (
+                <p className="text-muted">No sessions attended yet.</p>
               ) : (
-                <Table hover responsive size="sm" className="mb-0">
+                <Table hover responsive size="sm">
+                  <thead>
+                    <tr><th>Date</th><th>Cost</th><th className="text-end">Status</th></tr>
+                  </thead>
+                  <tbody>
+                    {attended.map((s) => {
+                      const sp = (s.players ?? []).find((p) => p.id === playerId);
+                      const d = toJSDate(s.date);
+                      const status = sp?.comped
+                        ? { label: 'Comped', bg: 'warning' }
+                        : sp?.paid
+                          ? { label: 'Paid', bg: 'success' }
+                          : { label: 'Unpaid', bg: 'danger' };
+                      return (
+                        <tr key={s.id}>
+                          <td>{d ? format(d, 'MMM d, yyyy') : '—'}</td>
+                          <td>{money(sp?.cost ?? 0)}</td>
+                          <td className="text-end"><Badge bg={status.bg}>{status.label}</Badge></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </Table>
+              )}
+            </Tab>
+            <Tab eventKey="transactions" title="Transactions">
+              {ledger.length === 0 ? (
+                <p className="text-muted">No transactions yet.</p>
+              ) : (
+                <Table hover responsive size="sm">
                   <thead>
                     <tr>
                       <th>Date</th>
@@ -119,8 +205,8 @@ export default function AttendancePage() {
                   </tbody>
                 </Table>
               )}
-            </Card.Body>
-          </Card>
+            </Tab>
+          </Tabs>
         </>
       )}
     </Container>

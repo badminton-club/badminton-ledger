@@ -51,6 +51,7 @@ export const selectClubRole      = (s: RootState) => s.club.role;
 export const selectUserClubs     = (s: RootState) => s.club.clubs;
 export const selectDisabledTabs  = (s: RootState) => s.club.disabledTabs;
 export const selectClubReady     = (s: RootState) => s.club.ready;
-export const selectIsClubAdmin   = (s: RootState) => s.club.role === 'admin';
+export const selectIsClubAdmin   = (s: RootState) => s.club.role === 'admin' || s.club.role === 'superAdmin';
+export const selectIsClubSuperAdmin = (s: RootState) => s.club.role === 'superAdmin';
 export const selectCurrentClub   = (s: RootState) =>
   s.club.clubs.find((c) => c.id === s.club.currentClubId) ?? null;

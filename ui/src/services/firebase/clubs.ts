@@ -15,11 +15,13 @@ import {
   clubDoc,
   memberDoc,
   membersRef,
+  linkRequestsRef,
+  linkRequestDoc,
   clubCollection,
   CLUB_DATA_COLLECTIONS,
 } from './client';
 import { serviceCall } from './utils';
-import type { UserProfile, Club, ClubRole, ClubMember, UserClub } from 'types';
+import type { UserProfile, Club, ClubRole, ClubMember, LinkRequest, UserClub } from 'types';
 
 const EMPTY_PROFILE: UserProfile = { clubs: [], lastVisitedClub: null };
 
@@ -31,7 +33,7 @@ const EMPTY_PROFILE: UserProfile = { clubs: [], lastVisitedClub: null };
 export async function createClub(clubId: string, name: string, uid: string): Promise<void> {
   return serviceCall('createClub', async () => {
     await setDoc(clubDoc(clubId), { name, ownerUid: uid, createdAt: serverTimestamp() }, { merge: true });
-    await setDoc(memberDoc(clubId, uid), { role: 'admin', addedAt: serverTimestamp() }, { merge: true });
+    await setDoc(memberDoc(clubId, uid), { role: 'superAdmin', addedAt: serverTimestamp() }, { merge: true });
     await setDoc(userDoc(uid), { clubs: arrayUnion(clubId), lastVisitedClub: clubId }, { merge: true });
   });
 }
@@ -73,7 +75,7 @@ export async function fetchMemberRole(clubId: string, uid: string): Promise<Club
       const snap = await getDoc(memberDoc(clubId, uid));
       if (!snap.exists()) return null;
       const role = snap.data().role;
-      return role === 'admin' || role === 'member' ? role : null;
+      return role === 'superAdmin' || role === 'admin' || role === 'member' ? role : null;
     } catch {
       return null; // membership read denied / missing — treat as no access
     }
@@ -168,6 +170,48 @@ export async function setMemberPlayer(clubId: string, uid: string, playerId: str
 export async function removeClubMember(clubId: string, uid: string): Promise<void> {
   return serviceCall('removeClubMember', async () => {
     await deleteDoc(memberDoc(clubId, uid));
+  });
+}
+
+// ─── Link requests ─────────────────────────────────────────────────────────
+
+/** A user asks an admin to link them to a player. One pending request per user. */
+export async function submitLinkRequest(clubId: string, uid: string, name: string, email: string): Promise<void> {
+  return serviceCall('submitLinkRequest', async () => {
+    await setDoc(linkRequestDoc(clubId, uid), { uid, name, email, createdAt: serverTimestamp() });
+  });
+}
+
+/** Lists pending link requests for a club (admin-only). */
+export async function fetchLinkRequests(clubId: string): Promise<LinkRequest[]> {
+  return serviceCall('fetchLinkRequests', async () => {
+    const snap = await getDocs(linkRequestsRef(clubId));
+    return snap.docs.map((d) => ({
+      uid: d.id,
+      name: (d.data().name as string) ?? '',
+      email: (d.data().email as string) ?? '',
+      createdAt: d.data().createdAt,
+    }));
+  });
+}
+
+/** Removes a link request (after approval, or to dismiss it). */
+export async function deleteLinkRequest(clubId: string, uid: string): Promise<void> {
+  return serviceCall('deleteLinkRequest', async () => {
+    await deleteDoc(linkRequestDoc(clubId, uid));
+  });
+}
+
+/** Returns the caller's own pending link request, if any. */
+export async function fetchMyLinkRequest(clubId: string, uid: string): Promise<LinkRequest | null> {
+  return serviceCall('fetchMyLinkRequest', async () => {
+    try {
+      const snap = await getDoc(linkRequestDoc(clubId, uid));
+      if (!snap.exists()) return null;
+      return { uid, name: snap.data().name ?? '', email: snap.data().email ?? '', createdAt: snap.data().createdAt };
+    } catch {
+      return null;
+    }
   });
 }
 
