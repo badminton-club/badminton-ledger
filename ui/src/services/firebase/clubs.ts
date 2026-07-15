@@ -176,9 +176,9 @@ export async function removeClubMember(clubId: string, uid: string): Promise<voi
 // ─── Link requests ─────────────────────────────────────────────────────────
 
 /** A user asks an admin to link them to a player. One pending request per user. */
-export async function submitLinkRequest(clubId: string, uid: string, name: string, email: string): Promise<void> {
+export async function submitLinkRequest(clubId: string, uid: string, firstName: string, lastName: string | null, email: string): Promise<void> {
   return serviceCall('submitLinkRequest', async () => {
-    await setDoc(linkRequestDoc(clubId, uid), { uid, name, email, createdAt: serverTimestamp() });
+    await setDoc(linkRequestDoc(clubId, uid), { uid, firstName, lastName: lastName || null, email, createdAt: serverTimestamp() });
   });
 }
 
@@ -186,12 +186,16 @@ export async function submitLinkRequest(clubId: string, uid: string, name: strin
 export async function fetchLinkRequests(clubId: string): Promise<LinkRequest[]> {
   return serviceCall('fetchLinkRequests', async () => {
     const snap = await getDocs(linkRequestsRef(clubId));
-    return snap.docs.map((d) => ({
-      uid: d.id,
-      name: (d.data().name as string) ?? '',
-      email: (d.data().email as string) ?? '',
-      createdAt: d.data().createdAt,
-    }));
+    return snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        uid: d.id,
+        firstName: (data.firstName as string) ?? (data.name as string) ?? '',
+        lastName: (data.lastName as string | null) ?? null,
+        email: (data.email as string) ?? '',
+        createdAt: data.createdAt,
+      };
+    });
   });
 }
 
@@ -208,7 +212,14 @@ export async function fetchMyLinkRequest(clubId: string, uid: string): Promise<L
     try {
       const snap = await getDoc(linkRequestDoc(clubId, uid));
       if (!snap.exists()) return null;
-      return { uid, name: snap.data().name ?? '', email: snap.data().email ?? '', createdAt: snap.data().createdAt };
+      const data = snap.data();
+      return {
+        uid,
+        firstName: (data.firstName as string) ?? (data.name as string) ?? '',
+        lastName: (data.lastName as string | null) ?? null,
+        email: (data.email as string) ?? '',
+        createdAt: data.createdAt,
+      };
     } catch {
       return null;
     }

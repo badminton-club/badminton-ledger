@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Container, Card, Table, Spinner, Alert, Badge, Tabs, Tab, Form, Button } from 'react-bootstrap';
+import { Container, Card, Table, Spinner, Alert, Badge, Tabs, Tab, Form, Button, Row, Col } from 'react-bootstrap';
 import { format } from 'date-fns';
-import { fetchMemberPlayerId, fetchPlayerLedger, fetchMyLinkRequest, submitLinkRequest, fetchSessions } from '../services/firebase';
+import { fetchMemberPlayerId, fetchPlayerLedger, fetchMyLinkRequest, submitLinkRequest, fetchSessions, updatePlayerProfile } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { toJSDate } from '../services/firebase/utils';
 import { useAppSelector } from '../hooks';
@@ -31,10 +31,18 @@ export default function AttendancePage() {
   const [error, setError] = useState('');
 
   const [myRequest, setMyRequest] = useState<LinkRequest | null>(null);
-  const [reqName, setReqName] = useState('');
+  const [reqFirst, setReqFirst] = useState('');
+  const [reqLast, setReqLast] = useState('');
   const [reqEmail, setReqEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+
+  const [pFirst, setPFirst] = useState('');
+  const [pLast, setPLast] = useState('');
+  const [pEmail, setPEmail] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState('');
+  const [profileSaved, setProfileSaved] = useState(false);
 
   const player = useAppSelector((s: RootState) =>
     playerId ? selectPlayerById(s, playerId) : undefined
@@ -60,7 +68,10 @@ export default function AttendancePage() {
           if (cancelled) return;
           setMyRequest(req);
           const u = auth.currentUser;
-          setReqName((prev) => prev || u?.displayName || '');
+          const dn = (u?.displayName || '').trim();
+          const sp = dn.split(/\s+/);
+          setReqFirst((prev) => prev || sp[0] || '');
+          setReqLast((prev) => prev || sp.slice(1).join(' ') || '');
           setReqEmail((prev) => prev || u?.email || '');
         }
       } catch {
@@ -74,17 +85,45 @@ export default function AttendancePage() {
 
   const handleSubmitRequest = async () => {
     if (!clubId || !uid) return;
-    const name = reqName.trim();
-    if (!name) { setSubmitError('Enter your name.'); return; }
+    const first = reqFirst.trim();
+    if (!first) { setSubmitError('Enter your first name.'); return; }
     setSubmitError('');
     setSubmitting(true);
     try {
-      await submitLinkRequest(clubId, uid, name, reqEmail.trim());
-      setMyRequest({ uid, name, email: reqEmail.trim() });
+      const last = reqLast.trim() || null;
+      await submitLinkRequest(clubId, uid, first, last, reqEmail.trim());
+      setMyRequest({ uid, firstName: first, lastName: last, email: reqEmail.trim() });
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Failed to send request.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Populate the edit-my-details form when the linked player first loads.
+  useEffect(() => {
+    if (player) {
+      setPFirst(player.firstName ?? '');
+      setPLast(player.lastName ?? '');
+      setPEmail(player.email ?? '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player?.id]);
+
+  const handleSaveProfile = async () => {
+    if (!playerId) return;
+    const first = pFirst.trim();
+    if (!first) { setProfileError('First name is required.'); return; }
+    setProfileError('');
+    setProfileSaved(false);
+    setSavingProfile(true);
+    try {
+      await updatePlayerProfile(playerId, { firstName: first, lastName: pLast.trim() || null, email: pEmail.trim() || null });
+      setProfileSaved(true);
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : 'Failed to save your details.');
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -114,15 +153,25 @@ export default function AttendancePage() {
                 You're not linked to a player in this club yet. Send your details and an admin will
                 link you (or create a player for you).
               </Card.Text>
-              <Form.Group className="mb-2">
-                <Form.Label>Name</Form.Label>
-                <Form.Control value={reqName} onChange={(e) => setReqName(e.target.value)} disabled={submitting} />
-              </Form.Group>
+              <Row>
+                <Col sm={6}>
+                  <Form.Group className="mb-2">
+                    <Form.Label>First name</Form.Label>
+                    <Form.Control value={reqFirst} onChange={(e) => setReqFirst(e.target.value)} disabled={submitting} />
+                  </Form.Group>
+                </Col>
+                <Col sm={6}>
+                  <Form.Group className="mb-2">
+                    <Form.Label>Last name</Form.Label>
+                    <Form.Control value={reqLast} onChange={(e) => setReqLast(e.target.value)} disabled={submitting} />
+                  </Form.Group>
+                </Col>
+              </Row>
               <Form.Group className="mb-3">
                 <Form.Label>Email</Form.Label>
                 <Form.Control type="email" value={reqEmail} onChange={(e) => setReqEmail(e.target.value)} disabled={submitting} />
               </Form.Group>
-              <Button variant="primary" onClick={handleSubmitRequest} disabled={submitting || !reqName.trim()}>
+              <Button variant="primary" onClick={handleSubmitRequest} disabled={submitting || !reqFirst.trim()}>
                 {submitting ? <Spinner size="sm" animation="border" /> : 'Send request'}
               </Button>
               {submitError && <Alert variant="danger" className="mt-3 mb-0 py-2">{submitError}</Alert>}
@@ -142,6 +191,35 @@ export default function AttendancePage() {
                   </strong>
                 </span>
               )}
+            </Card.Body>
+          </Card>
+
+          <Card className="mb-3">
+            <Card.Body>
+              <Card.Title className="h6">My details</Card.Title>
+              <Row>
+                <Col sm={6}>
+                  <Form.Group className="mb-2">
+                    <Form.Label>First name</Form.Label>
+                    <Form.Control value={pFirst} onChange={(e) => setPFirst(e.target.value)} disabled={savingProfile} />
+                  </Form.Group>
+                </Col>
+                <Col sm={6}>
+                  <Form.Group className="mb-2">
+                    <Form.Label>Last name</Form.Label>
+                    <Form.Control value={pLast} onChange={(e) => setPLast(e.target.value)} disabled={savingProfile} />
+                  </Form.Group>
+                </Col>
+              </Row>
+              <Form.Group className="mb-2">
+                <Form.Label>Email</Form.Label>
+                <Form.Control type="email" value={pEmail} onChange={(e) => setPEmail(e.target.value)} disabled={savingProfile} />
+              </Form.Group>
+              <Button variant="primary" size="sm" onClick={handleSaveProfile} disabled={savingProfile || !pFirst.trim()}>
+                {savingProfile ? <Spinner size="sm" animation="border" /> : 'Save details'}
+              </Button>
+              {profileSaved && <span className="text-success small ms-2">Saved.</span>}
+              {profileError && <Alert variant="danger" className="mt-2 mb-0 py-2">{profileError}</Alert>}
             </Card.Body>
           </Card>
 

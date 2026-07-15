@@ -216,7 +216,8 @@ export interface ClubMember {
 // clubs/{clubId}/linkRequests/{uid} — a user's request for an admin to link them to a player.
 export interface LinkRequest {
   uid: string;
-  name: string;
+  firstName: string;
+  lastName: string | null;
   email: string;
   createdAt?: Timestamp;
 }

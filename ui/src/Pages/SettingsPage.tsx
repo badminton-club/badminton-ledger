@@ -15,7 +15,7 @@ import {
   setCurrentClub,
 } from '../features/club/clubSlice';
 import { TOGGLEABLE_TABS } from '../features/club/tabs';
-import type { ClubMember, ClubRole, LinkRequest } from '../types';
+import type { ClubMember, ClubRole, LinkRequest, Player } from '../types';
 
 const CONFIRM_PHRASE = 'CLEAR ALL DATA';
 
@@ -131,7 +131,8 @@ export default function SettingsPage() {
         const match = players.find(
           (p) =>
             (!!p.email && !!r.email && p.email.toLowerCase() === r.email.toLowerCase()) ||
-            `${p.firstName} ${p.lastName ?? ''}`.trim().toLowerCase() === r.name.trim().toLowerCase()
+            `${p.firstName} ${p.lastName ?? ''}`.trim().toLowerCase() ===
+              `${r.firstName} ${r.lastName ?? ''}`.trim().toLowerCase()
         );
         if (match) suggestions[r.uid] = match.id;
       });
@@ -167,10 +168,7 @@ export default function SettingsPage() {
     setRequestsError('');
     setProcessingReq(req.uid);
     try {
-      const parts = req.name.trim().split(/\s+/);
-      const firstName = parts.shift() || req.name.trim();
-      const lastName = parts.join(' ') || null;
-      const playerId = await addPlayer({ firstName, lastName, email: req.email || null, balance: 0, description: '' });
+      const playerId = await addPlayer({ firstName: req.firstName, lastName: req.lastName, email: req.email || null, balance: 0, description: '' });
       await setMemberPlayer(clubId, req.uid, playerId);
       await deleteLinkRequest(clubId, req.uid);
       await Promise.all([loadRequests(), loadMembers()]);
@@ -291,6 +289,16 @@ export default function SettingsPage() {
     }
   };
 
+  // Distinguish players who share a display name (append email, else a short id).
+  const playerLabel = (p: Player) => {
+    const name = `${p.firstName} ${p.lastName ?? ''}`.trim();
+    const dup = players.filter(
+      (x) => `${x.firstName} ${x.lastName ?? ''}`.trim().toLowerCase() === name.toLowerCase()
+    ).length > 1;
+    if (!dup) return name || p.id;
+    return `${name || p.id} ${p.email ? `(${p.email})` : `#${p.id.slice(0, 4)}`}`;
+  };
+
   if (checkingAdmin) {
     return (
       <Container className="mt-4 text-center">
@@ -351,7 +359,7 @@ export default function SettingsPage() {
               {requests.map((r) => (
                 <ListGroup.Item key={r.uid} className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
                   <span>
-                    <strong>{r.name || '(no name)'}</strong>
+                    <strong>{`${r.firstName} ${r.lastName ?? ''}`.trim() || '(no name)'}</strong>
                     {r.email && <span className="text-muted small ms-2">{r.email}</span>}
                   </span>
                   <span className="d-flex align-items-center gap-2 flex-wrap">
@@ -364,7 +372,7 @@ export default function SettingsPage() {
                     >
                       <option value="">— match a player —</option>
                       {players.map((p) => (
-                        <option key={p.id} value={p.id}>{`${p.firstName} ${p.lastName ?? ''}`.trim()}</option>
+                        <option key={p.id} value={p.id}>{playerLabel(p)}</option>
                       ))}
                     </Form.Select>
                     <Button size="sm" variant="success" disabled={processingReq === r.uid || !reqSel[r.uid]} onClick={() => handleApproveRequest(r)}>
@@ -437,7 +445,7 @@ export default function SettingsPage() {
                     >
                       <option value="">— not linked —</option>
                       {players.map((p) => (
-                        <option key={p.id} value={p.id}>{`${p.firstName} ${p.lastName ?? ''}`.trim()}</option>
+                        <option key={p.id} value={p.id}>{playerLabel(p)}</option>
                       ))}
                     </Form.Select>
                     {isSuperAdmin && (

@@ -61,7 +61,16 @@ service cloud.firestore {
 
       // Calendar data: any member may read; only admins may write.
       match /sessions/{doc} { allow read: if isMember(clubId); allow write: if isClubAdmin(clubId); }
-      match /players/{doc}  { allow read: if isMember(clubId); allow write: if isClubAdmin(clubId); }
+      match /players/{doc} {
+        allow read:           if isMember(clubId);
+        allow create, delete: if isClubAdmin(clubId);
+        // Admins edit any player; a member may edit only their own linked player's
+        // name/email (never balance, sessionCount, etc.).
+        allow update: if isClubAdmin(clubId)
+          || (isMember(clubId) && doc == memberPlayerId(clubId)
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['firstName', 'firstNameLower', 'lastName', 'lastNameLower', 'email']));
+      }
 
       // Financial / inventory data: admins only.
       match /birdieInventory/{doc}       { allow read, write: if isClubAdmin(clubId); }

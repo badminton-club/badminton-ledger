@@ -1,6 +1,8 @@
 import {
   getDocs,
   addDoc,
+  updateDoc,
+  doc,
   query,
   where,
   orderBy,
@@ -78,4 +80,20 @@ export async function addPlayer(input: NewPlayerInput): Promise<string> {
 /** Returns a display name string for a player. */
 export function formatPlayerName(player: Pick<Player, 'firstName' | 'lastName'>): string {
   return [player.firstName, player.lastName].filter(Boolean).join(' ');
+}
+
+/** Updates a player's name and email (keeps the lowercase search fields in sync). */
+export async function updatePlayerProfile(
+  playerId: string,
+  input: { firstName: string; lastName: string | null; email: string | null }
+): Promise<void> {
+  return serviceCall('updatePlayerProfile', async () => {
+    await updateDoc(doc(refs.players, playerId), {
+      firstName:      input.firstName,
+      firstNameLower: input.firstName.toLowerCase(),
+      lastName:       input.lastName ?? null,
+      lastNameLower:  input.lastName ? input.lastName.toLowerCase() : null,
+      email:          input.email ?? null,
+    });
+  });
 }
