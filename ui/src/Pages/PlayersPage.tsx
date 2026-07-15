@@ -300,7 +300,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                     <span>{formatPlayerName(player)}</span>
                     {player.balance < 0 && (
                       <Badge bg="danger" style={{ fontSize: 10 }}>
-                        ${Math.abs(player.balance).toFixed(0)} owed
+                        ${Math.abs(player.balance).toFixed(2)} owed
                       </Badge>
                     )}
                   </ListGroup.Item>
