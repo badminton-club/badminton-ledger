@@ -66,7 +66,9 @@ export function useClubBootstrap(): void {
         null;
 
       dispatch(setCurrentClub(pick));
-      dispatch(setReady(true));
+      // When a club is picked, the club-scope effect below loads its role/settings
+      // and flips `ready`. Only mark ready here when there's nothing to load.
+      if (!pick) dispatch(setReady(true));
 
       if (clubParam) {
         const next = new URLSearchParams(searchParams);
@@ -90,8 +92,21 @@ export function useClubBootstrap(): void {
     localStorage.setItem(LS_KEY, currentClubId);
     const user = auth.currentUser;
     if (!user) return;
+    // Switching clubs: hide club-scoped routes until the new club's role and
+    // settings have loaded. This keeps role-based guards from acting on the
+    // previous club's role, and remounts pages so they refetch for the new club.
+    dispatch(setReady(false));
     setLastVisitedClub(user.uid, currentClubId).catch(() => { /* ignore */ });
-    fetchMemberRole(currentClubId, user.uid).then((role) => dispatch(setRole(role)));
-    fetchClub(currentClubId).then((club) => dispatch(setDisabledTabs(club?.disabledTabs ?? [])));
+    let cancelled = false;
+    Promise.all([
+      fetchMemberRole(currentClubId, user.uid),
+      fetchClub(currentClubId),
+    ]).then(([role, club]) => {
+      if (cancelled) return;
+      dispatch(setRole(role));
+      dispatch(setDisabledTabs(club?.disabledTabs ?? []));
+      dispatch(setReady(true));
+    });
+    return () => { cancelled = true; };
   }, [currentClubId, dispatch]);
 }
