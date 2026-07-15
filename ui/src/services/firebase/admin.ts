@@ -12,6 +12,7 @@ export const CLEARABLE_COLLECTIONS = [
   'transactions',
   'balanceLedger',
   'archivedSessions',
+  'payouts',
 ] as const;
 
 export type ClearableCollection = (typeof CLEARABLE_COLLECTIONS)[number];

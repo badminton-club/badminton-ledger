@@ -35,6 +35,7 @@ export const refs = {
   transactions:         collection(db, 'transactions'),        // was "transcations" — fixed
   balanceLedger:        collection(db, 'balanceLedger')        as CollectionReference,
   archivedSessions:     collection(db, 'archivedSessions')     as CollectionReference,
+  payouts:              collection(db, 'payouts')              as CollectionReference,
 };
 
 export { db, auth };

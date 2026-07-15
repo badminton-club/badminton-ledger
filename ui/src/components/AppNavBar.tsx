@@ -33,6 +33,9 @@ export default function AppNavbar() {
                                 <Nav.Link as={Link} to="/players">
                                     Players
                                 </Nav.Link>
+                                <Nav.Link as={Link} to="/payout">
+                                    Payout
+                                </Nav.Link>
                                 <Nav.Link as={Link} to="/settings">
                                     Settings
                                 </Nav.Link>

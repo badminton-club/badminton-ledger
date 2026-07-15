@@ -14,7 +14,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { getMonthYear } from '../utils/dateUtils';
 import AddPlayerModal from '../components/AddPlayerModal';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { db, refs, togglePlayerPaidStatus } from '../services/firebase';
+import { db, refs, togglePlayerPaidStatus, togglePlayerCompStatus } from '../services/firebase';
 import { addPlayer } from '../services/firebase/players';
 import {
   collection, query, where, getDocs, orderBy,
@@ -186,6 +186,18 @@ console.log("selectedPlayer ==> ", selectedPlayer);
       await fetchLedger(selectedPlayerId);
     } catch (err) {
       setSessionsError(err instanceof Error ? err.message : 'Failed to update payment status.');
+    }
+  };
+
+  const handleToggleComp = async (sessionId: string) => {
+    if (!selectedPlayerId) return;
+    setSessionsError('');
+    try {
+      await togglePlayerCompStatus(sessionId, selectedPlayerId);
+      await fetchAttendedSessions();
+      await fetchLedger(selectedPlayerId);
+    } catch (err) {
+      setSessionsError(err instanceof Error ? err.message : 'Failed to update comp status.');
     }
   };
 
@@ -521,17 +533,36 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                                 <div>${playerInSession?.cost?.toFixed(2) ?? 'N/A'}</div>
                                 {playerInSession && (
                                   <div className="mt-1 d-flex flex-column align-items-end gap-1">
-                                    <Badge bg={playerInSession.paid ? 'success' : 'danger'} style={{ fontSize: 10 }}>
-                                      {playerInSession.paid ? 'Paid' : 'Unpaid'}
-                                    </Badge>
-                                    <Button
-                                      variant={playerInSession.paid ? 'outline-secondary' : 'outline-success'}
-                                      size="sm"
-                                      style={{ fontSize: 11, padding: '1px 8px' }}
-                                      onClick={() => handleTogglePaid(s.id)}
+                                    <Badge
+                                      bg={playerInSession.comped ? 'info' : playerInSession.paid ? 'success' : 'danger'}
+                                      style={{ fontSize: 10 }}
                                     >
-                                      {playerInSession.paid ? 'Mark as unpaid' : 'Mark as paid'}
-                                    </Button>
+                                      {playerInSession.comped ? 'Comped' : playerInSession.paid ? 'Paid' : 'Unpaid'}
+                                    </Badge>
+                                    <div className="d-flex gap-1">
+                                      <Button
+                                        variant="warning"
+                                        size="sm"
+                                        style={{
+                                          fontSize: 11,
+                                          padding: '1px 8px',
+                                          backgroundColor: playerInSession.comped ? '#b8860b' : 'transparent',
+                                          borderColor: '#b8860b',
+                                          color: playerInSession.comped ? '#fff' : '#b8860b',
+                                        }}
+                                        onClick={() => handleToggleComp(s.id)}
+                                      >
+                                        {playerInSession.comped ? 'Uncomp' : 'Comp'}
+                                      </Button>
+                                      <Button
+                                        variant={playerInSession.paid ? 'outline-secondary' : 'outline-success'}
+                                        size="sm"
+                                        style={{ fontSize: 11, padding: '1px 8px' }}
+                                        onClick={() => handleTogglePaid(s.id)}
+                                      >
+                                        {playerInSession.paid ? 'Mark as unpaid' : 'Mark as paid'}
+                                      </Button>
+                                    </div>
                                   </div>
                                 )}
                               </div>

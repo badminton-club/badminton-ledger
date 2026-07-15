@@ -323,9 +323,18 @@ export default function CourtCreditsPage() {
                       {!isLoadingHistory && history.length === 0 && activeKey === batch.id && (
                         <p className="text-muted">No usage or adjustments recorded.</p>
                       )}
-                      {!isLoadingHistory && history.length > 0 && activeKey === batch.id && (
+                      {!isLoadingHistory && history.length > 0 && activeKey === batch.id && (() => {
+                        // Remaining hours after each event, reconstructed from current
+                        // remaining by walking newest → oldest and adding back usage.
+                        const remainingByRow = new Map<HistoryItem, number>();
+                        let remaining = batch.remainingHours ?? 0;
+                        for (const item of history) {
+                          remainingByRow.set(item, remaining);
+                          if (item.type === 'sessionUsage') remaining += (item.hoursUsed as number) ?? 0;
+                        }
+                        return (
                         <Table striped bordered hover responsive size="sm">
-                          <thead><tr><th>Date</th><th>Type</th><th>Details</th><th>Source</th></tr></thead>
+                          <thead><tr><th>Date</th><th>Type</th><th>Details</th><th>Remaining</th><th>Source</th></tr></thead>
                           <tbody>
                             {history.map((item, i) => {
                               const style = item.type === 'sessionUsage' ? SESSION_ROW_STYLE : ADJUSTMENT_ROW_STYLE;
@@ -346,6 +355,7 @@ export default function CourtCreditsPage() {
                                       </>
                                     )}
                                   </td>
+                                  <td style={style}>{remainingByRow.get(item) ?? 0} hrs</td>
                                   <td style={style}>
                                     {item.type === 'sessionUsage' ? (
                                       <Link to={`/?date=${format(item.eventDate as Date, 'yyyy-MM-dd')}`}>
@@ -358,7 +368,8 @@ export default function CourtCreditsPage() {
                             })}
                           </tbody>
                         </Table>
-                      )}
+                        );
+                      })()}
                     </>
                   )}
                 </Accordion.Body>

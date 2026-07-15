@@ -353,26 +353,94 @@ export async function togglePlayerPaidStatus(
       const target     = players.find(p => p.id === playerId);
       if (!target) throw new Error(`Player ${playerId} not in session ${sessionId}`);
 
-      const nowPaid    = !target.paid;
+      const nowPaid = !target.paid;
+      const cost    = target.cost;
+      // Paid and comped are mutually exclusive: marking paid clears any comp.
       const updatedPlayers = players.map(p =>
-        p.id === playerId ? { ...p, paid: nowPaid } : p
+        p.id === playerId ? { ...p, paid: nowPaid, comped: nowPaid ? false : (p.comped ?? false) } : p
       );
-      const before = (playerSnap.data()?.balance as number) ?? 0;
-      const delta  = nowPaid ? target.cost : -target.cost;
-
       tx.update(sessionRef, { players: updatedPlayers });
-      // Marking paid increases their balance back (they've settled up); unpaying reverses it
-      tx.update(playerRef, { balance: increment(delta) });
-      tx.set(doc(refs.balanceLedger), {
-        playerId:      playerId,
-        sessionId:     sessionId,
-        delta,
-        balanceBefore: before,
-        balanceAfter:  before + delta,
-        reason:        'payment',
-        note:          nowPaid ? 'Marked paid' : 'Marked unpaid',
-        createdAt:     serverTimestamp(),
-      });
+
+      let before = (playerSnap.data()?.balance as number) ?? 0;
+      const initial = before;
+      const log = (delta: number, reason: string, note: string) => {
+        tx.set(doc(refs.balanceLedger), {
+          playerId, sessionId, delta,
+          balanceBefore: before, balanceAfter: before + delta,
+          reason, note, createdAt: serverTimestamp(),
+        });
+        before += delta;
+      };
+
+      if (nowPaid) {
+        // Reverse a prior comp settlement so the player isn't double-credited.
+        if (target.comped) log(-cost, 'comp', 'Reversed — marked paid to club');
+        log(cost, 'payment', 'Marked paid');
+      } else {
+        log(-cost, 'payment', 'Marked unpaid');
+      }
+
+      const netDelta = before - initial;
+      if (netDelta !== 0) tx.update(playerRef, { balance: increment(netDelta) });
+    });
+  });
+}
+
+/**
+ * Toggles a player's "comped" status for a session: the player settled directly
+ * with the owner. Like paying, this credits the player's balance, but it is logged
+ * with reason 'comp' so it is excluded from the owner payout (the owner already has
+ * the money). Comped is mutually exclusive with paid.
+ */
+export async function togglePlayerCompStatus(
+  sessionId: string,
+  playerId: string
+): Promise<void> {
+  return serviceCall('togglePlayerCompStatus', async () => {
+    const sessionRef = doc(refs.sessions, sessionId);
+    const playerRef  = doc(refs.players, playerId);
+
+    await runTransaction(db, async (tx) => {
+      const [sessionSnap, playerSnap] = await Promise.all([
+        tx.get(sessionRef),
+        tx.get(playerRef),
+      ]);
+
+      if (!sessionSnap.exists()) throw new Error(`Session ${sessionId} not found`);
+      if (!playerSnap.exists()) throw new Error(`Player ${playerId} not found`);
+
+      const players = sessionSnap.data().players as SessionPlayer[];
+      const target  = players.find(p => p.id === playerId);
+      if (!target) throw new Error(`Player ${playerId} not in session ${sessionId}`);
+
+      const nowComped = !target.comped;
+      const cost      = target.cost;
+      const updatedPlayers = players.map(p =>
+        p.id === playerId ? { ...p, comped: nowComped, paid: nowComped ? false : p.paid } : p
+      );
+      tx.update(sessionRef, { players: updatedPlayers });
+
+      let before = (playerSnap.data()?.balance as number) ?? 0;
+      const initial = before;
+      const log = (delta: number, reason: string, note: string) => {
+        tx.set(doc(refs.balanceLedger), {
+          playerId, sessionId, delta,
+          balanceBefore: before, balanceAfter: before + delta,
+          reason, note, createdAt: serverTimestamp(),
+        });
+        before += delta;
+      };
+
+      if (nowComped) {
+        // If they had paid the club, reverse that payment so it leaves the owner payout.
+        if (target.paid) log(-cost, 'payment', 'Reversed — paid owner directly (comp)');
+        log(cost, 'comp', 'Comped — player paid owner directly');
+      } else {
+        log(-cost, 'comp', 'Comp removed');
+      }
+
+      const netDelta = before - initial;
+      if (netDelta !== 0) tx.update(playerRef, { balance: increment(netDelta) });
     });
   });
 }

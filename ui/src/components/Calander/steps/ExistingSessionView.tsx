@@ -3,7 +3,7 @@ import { Alert, Button, Col, Form, ListGroup, Row } from 'react-bootstrap';
 import { format } from 'date-fns';
 import { useAppSelector } from 'hooks';
 import { selectPlayerById } from '../../../features/players/playersSlice';
-import { togglePlayerHighlightStatus, togglePlayerPaidStatus } from '../../../services/firebase';
+import { togglePlayerHighlightStatus, togglePlayerPaidStatus, togglePlayerCompStatus } from '../../../services/firebase';
 import type { Session, SessionPlayer } from 'types';
 import type { RootState } from '../../../store';
 
@@ -62,6 +62,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
             key={player.id}
             player={player}
             onTogglePaid={() => refresh(() => togglePlayerPaidStatus(session.id, player.id))}
+            onToggleComp={() => refresh(() => togglePlayerCompStatus(session.id, player.id))}
             onToggleHighlight={() => refresh(() => togglePlayerHighlightStatus(session.id, player.id))}
           />
         ))}
@@ -125,10 +126,11 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
 }
 
 function PlayerRow({
-  player, onTogglePaid, onToggleHighlight,
+  player, onTogglePaid, onToggleComp, onToggleHighlight,
 }: {
   player:            SessionPlayer;
   onTogglePaid:      () => void;
+  onToggleComp:      () => void;
   onToggleHighlight: () => void;
 }) {
   const stored = useAppSelector((s: RootState) => selectPlayerById(s, player.id));
@@ -149,6 +151,19 @@ function PlayerRow({
         <span className={player.paid ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
         <Button size="sm" variant={player.highlighted ? 'warning' : 'outline-secondary'} onClick={onToggleHighlight}>
           {player.highlighted ? '★' : '☆'}
+        </Button>
+        <Button
+          size="sm"
+          variant="warning"
+          onClick={onToggleComp}
+          style={{
+            minWidth: 72,
+            backgroundColor: player.comped ? '#b8860b' : 'transparent',
+            borderColor: '#b8860b',
+            color: player.comped ? '#fff' : '#b8860b',
+          }}
+        >
+          {player.comped ? '✓ Comp' : 'Comp'}
         </Button>
         <Button size="sm" variant={player.paid ? 'success' : 'outline-secondary'} onClick={onTogglePaid} style={{ minWidth: 110 }}>
           {player.paid ? '✓ Paid' : 'Mark as Paid'}

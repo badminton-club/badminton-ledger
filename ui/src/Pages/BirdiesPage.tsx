@@ -417,44 +417,55 @@ export default function BirdiesPage() {
           {!isLoadingHistory && history.length === 0 && (
             <p className="text-muted">No usage or adjustments recorded.</p>
           )}
-          {!isLoadingHistory && history.length > 0 && (
-            <Table striped borderless hover responsive size="sm">
-              <thead>
-                <tr><th>Date</th><th>Type</th><th>Details</th><th>Source</th></tr>
-              </thead>
-              <tbody>
-                {history.map((item, i) => {
-                  const style = item.type === 'adjustment' ? ADJUSTMENT_ROW_STYLE : {};
-                  return (
-                    <tr key={`${item.type}-${item.id ?? i}`}>
-                      <td style={style}>{format(item.eventDate, 'yyyy-MM-dd HH:mm')}</td>
-                      <td style={style}>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
-                      <td style={style}>
-                        {item.type === 'sessionUsage' && `Used: ${item.quantityUsed as number} birds`}
-                        {item.type === 'adjustment' && (
-                          <>
-                            Reason: {item.reason as string}
-                            {(item.changes as { field: string; oldValue: unknown; newValue: unknown }[])?.map((c, ci) => (
-                              <div key={ci} style={{ fontSize: '0.8em', marginLeft: 10 }}>
-                                <em>{c.field}:</em> {String(c.oldValue)} → {String(c.newValue)}
-                              </div>
-                            ))}
-                          </>
-                        )}
-                      </td>
-                      <td style={style}>
-                        {item.type === 'sessionUsage' ? (
-                          <Link to={`/?date=${format(item.eventDate as Date, 'yyyy-MM-dd')}`}>
-                            View on calendar
-                          </Link>
-                        ) : item.type === 'adjustment' ? (item.userName as string) : ''}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </Table>
-          )}
+          {!isLoadingHistory && history.length > 0 && (() => {
+            // Remaining birds after each event, reconstructed from current stock by
+            // walking newest → oldest and adding back usage (history is newest-first).
+            const remainingByRow = new Map<HistoryItem, number>();
+            let remaining = totalRemainingBirds(selectedBatch);
+            for (const item of history) {
+              remainingByRow.set(item, remaining);
+              if (item.type === 'sessionUsage') remaining += (item.quantityUsed as number) ?? 0;
+            }
+            return (
+              <Table striped borderless hover responsive size="sm">
+                <thead>
+                  <tr><th>Date</th><th>Type</th><th>Details</th><th>Remaining</th><th>Source</th></tr>
+                </thead>
+                <tbody>
+                  {history.map((item, i) => {
+                    const style = item.type === 'adjustment' ? ADJUSTMENT_ROW_STYLE : {};
+                    return (
+                      <tr key={`${item.type}-${item.id ?? i}`}>
+                        <td style={style}>{format(item.eventDate, 'yyyy-MM-dd HH:mm')}</td>
+                        <td style={style}>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
+                        <td style={style}>
+                          {item.type === 'sessionUsage' && `Used: ${item.quantityUsed as number} birds`}
+                          {item.type === 'adjustment' && (
+                            <>
+                              Reason: {item.reason as string}
+                              {(item.changes as { field: string; oldValue: unknown; newValue: unknown }[])?.map((c, ci) => (
+                                <div key={ci} style={{ fontSize: '0.8em', marginLeft: 10 }}>
+                                  <em>{c.field}:</em> {String(c.oldValue)} → {String(c.newValue)}
+                                </div>
+                              ))}
+                            </>
+                          )}
+                        </td>
+                        <td style={style}>{remainingByRow.get(item) ?? 0} birds</td>
+                        <td style={style}>
+                          {item.type === 'sessionUsage' ? (
+                            <Link to={`/?date=${format(item.eventDate as Date, 'yyyy-MM-dd')}`}>
+                              View on calendar
+                            </Link>
+                          ) : item.type === 'adjustment' ? (item.userName as string) : ''}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            );
+          })()}
         </Card.Body>
       </Card>
     );

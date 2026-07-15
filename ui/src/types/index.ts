@@ -44,6 +44,7 @@ export interface SessionPlayer {
   percentage: number;
   cost: number;
   paid: boolean;
+  comped?: boolean; // player settled directly with the owner — excluded from owner payout
   highlighted: boolean;
 }
 
@@ -107,6 +108,36 @@ export interface BirdieTransaction extends BaseTransaction {
 export interface CourtTransaction extends BaseTransaction {
   resourceType: 'court';
   hoursUsed: number;
+}
+
+// ─── Owner Payouts ─────────────────────────────────────────────────────────────
+
+// A recorded cashout to the owner for the money collected from players.
+export interface OwnerPayout {
+  id: string;
+  amount: number;             // amount paid to the owner in this cashout
+  note: string | null;
+  paidByUid: string | null;
+  date: Timestamp;            // when the payout was made
+  createdAt: Timestamp;
+}
+
+// One row in the payout ledger: money collected from players (a payment or a manual
+// balance adjustment) that is owed to the owner, or a payout that reduces the balance.
+export interface PayoutLedgerEntry {
+  id: string;
+  date: Date;
+  type: 'payment' | 'adjustment' | 'comp' | 'payout';
+  amount: number;
+  playerId: string | null;
+  note: string;
+}
+
+export interface OwnerPayoutSummary {
+  totalCollected: number;        // sum of player payments + balance adjustments
+  totalPaid: number;             // sum of all recorded payouts
+  pending: number;               // totalCollected - totalPaid
+  ledger: PayoutLedgerEntry[];   // collected entries + payouts, newest first
 }
 
 // ─── Inventory Adjustments ───────────────────────────────────────────────────
