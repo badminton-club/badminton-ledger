@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { format } from 'date-fns';
 
 export interface UsagePoint {
@@ -14,6 +14,8 @@ export interface UsagePoint {
  * value over time (chronological). Scales to its container via viewBox.
  */
 export default function BirdieUsageChart({ points }: { points: UsagePoint[] }) {
+  const [hover, setHover] = useState<number | null>(null);
+
   if (points.length === 0) {
     return <p className="text-muted text-center my-4">No birdie usage recorded yet.</p>;
   }
@@ -78,18 +80,50 @@ export default function BirdieUsageChart({ points }: { points: UsagePoint[] }) {
       {/* Trend line */}
       <path d={linePath} fill="none" stroke="#4dabf7" strokeWidth={1.5} opacity={0.6} />
 
-      {/* Points */}
+      {/* Points (larger transparent hit target over each dot) */}
       {data.map((p, i) => (
-        <circle key={i} cx={xScale(p.date.getTime())} cy={yScale(p.value)} r={4} fill="#1c7ed6">
-          <title>{[
-            format(p.date, 'PP'),
-            `Total birds: ${p.totalBirds ?? '—'}`,
-            `Players: ${p.totalPlayers ?? '—'}`,
-            `Courts: ${p.totalCourts ?? '—'}`,
-            `Avg birds/court: ${fmt(p.value)}`,
-          ].join('\n')}</title>
-        </circle>
+        <g key={i}>
+          <circle
+            cx={xScale(p.date.getTime())} cy={yScale(p.value)} r={10}
+            fill="transparent"
+            style={{ cursor: 'pointer' }}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(h => (h === i ? null : h))}
+          />
+          <circle
+            cx={xScale(p.date.getTime())} cy={yScale(p.value)} r={hover === i ? 6 : 4}
+            fill="#1c7ed6" pointerEvents="none"
+          />
+        </g>
       ))}
+
+      {/* Hover tooltip (drawn in-SVG so it scales and appears instantly) */}
+      {hover !== null && (() => {
+        const p = data[hover];
+        const px = xScale(p.date.getTime());
+        const py = yScale(p.value);
+        const lines = [
+          format(p.date, 'PP'),
+          `Total birds: ${p.totalBirds ?? '—'}`,
+          `Players: ${p.totalPlayers ?? '—'}`,
+          `Courts: ${p.totalCourts ?? '—'}`,
+          `Avg birds/court: ${fmt(p.value)}`,
+        ];
+        const boxW = 158;
+        const lineH = 15;
+        const boxH = lines.length * lineH + 10;
+        let bx = px + 12;
+        if (bx + boxW > W - 4) bx = px - 12 - boxW;
+        let by = Math.max(4, Math.min(py - boxH / 2, H - boxH - 4));
+        return (
+          <g pointerEvents="none">
+            <rect x={bx} y={by} width={boxW} height={boxH} rx={4} fill="#212529" opacity={0.92} />
+            {lines.map((ln, i) => (
+              <text key={i} x={bx + 8} y={by + 16 + i * lineH} fontSize={11} fill="#f1f3f5">{ln}</text>
+            ))}
+          </g>
+        );
+      })()}
     </svg>
   );
 }
