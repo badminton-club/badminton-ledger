@@ -2,8 +2,11 @@ import React from 'react';
 import { format } from 'date-fns';
 
 export interface UsagePoint {
-  date:  Date;
-  value: number;
+  date:          Date;
+  value:         number; // avg birds per court
+  totalBirds?:   number;
+  totalPlayers?: number;
+  totalCourts?:  number;
 }
 
 /**
@@ -78,7 +81,13 @@ export default function BirdieUsageChart({ points }: { points: UsagePoint[] }) {
       {/* Points */}
       {data.map((p, i) => (
         <circle key={i} cx={xScale(p.date.getTime())} cy={yScale(p.value)} r={4} fill="#1c7ed6">
-          <title>{`${format(p.date, 'PP')}: ${fmt(p.value)} birds/court`}</title>
+          <title>{[
+            format(p.date, 'PP'),
+            `Total birds: ${p.totalBirds ?? '—'}`,
+            `Players: ${p.totalPlayers ?? '—'}`,
+            `Courts: ${p.totalCourts ?? '—'}`,
+            `Avg birds/court: ${fmt(p.value)}`,
+          ].join('\n')}</title>
         </circle>
       ))}
     </svg>

@@ -9,7 +9,7 @@ import 'react-datepicker/dist/react-datepicker.css';
 import { Link } from 'react-router-dom';
 
 import AddBirdieBatchModal from 'components/AddBirdieBatchModal';
-import BirdieUsageChart from 'components/BirdieUsageChart';
+import BirdieUsageChart, { type UsagePoint } from 'components/BirdieUsageChart';
 import {
   fetchBirdieInventory,
   addBirdieBatch,
@@ -89,7 +89,7 @@ export default function BirdiesPage() {
   const [isSaving,         setIsSaving]         = useState(false);
   const [history,          setHistory]          = useState<HistoryItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [usagePoints,      setUsagePoints]      = useState<{ date: Date; value: number }[]>([]);
+  const [usagePoints,      setUsagePoints]      = useState<UsagePoint[]>([]);
 
   // ── Fetch history when selected batch changes ────────────────────────────────
   useEffect(() => {
@@ -147,6 +147,9 @@ export default function BirdiesPage() {
               return {
                 date:  s.date instanceof Date ? s.date : new Date(s.date as unknown as string),
                 value: totalBirds / courts,
+                totalBirds,
+                totalPlayers: s.players?.length ?? 0,
+                totalCourts:  s.courtCount ?? 0,
               };
             })
             .filter(p => p.value > 0),
