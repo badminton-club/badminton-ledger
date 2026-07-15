@@ -15,7 +15,7 @@ import { subscribeToPlayers } from './features/players/playersSlice';
 import { useAppDispatch, useAppSelector } from './hooks';
 import { setCurrentClubId } from './services/firebase/client';
 import { useClubBootstrap } from './features/club/useClubBootstrap';
-import { selectCurrentClubId, selectClubReady, selectClubRole } from './features/club/clubSlice';
+import { selectCurrentClubId, selectClubReady, selectClubRole, selectSignedIn } from './features/club/clubSlice';
 
 function ClubLoading() {
   return (
@@ -25,12 +25,14 @@ function ClubLoading() {
   );
 }
 
-// Requires a selected club; otherwise sends the user to the account page to pick one.
+// Requires a signed-in user with a selected club; otherwise sends the user to the
+// account page to sign in and/or pick a club.
 function RequireClub({ children }: { children: React.ReactElement }) {
   const ready = useAppSelector(selectClubReady);
+  const signedIn = useAppSelector(selectSignedIn);
   const clubId = useAppSelector(selectCurrentClubId);
   if (!ready) return <ClubLoading />;
-  if (!clubId) return <Navigate to="/auth" replace />;
+  if (!signedIn || !clubId) return <Navigate to="/auth" replace />;
   return children;
 }
 
