@@ -291,7 +291,10 @@ export async function editSession(
         tx.update(snap.ref, { remainingHours: d.remainingHours - delta });
       });
 
-      // ── Player balance deltas ──────────────────────────────────────────────────────
+      // ── Player balance + membership deltas ─────────────────────────────────────────
+      // Every player is debited their cost at creation, so any cost change (including
+      // players added to or removed from the session) must adjust the balance, and the
+      // sessionCount must track membership — regardless of paid state.
       allPlayerIds.forEach(id => {
         const snap      = playerMap.get(id)!;
         if (!snap.exists()) return;
@@ -300,15 +303,27 @@ export async function editSession(
 
         const oldCost   = oldPlayer?.cost ?? 0;
         const newCost   = newPlayer?.cost ?? 0;
-        const costDelta = newCost - oldCost;  // was inverted in original
+        const costDelta = newCost - oldCost;
+        const membershipDelta = (newPlayer ? 1 : 0) - (oldPlayer ? 1 : 0);
+        if (costDelta === 0 && membershipDelta === 0) return;
 
-        // Only adjust balance if the player was/is a paid participant
-        const wasPaid   = oldPlayer?.paid ?? false;
-        if (costDelta === 0) return;
+        const before = (snap.data()?.balance as number) ?? 0;
+        tx.update(snap.ref, {
+          balance: increment(-costDelta),
+          ...(membershipDelta !== 0 ? { sessionCount: increment(membershipDelta) } : {}),
+        });
 
-        // If they've already paid, adjust their balance to reflect the new amount
-        if (wasPaid) {
-          tx.update(snap.ref, { balance: increment(-costDelta) });
+        if (costDelta !== 0) {
+          tx.set(doc(refs.balanceLedger), {
+            playerId:      id,
+            sessionId,
+            delta:         -costDelta,
+            balanceBefore: before,
+            balanceAfter:  before - costDelta,
+            reason:        'session-edit',
+            note:          `Session edit (${oldCost.toFixed(2)} → ${newCost.toFixed(2)})`,
+            createdAt:     serverTimestamp(),
+          });
         }
       });
     });

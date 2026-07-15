@@ -12,7 +12,7 @@ import {
   setAddError,
 } from '../../../features/SessionModal/sessionModalSlice';
 
-import { selectPlayerById } from '../../../features/players/playersSlice';
+import { selectPlayerById, selectAllPlayers } from '../../../features/players/playersSlice';
 import { fetchBirdieInventory, fetchCourtCredits } from '../../../services/firebase';
 import type {
   BirdieBatch, CourtCreditBatch, Session,
@@ -55,6 +55,8 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
   const dispatch          = useAppDispatch();
   const confirmedPlayers  = useAppSelector(selectConfirmedPlayers);
   const addError          = useAppSelector(selectAddError);
+  const allPlayers        = useAppSelector(selectAllPlayers);
+  const [playerToAdd, setPlayerToAdd] = useState('');
 
   const [courtCount,      setCourtCount]      = useState(session ? String(
     Math.round((session.courtCreditUsage?.reduce((s, c) => s + c.hoursUsed, 0) ?? 0) / 2)
@@ -168,6 +170,12 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
     ));
   };
 
+  const handleAddPlayer = () => {
+    if (!playerToAdd || confirmedPlayers.some(p => p.id === playerToAdd)) return;
+    dispatch(setConfirmedPlayers([...confirmedPlayers, { id: playerToAdd, percentage: 1 }]));
+    setPlayerToAdd('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     await onSave({
@@ -200,6 +208,26 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
           onRemove={() => dispatch(setConfirmedPlayers(confirmedPlayers.filter(p => p.id !== player.id)))}
         />
       ))}
+
+      <Row className="mb-3">
+        <Col md={8}>
+          <InputGroup size="sm">
+            <Form.Select value={playerToAdd} onChange={e => setPlayerToAdd(e.target.value)}>
+              <option value="">+ Add player…</option>
+              {allPlayers
+                .filter(p => !confirmedPlayers.some(cp => cp.id === p.id))
+                .map(p => (
+                  <option key={p.id} value={p.id}>
+                    {[p.firstName, p.lastName].filter(Boolean).join(' ')}
+                  </option>
+                ))}
+            </Form.Select>
+            <Button variant="outline-primary" disabled={!playerToAdd} onClick={handleAddPlayer}>
+              Add
+            </Button>
+          </InputGroup>
+        </Col>
+      </Row>
 
       {/* ── Courts ──────────────────────────────────────────────────────── */}
       <Form.Group className="my-3">
