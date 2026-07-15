@@ -3,6 +3,7 @@ import {
   getDocs,
   setDoc,
   updateDoc,
+  deleteDoc,
   writeBatch,
   arrayUnion,
   arrayRemove,
@@ -18,7 +19,7 @@ import {
   CLUB_DATA_COLLECTIONS,
 } from './client';
 import { serviceCall } from './utils';
-import type { UserProfile, Club, ClubRole, UserClub } from 'types';
+import type { UserProfile, Club, ClubRole, ClubMember, UserClub } from 'types';
 
 const EMPTY_PROFILE: UserProfile = { clubs: [], lastVisitedClub: null };
 
@@ -123,6 +124,50 @@ export async function setLastVisitedClub(uid: string, clubId: string): Promise<v
 export async function addClubMember(clubId: string, uid: string, role: ClubRole): Promise<void> {
   return serviceCall('addClubMember', async () => {
     await setDoc(memberDoc(clubId, uid), { role, addedAt: serverTimestamp() }, { merge: true });
+  });
+}
+
+/** Reads the caller's linked player id in a club (null if unlinked or not a member). */
+export async function fetchMemberPlayerId(clubId: string, uid: string): Promise<string | null> {
+  return serviceCall('fetchMemberPlayerId', async () => {
+    try {
+      const snap = await getDoc(memberDoc(clubId, uid));
+      if (!snap.exists()) return null;
+      return (snap.data().playerId as string | undefined) ?? null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+/** Lists all members of a club (admin-only). */
+export async function fetchClubMembers(clubId: string): Promise<ClubMember[]> {
+  return serviceCall('fetchClubMembers', async () => {
+    const snap = await getDocs(membersRef(clubId));
+    return snap.docs.map((d) => ({
+      uid: d.id,
+      role: (d.data().role as ClubRole) ?? 'member',
+      playerId: (d.data().playerId as string | undefined) ?? null,
+    }));
+  });
+}
+
+/** Links (or unlinks) a member to a player. Creates the membership as 'member' if new. */
+export async function setMemberPlayer(clubId: string, uid: string, playerId: string | null): Promise<void> {
+  return serviceCall('setMemberPlayer', async () => {
+    const snap = await getDoc(memberDoc(clubId, uid));
+    if (snap.exists()) {
+      await updateDoc(memberDoc(clubId, uid), { playerId });
+    } else {
+      await setDoc(memberDoc(clubId, uid), { role: 'member', playerId, addedAt: serverTimestamp() });
+    }
+  });
+}
+
+/** Removes a member from a club (admin-only). */
+export async function removeClubMember(clubId: string, uid: string): Promise<void> {
+  return serviceCall('removeClubMember', async () => {
+    await deleteDoc(memberDoc(clubId, uid));
   });
 }
 

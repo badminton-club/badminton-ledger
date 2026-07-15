@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup } from 'react-bootstrap';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup, Badge } from 'react-bootstrap';
 import { clearAllData, exportAllData, restoreAllData, CLEARABLE_COLLECTIONS, type ClearSummary, type BackupData } from '../services/firebase/admin';
-import { addClubMember, setClubTabEnabled, deleteClub, fetchUserClubs } from '../services/firebase';
+import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
+import { selectAllPlayers } from '../features/players/playersSlice';
 import {
   selectIsClubAdmin,
   selectCurrentClubId,
@@ -13,6 +14,7 @@ import {
   setCurrentClub,
 } from '../features/club/clubSlice';
 import { TOGGLEABLE_TABS } from '../features/club/tabs';
+import type { ClubMember, ClubRole } from '../types';
 
 const CONFIRM_PHRASE = 'CLEAR ALL DATA';
 
@@ -21,6 +23,7 @@ export default function SettingsPage() {
   const isAdmin = useAppSelector(selectIsClubAdmin);
   const clubId = useAppSelector(selectCurrentClubId);
   const disabledTabs = useAppSelector(selectDisabledTabs);
+  const players = useAppSelector(selectAllPlayers);
   const uid = auth.currentUser?.uid ?? null;
   const checkingAdmin = false;
   const [confirmText, setConfirmText] = useState('');
@@ -32,11 +35,13 @@ export default function SettingsPage() {
   const [restoreResult, setRestoreResult] = useState<ClearSummary | null>(null);
   const [ioError, setIoError] = useState('');
 
-  const [newAdminUid, setNewAdminUid] = useState('');
-  const [addingAdmin, setAddingAdmin] = useState(false);
-  const [adminMsg, setAdminMsg] = useState('');
-  const [adminError, setAdminError] = useState('');
-
+  const [members, setMembers] = useState<ClubMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState('');
+  const [newMemberUid, setNewMemberUid] = useState('');
+  const [newMemberRole, setNewMemberRole] = useState<ClubRole>('member');
+  const [addingMember, setAddingMember] = useState(false);
+  const [assigningUid, setAssigningUid] = useState<string | null>(null);
   const [togglingTab, setTogglingTab] = useState<string | null>(null);
   const [tabsError, setTabsError] = useState('');
 
@@ -44,21 +49,64 @@ export default function SettingsPage() {
   const [deletingClub, setDeletingClub] = useState(false);
   const [deleteClubError, setDeleteClubError] = useState('');
 
-  const handleAddAdmin = async () => {
-    if (!clubId) return;
-    setAdminError('');
-    setAdminMsg('');
-    const target = newAdminUid.trim();
-    if (!target) { setAdminError('Enter a user ID.'); return; }
-    setAddingAdmin(true);
+  const loadMembers = useCallback(async () => {
+    if (!clubId) { setMembers([]); return; }
+    setMembersLoading(true);
+    setMembersError('');
     try {
-      await addClubMember(clubId, target, 'admin');
-      setAdminMsg(`Added ${target} as an admin.`);
-      setNewAdminUid('');
+      setMembers(await fetchClubMembers(clubId));
     } catch (err) {
-      setAdminError(err instanceof Error ? err.message : 'Failed to add admin.');
+      setMembersError(err instanceof Error ? err.message : 'Failed to load members.');
     } finally {
-      setAddingAdmin(false);
+      setMembersLoading(false);
+    }
+  }, [clubId]);
+
+  useEffect(() => { if (isAdmin && clubId) loadMembers(); }, [isAdmin, clubId, loadMembers]);
+
+  const handleAddMember = async () => {
+    if (!clubId) return;
+    const target = newMemberUid.trim();
+    if (!target) { setMembersError('Enter a user ID.'); return; }
+    setMembersError('');
+    setAddingMember(true);
+    try {
+      await addClubMember(clubId, target, newMemberRole);
+      setNewMemberUid('');
+      await loadMembers();
+    } catch (err) {
+      setMembersError(err instanceof Error ? err.message : 'Failed to add member.');
+    } finally {
+      setAddingMember(false);
+    }
+  };
+
+  const handleAssignPlayer = async (memberUid: string, pid: string | null) => {
+    if (!clubId) return;
+    setMembersError('');
+    setAssigningUid(memberUid);
+    try {
+      await setMemberPlayer(clubId, memberUid, pid);
+      await loadMembers();
+    } catch (err) {
+      setMembersError(err instanceof Error ? err.message : 'Failed to link player.');
+    } finally {
+      setAssigningUid(null);
+    }
+  };
+
+  const handleRemoveMember = async (memberUid: string) => {
+    if (!clubId) return;
+    if (!window.confirm('Remove this member from the club?')) return;
+    setMembersError('');
+    setAssigningUid(memberUid);
+    try {
+      await removeClubMember(clubId, memberUid);
+      await loadMembers();
+    } catch (err) {
+      setMembersError(err instanceof Error ? err.message : 'Failed to remove member.');
+    } finally {
+      setAssigningUid(null);
     }
   };
 
@@ -203,25 +251,69 @@ export default function SettingsPage() {
       </Card>
 
       <Card className="mt-3">
-        <Card.Header>Admins</Card.Header>
+        <Card.Header>Members &amp; player links</Card.Header>
         <Card.Body>
           <Card.Text className="text-muted">
-            Enter a user's ID (they can find it on their Account page after signing in). They'll get
-            full admin access to this club.
+            Add people by their user ID (shown on their Account page) and link each to a player so
+            they can see their own attendance.
           </Card.Text>
-          <InputGroup>
+
+          <InputGroup className="mb-3">
             <Form.Control
               placeholder="User ID"
-              value={newAdminUid}
-              onChange={(e) => setNewAdminUid(e.target.value)}
-              disabled={addingAdmin}
+              value={newMemberUid}
+              onChange={(e) => setNewMemberUid(e.target.value)}
+              disabled={addingMember}
             />
-            <Button variant="primary" onClick={handleAddAdmin} disabled={addingAdmin || !newAdminUid.trim()}>
-              {addingAdmin ? <Spinner size="sm" animation="border" /> : 'Add admin'}
+            <Form.Select
+              value={newMemberRole}
+              onChange={(e) => setNewMemberRole(e.target.value as ClubRole)}
+              disabled={addingMember}
+              style={{ maxWidth: 130 }}
+            >
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </Form.Select>
+            <Button variant="primary" onClick={handleAddMember} disabled={addingMember || !newMemberUid.trim()}>
+              {addingMember ? <Spinner size="sm" animation="border" /> : 'Add'}
             </Button>
           </InputGroup>
-          {adminMsg && <Alert variant="success" className="mt-2 mb-0 py-2">{adminMsg}</Alert>}
-          {adminError && <Alert variant="danger" className="mt-2 mb-0 py-2">{adminError}</Alert>}
+
+          {membersError && <Alert variant="danger" className="py-2">{membersError}</Alert>}
+
+          {membersLoading ? (
+            <Spinner animation="border" size="sm" />
+          ) : members.length === 0 ? (
+            <p className="text-muted mb-0">No members yet.</p>
+          ) : (
+            <ListGroup variant="flush">
+              {members.map((m) => (
+                <ListGroup.Item key={m.uid} className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                  <span className="text-truncate" style={{ maxWidth: 180 }} title={m.uid}>
+                    <code>{m.uid.slice(0, 10)}…</code>
+                    <Badge bg={m.role === 'admin' ? 'success' : 'secondary'} className="ms-2">{m.role}</Badge>
+                  </span>
+                  <span className="d-flex align-items-center gap-2">
+                    <Form.Select
+                      size="sm"
+                      value={m.playerId ?? ''}
+                      onChange={(e) => handleAssignPlayer(m.uid, e.target.value || null)}
+                      disabled={assigningUid === m.uid}
+                      style={{ minWidth: 160 }}
+                    >
+                      <option value="">— not linked —</option>
+                      {players.map((p) => (
+                        <option key={p.id} value={p.id}>{`${p.firstName} ${p.lastName ?? ''}`.trim()}</option>
+                      ))}
+                    </Form.Select>
+                    <Button size="sm" variant="outline-danger" disabled={assigningUid === m.uid} onClick={() => handleRemoveMember(m.uid)}>
+                      Remove
+                    </Button>
+                  </span>
+                </ListGroup.Item>
+              ))}
+            </ListGroup>
+          )}
         </Card.Body>
       </Card>
 

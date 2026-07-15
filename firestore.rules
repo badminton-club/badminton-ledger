@@ -18,6 +18,11 @@ service cloud.firestore {
     function isClubAdmin(clubId) {
       return isMember(clubId) && memberRole(clubId) == 'admin';
     }
+    // The player a member is linked to ('' when unlinked) — used so a member can read
+    // only their own balance-ledger entries.
+    function memberPlayerId(clubId) {
+      return get(/databases/$(database)/documents/clubs/$(clubId)/members/$(request.auth.uid)).data.get('playerId', '');
+    }
     // Bootstrap: whoever created the club (its ownerUid) can grant themselves the
     // first admin membership before any admin exists.
     function isClubOwner(clubId) {
@@ -47,7 +52,12 @@ service cloud.firestore {
       match /courtCredits/{doc}          { allow read, write: if isClubAdmin(clubId); }
       match /inventoryAdjustments/{doc}  { allow read, write: if isClubAdmin(clubId); }
       match /transactions/{doc}          { allow read, write: if isClubAdmin(clubId); }
-      match /balanceLedger/{doc}         { allow read, write: if isClubAdmin(clubId); }
+      // Members may read only their own linked player's ledger; admins read/write all.
+      match /balanceLedger/{doc} {
+        allow read: if isClubAdmin(clubId)
+          || (isMember(clubId) && resource.data.playerId == memberPlayerId(clubId));
+        allow write: if isClubAdmin(clubId);
+      }
       match /archivedSessions/{doc}      { allow read, write: if isClubAdmin(clubId); }
       match /payouts/{doc}               { allow read, write: if isClubAdmin(clubId); }
     }
@@ -58,19 +68,19 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == uid;
     }
 
-    // ── Legacy pre-club collections ─────────────────────────────────────────────
-    // TEMPORARY: read-only access to the old top-level data so the one-time
-    // "import existing data" migration can copy it into a club. Safe to DELETE this
-    // block once every club has been migrated.
-    match /sessions/{doc}              { allow read: if isSignedIn(); }
-    match /players/{doc}               { allow read: if isSignedIn(); }
-    match /birdieInventory/{doc}       { allow read: if isSignedIn(); }
-    match /courtCredits/{doc}          { allow read: if isSignedIn(); }
-    match /inventoryAdjustments/{doc}  { allow read: if isSignedIn(); }
-    match /transactions/{doc}          { allow read: if isSignedIn(); }
-    match /balanceLedger/{doc}         { allow read: if isSignedIn(); }
-    match /archivedSessions/{doc}      { allow read: if isSignedIn(); }
-    match /payouts/{doc}               { allow read: if isSignedIn(); }
+    # // ── Legacy pre-club collections ─────────────────────────────────────────────
+    # // TEMPORARY: read-only access to the old top-level data so the one-time
+    # // "import existing data" migration can copy it into a club. Safe to DELETE this
+    # // block once every club has been migrated.
+    # match /sessions/{doc}              { allow read: if isSignedIn(); }
+    # match /players/{doc}               { allow read: if isSignedIn(); }
+    # match /birdieInventory/{doc}       { allow read: if isSignedIn(); }
+    # match /courtCredits/{doc}          { allow read: if isSignedIn(); }
+    # match /inventoryAdjustments/{doc}  { allow read: if isSignedIn(); }
+    # match /transactions/{doc}          { allow read: if isSignedIn(); }
+    # match /balanceLedger/{doc}         { allow read: if isSignedIn(); }
+    # match /archivedSessions/{doc}      { allow read: if isSignedIn(); }
+    # match /payouts/{doc}               { allow read: if isSignedIn(); }
 
     // ── Deny everything else ───────────────────────────────────────────────────
     match /{document=**} {

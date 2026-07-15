@@ -202,7 +202,28 @@ export interface Club {
 // clubs/{clubId}/members/{uid}
 export interface ClubMembership {
   role: ClubRole;
+  playerId?: string | null;   // the player record this user is linked to (set by an admin)
   addedAt?: Timestamp;
+}
+
+// A club member as presented to admins (member doc + its uid).
+export interface ClubMember {
+  uid: string;
+  role: ClubRole;
+  playerId: string | null;
+}
+
+// clubs/{clubId}/balanceLedger/{id} — one balance change for a player.
+export interface BalanceLedgerEntry {
+  id: string;
+  playerId: string;
+  sessionId: string | null;
+  delta: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  reason: string;
+  note?: string;
+  createdAt?: Timestamp;
 }
 
 // users/{uid} — the signed-in user's global profile (their saved club list + default)

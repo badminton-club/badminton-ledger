@@ -53,6 +53,11 @@ export default function AppNavbar() {
                         )}
                     </Nav>
                     <Nav className="ms-auto">
+                        {currentClubId && (
+                            <Nav.Link as={Link} to="/attendance">
+                                Attendance
+                            </Nav.Link>
+                        )}
                         {isAdmin && (
                             <>
                                 {TOGGLEABLE_TABS.filter((t) => !disabledTabs.includes(t.key)).map((t) => (
