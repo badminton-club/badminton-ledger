@@ -22,6 +22,7 @@ service cloud.firestore {
     match /transactions/{doc}          { allow read, write: if isAdmin(); }
     match /balanceLedger/{doc}         { allow read, write: if isAdmin(); }
     match /archivedSessions/{doc}      { allow read, write: if isAdmin(); }
+    match /payouts/{doc}               { allow read, write: if isAdmin(); }
 
     // ── Admin membership ───────────────────────────────────────────────────────
     // Signed-in users may read (so the app can check their own admin status),
