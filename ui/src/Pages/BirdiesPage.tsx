@@ -189,7 +189,7 @@ export default function BirdiesPage() {
     setShowAddModal(false);
   };
 
-  const handleSelectBatch = (batch: BirdieBatch) => {
+  const handleSelectBatch = (batch: BirdieBatch | null) => {
     setSelectedBatch(batch);
     setIsEditing(false);
     setEditForm(null);
@@ -289,7 +289,7 @@ export default function BirdiesPage() {
           {sorted.map(batch => (
             <tr
               key={batch.id}
-              onClick={(e) => { e.stopPropagation(); handleSelectBatch(batch); }}
+              onClick={(e) => { e.stopPropagation(); handleSelectBatch(selectedBatch?.id === batch.id ? null : batch); }}
               style={{ cursor: 'pointer' }}
               className={selectedBatch?.id === batch.id ? 'table-primary' : ''}
             >
