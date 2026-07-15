@@ -30,8 +30,9 @@ export default function BirdieUsageChart({ points }: { points: UsagePoint[] }) {
   const xScale = (t: number) =>
     maxT === minT ? M.left + innerW / 2 : M.left + ((t - minT) / (maxT - minT)) * innerW;
   const yScale = (v: number) => M.top + innerH - (v / maxV) * innerH;
+  const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
-  const yTicks = Array.from({ length: 5 }, (_, i) => Math.round((maxV / 4) * i));
+  const yTicks = Array.from({ length: 5 }, (_, i) => (maxV / 4) * i);
   const linePath = data
     .map((p, i) => `${i === 0 ? 'M' : 'L'} ${xScale(p.date.getTime()).toFixed(1)} ${yScale(p.value).toFixed(1)}`)
     .join(' ');
@@ -48,7 +49,7 @@ export default function BirdieUsageChart({ points }: { points: UsagePoint[] }) {
         return (
           <g key={i}>
             <line x1={M.left} x2={W - M.right} y1={yy} y2={yy} stroke="#e9ecef" />
-            <text x={M.left - 8} y={yy + 3} textAnchor="end" fontSize={10} fill="#868e96">{t}</text>
+            <text x={M.left - 8} y={yy + 3} textAnchor="end" fontSize={10} fill="#868e96">{fmt(t)}</text>
           </g>
         );
       })}
@@ -68,7 +69,7 @@ export default function BirdieUsageChart({ points }: { points: UsagePoint[] }) {
         transform={`translate(12 ${M.top + innerH / 2}) rotate(-90)`}
         textAnchor="middle" fontSize={11} fill="#495057"
       >
-        Birds used
+        Birds / court
       </text>
 
       {/* Trend line */}
@@ -77,7 +78,7 @@ export default function BirdieUsageChart({ points }: { points: UsagePoint[] }) {
       {/* Points */}
       {data.map((p, i) => (
         <circle key={i} cx={xScale(p.date.getTime())} cy={yScale(p.value)} r={4} fill="#1c7ed6">
-          <title>{`${format(p.date, 'PP')}: ${p.value} birds`}</title>
+          <title>{`${format(p.date, 'PP')}: ${fmt(p.value)} birds/court`}</title>
         </circle>
       ))}
     </svg>

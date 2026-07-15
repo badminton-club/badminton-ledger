@@ -141,10 +141,14 @@ export default function BirdiesPage() {
       .then(sessions => {
         setUsagePoints(
           sessions
-            .map(s => ({
-              date:  s.date instanceof Date ? s.date : new Date(s.date as unknown as string),
-              value: (s.birdieUsage ?? []).reduce((sum, u) => sum + (u.quantity ?? 0), 0),
-            }))
+            .map(s => {
+              const totalBirds = (s.birdieUsage ?? []).reduce((sum, u) => sum + (u.quantity ?? 0), 0);
+              const courts = s.courtCount || 1;
+              return {
+                date:  s.date instanceof Date ? s.date : new Date(s.date as unknown as string),
+                value: totalBirds / courts,
+              };
+            })
             .filter(p => p.value > 0),
         );
       })
@@ -302,7 +306,7 @@ export default function BirdiesPage() {
     if (!selectedBatch) {
       return (
         <Card className="h-100">
-          <Card.Header><Card.Title className="h6 mb-0">Birds used per session</Card.Title></Card.Header>
+          <Card.Header><Card.Title className="h6 mb-0">Avg birds used per court (per session)</Card.Title></Card.Header>
           <Card.Body>
             <BirdieUsageChart points={usagePoints} />
             <p className="text-muted small text-center mt-2 mb-0">
