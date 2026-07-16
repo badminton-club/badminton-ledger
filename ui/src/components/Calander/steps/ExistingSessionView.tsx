@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Alert, Badge, Button, ButtonGroup, Col, Form, ListGroup, Row } from 'react-bootstrap';
+import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { useAppSelector } from 'hooks';
 import { selectPlayerById } from '../../../features/players/playersSlice';
@@ -186,7 +187,11 @@ function PlayerRow({
         transition:      'background-color 0.2s',
       }}
     >
-      <span>{name}</span>
+      <span>
+        {isAdmin
+          ? <Link to={`/players?playerId=${player.id}`}>{name}</Link>
+          : name}
+      </span>
       <div className="d-flex align-items-center gap-2">
         <span className={player.paid ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
         {isAdmin ? (
