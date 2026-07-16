@@ -18,6 +18,8 @@ import type {
 // Balance-ledger reasons shown in the payout ledger. Payments and manual balance
 // adjustments are money collected by the club and owed to the owner. Comps are shown
 // for record keeping but NOT counted — the player paid the owner directly.
+// Manual adjustments made with "Include in owner payout" unchecked are logged as
+// 'manual-excluded' and intentionally omitted here, so they never affect the payout.
 const LEDGER_REASONS = ['payment', 'manual', 'comp'];
 
 /**

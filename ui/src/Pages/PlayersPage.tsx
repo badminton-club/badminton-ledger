@@ -32,6 +32,7 @@ interface BalanceAdjustment {
   amount: string;
   reason: string;
   type:   'credit' | 'debit';
+  includeInPayout: boolean;
 }
 
 interface LedgerEntry {
@@ -45,7 +46,7 @@ interface LedgerEntry {
   sessionId?:    string;
 }
 
-const INIT_BALANCE: BalanceAdjustment = { amount: '', reason: '', type: 'credit' };
+const INIT_BALANCE: BalanceAdjustment = { amount: '', reason: '', type: 'credit', includeInPayout: true };
 
 function formatPlayerName(player: Pick<Player, 'firstName' | 'lastName'>): string {
   return [player.firstName, player.lastName].filter(Boolean).join(' ');
@@ -227,7 +228,9 @@ console.log("selectedPlayer ==> ", selectedPlayer);
           delta,
           balanceBefore: before,
           balanceAfter:  before + delta,
-          reason:        'manual',
+          // 'manual' counts toward the owner payout; 'manual-excluded' is a balance
+          // change the club doesn't owe the owner (e.g. correcting an error).
+          reason:        balanceAdjustment.includeInPayout ? 'manual' : 'manual-excluded',
           note:          balanceAdjustment.reason.trim(),
           createdAt:     serverTimestamp(),
         });
@@ -299,10 +302,15 @@ console.log("selectedPlayer ==> ", selectedPlayer);
 
   const getDeltaLabel = (reason: string) => {
     const map: Record<string, string> = {
-      session_add:  'Session',
-      session_edit: 'Edit',
-      payment:      'Payment',
-      manual:       'Manual',
+      session:           'Session',
+      session_add:       'Session',
+      'session-edit':    'Edit',
+      session_edit:      'Edit',
+      payment:           'Payment',
+      comp:              'Comp',
+      settlement:        'Settlement',
+      manual:            'Manual',
+      'manual-excluded': 'Manual (off payout)',
     };
     return map[reason] ?? reason;
   };
@@ -474,6 +482,14 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                           onChange={e => setBalanceAdjustment(p => ({ ...p, reason: e.target.value }))}
                           className="mb-2"
                           required
+                        />
+                        <Form.Check
+                          type="checkbox"
+                          id="balance-include-in-payout"
+                          label="Include in owner payout"
+                          checked={balanceAdjustment.includeInPayout}
+                          onChange={e => setBalanceAdjustment(p => ({ ...p, includeInPayout: e.target.checked }))}
+                          className="mb-2"
                         />
                         <Button type="submit" variant="primary" size="sm" disabled={isUpdatingBalance}>
                           {isUpdatingBalance
