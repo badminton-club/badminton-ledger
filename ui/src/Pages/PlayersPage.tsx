@@ -25,6 +25,7 @@ import {
   selectAllPlayers, selectPlayerById,
   selectPlayersStatus, selectPlayersError,
 } from '../features/players/playersSlice';
+import { selectDisabledTabs } from '../features/club/clubSlice';
 import type { NewPlayerInput, PaidVia, Player, Session } from '../types';
 import type { RootState } from '../store';
 
@@ -58,6 +59,8 @@ export default function PlayersPage() {
   const playersList   = useAppSelector(selectAllPlayers);
   const playersStatus = useAppSelector(selectPlayersStatus);
   const playersError  = useAppSelector(selectPlayersError);
+  const disabledTabs  = useAppSelector(selectDisabledTabs);
+  const payoutEnabled = !disabledTabs.includes('payout');
   const selectedPlayer = useAppSelector((s: RootState) =>
     searchParams.get('playerId') ? selectPlayerById(s, searchParams.get('playerId')!) : null
 );
@@ -472,14 +475,16 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                           className="mb-2"
                           required
                         />
-                        <Form.Check
-                          type="checkbox"
-                          id="balance-include-in-payout"
-                          label="Include in owner payout"
-                          checked={balanceAdjustment.includeInPayout}
-                          onChange={e => setBalanceAdjustment(p => ({ ...p, includeInPayout: e.target.checked }))}
-                          className="mb-2"
-                        />
+                        {payoutEnabled && (
+                          <Form.Check
+                            type="checkbox"
+                            id="balance-include-in-payout"
+                            label="Include in owner payout"
+                            checked={balanceAdjustment.includeInPayout}
+                            onChange={e => setBalanceAdjustment(p => ({ ...p, includeInPayout: e.target.checked }))}
+                            className="mb-2"
+                          />
+                        )}
                         <Button type="submit" variant="primary" size="sm" disabled={isUpdatingBalance}>
                           {isUpdatingBalance
                             ? <Spinner as="span" size="sm" animation="border" />

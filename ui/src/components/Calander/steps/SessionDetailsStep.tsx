@@ -13,6 +13,7 @@ import {
 } from '../../../features/SessionModal/sessionModalSlice';
 
 import { selectPlayerById, selectAllPlayers } from '../../../features/players/playersSlice';
+import { selectDisabledTabs } from '../../../features/club/clubSlice';
 import { fetchBirdieInventory, fetchCourtCredits } from '../../../services/firebase';
 import { addPlayer } from '../../../services/firebase/players';
 import AddPlayerModal from '../../AddPlayerModal';
@@ -58,6 +59,8 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
   const confirmedPlayers  = useAppSelector(selectConfirmedPlayers);
   const addError          = useAppSelector(selectAddError);
   const allPlayers        = useAppSelector(selectAllPlayers);
+  const disabledTabs      = useAppSelector(selectDisabledTabs);
+  const birdiesEnabled    = !disabledTabs.includes('birdies');
   const [playerToAdd, setPlayerToAdd] = useState('');
   const [showNewPlayerModal, setShowNewPlayerModal] = useState(false);
 
@@ -312,6 +315,7 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
       </Form.Group>
 
       {/* ── Birdies ─────────────────────────────────────────────────────── */}
+      {birdiesEnabled && (<>
       <Form.Label className="fw-semibold">Birdies Used</Form.Label>
       {birdieUsage.map((usage, i) => {
         const batch = birdieInventory.find(b => b.id === usage.id);
@@ -360,12 +364,13 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
       >
         + Add another birdie batch
       </Button>
+      </>)}
 
       {/* ── Cost summary ────────────────────────────────────────────────── */}
       <div className="p-3 bg-light border rounded mb-3">
         <h6 className="mb-2">Session Cost Summary</h6>
         <CostRow label="Court cost"  value={totalCourtCost} />
-        <CostRow label="Birdie cost" value={totalBirdieCost} />
+        {birdiesEnabled && <CostRow label="Birdie cost" value={totalBirdieCost} />}
         <CostRow label="Total"       value={totalSessionCost} bold />
         {confirmedPlayers.length > 0 && (
           <CostRow

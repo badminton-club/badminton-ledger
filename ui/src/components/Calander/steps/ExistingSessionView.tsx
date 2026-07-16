@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { useAppSelector } from 'hooks';
 import { selectPlayerById } from '../../../features/players/playersSlice';
-import { selectIsClubAdmin } from '../../../features/club/clubSlice';
+import { selectDisabledTabs, selectIsClubAdmin } from '../../../features/club/clubSlice';
 import { setPlayerSettlement, togglePlayerHighlightStatus } from '../../../services/firebase';
 import type { PaidVia, Session, SessionPlayer } from 'types';
 import type { RootState } from '../../../store';
@@ -18,6 +18,8 @@ interface Props {
 
 export default function ExistingSessionView({ session, onSessionUpdate, onEdit, onDelete }: Props) {
   const isAdmin = useAppSelector(selectIsClubAdmin);
+  const disabledTabs = useAppSelector(selectDisabledTabs);
+  const birdiesEnabled = !disabledTabs.includes('birdies');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteText, setDeleteText] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -53,7 +55,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
     <>
       <h6>Session Date: {format(session.date, 'PPP')}</h6>
       {session.location && <p><strong>Location:</strong> {session.location}</p>}
-      <p><strong>Birdies Used:</strong> {totalBirds || 'N/A'}</p>
+      {birdiesEnabled && <p><strong>Birdies Used:</strong> {totalBirds || 'N/A'}</p>}
 
       <h6 className="mt-3">Players</h6>
       <ListGroup variant="flush">
@@ -74,7 +76,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
       <div className="mt-4 p-3 bg-light border rounded">
         <h6 className="mb-2">Session Cost Summary</h6>
         <SummaryRow label="Total Court Cost"              value={`$${(session.totalCourtCost ?? 0).toFixed(2)}`} />
-        <SummaryRow label="Total Birdie Cost"             value={`$${(session.totalBirdieCost ?? 0).toFixed(2)}`} />
+        {birdiesEnabled && <SummaryRow label="Total Birdie Cost" value={`$${(session.totalBirdieCost ?? 0).toFixed(2)}`} />}
         <SummaryRow label="Total Session Cost"            value={`$${(session.totalSessionCost ?? 0).toFixed(2)}`} bold />
         <SummaryRow label="Players"                       value={String(session.players.length)} />
         <SummaryRow label="Unpaid players"                value={String(session.players.filter(p => !p.paid).length)} />
