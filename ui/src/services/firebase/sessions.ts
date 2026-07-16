@@ -16,6 +16,7 @@ import { serviceCall, toJSDate, deductBirds } from './utils';
 import type {
   Session,
   SessionPlayer,
+  PaidVia,
   BirdieUsage,
   CourtCreditUsage,
 } from 'types';
@@ -116,9 +117,21 @@ export async function addSession(data: NewSessionData): Promise<string> {
         if (!playerDocs[i].exists()) throw new Error(`Player ${player.id} not found`);
       });
 
+      // A player whose positive (prepaid) balance covers the session cost has
+      // effectively paid: the cost is drawn from their balance below, so mark them
+      // paid automatically instead of leaving them as owing.
+      const resolvedPlayers = data.players.map((player, i) => {
+        const before = (playerDocs[i].data()?.balance as number) ?? 0;
+        const coveredByBalance = before > 0 && player.cost > 0 && player.cost <= before;
+        return coveredByBalance && !player.paid && !player.comped
+          ? { ...player, paid: true, paidVia: 'balance' as const }
+          : player;
+      });
+
       // ── 3. Write session ──────────────────────────────────────────────────────────
       tx.set(sessionRef, {
         ...data,
+        players:   resolvedPlayers,
         id:        sessionRef.id,
         date:      Timestamp.fromDate(data.date),
         createdAt: serverTimestamp(),
@@ -235,9 +248,27 @@ export async function editSession(
       const courtMap   = new Map([...allCourtIds].map((id, i)  => [id, courtSnaps[i]]));
       const playerMap  = new Map([...allPlayerIds].map((id, i) => [id, playerSnaps[i]]));
 
+      // A player whose positive (prepaid) balance covers their session cost has
+      // effectively paid. Measure the balance on the same basis as addSession by
+      // reversing this session's currently-applied debit (an unsettled player was
+      // debited their old cost at creation), then auto-mark paid when it covers the
+      // new cost. editSession adjusts balances by cost delta regardless of paid
+      // state, so flipping this flag has no balance side effect.
+      const resolvedPlayers = updatedData.players.map((player) => {
+        const before    = (playerMap.get(player.id)?.data()?.balance as number) ?? 0;
+        const oldPlayer = original.players.find(p => p.id === player.id);
+        const appliedDebit = oldPlayer && !oldPlayer.paid && !oldPlayer.comped ? (oldPlayer.cost ?? 0) : 0;
+        const available = before + appliedDebit;
+        const coveredByBalance = available > 0 && player.cost > 0 && player.cost <= available;
+        return coveredByBalance && !player.paid && !player.comped
+          ? { ...player, paid: true, paidVia: 'balance' as const }
+          : player;
+      });
+
       // ── Write phase: update session ────────────────────────────────────────────────
       tx.update(sessionRef, {
         ...updatedData,
+        players:   resolvedPlayers,
         date:      Timestamp.fromDate(updatedData.date),
         updatedAt: serverTimestamp(),
       });
@@ -355,9 +386,15 @@ export async function togglePlayerPaidStatus(
 
       const nowPaid = !target.paid;
       const cost    = target.cost;
+      // Current settlement method (inferred for legacy docs written before paidVia).
+      const currentVia: PaidVia = target.paidVia ?? (target.comped ? 'comp' : target.paid ? 'etransfer' : null);
+      // The manual button always records an e-Transfer settlement with the club.
+      const nextVia: PaidVia = nowPaid ? 'etransfer' : null;
       // Paid and comped are mutually exclusive: marking paid clears any comp.
       const updatedPlayers = players.map(p =>
-        p.id === playerId ? { ...p, paid: nowPaid, comped: nowPaid ? false : (p.comped ?? false) } : p
+        p.id === playerId
+          ? { ...p, paid: nowPaid, paidVia: nextVia, comped: nowPaid ? false : (p.comped ?? false) }
+          : p
       );
       tx.update(sessionRef, { players: updatedPlayers });
 
@@ -376,7 +413,9 @@ export async function togglePlayerPaidStatus(
         // Reverse a prior comp settlement so the player isn't double-credited.
         if (target.comped) log(-cost, 'comp', 'Reversed — marked paid to club');
         log(cost, 'payment', 'Marked paid');
-      } else {
+      } else if (currentVia === 'etransfer') {
+        // Only reverse a real e-Transfer payment. A 'balance' settlement was drawn from
+        // the player's prepaid balance (no payment entry), so there's nothing to reverse.
         log(-cost, 'payment', 'Marked unpaid');
       }
 
@@ -415,8 +454,12 @@ export async function togglePlayerCompStatus(
 
       const nowComped = !target.comped;
       const cost      = target.cost;
+      // Current settlement method (inferred for legacy docs written before paidVia).
+      const currentVia: PaidVia = target.paidVia ?? (target.comped ? 'comp' : target.paid ? 'etransfer' : null);
       const updatedPlayers = players.map(p =>
-        p.id === playerId ? { ...p, comped: nowComped, paid: nowComped ? false : p.paid } : p
+        p.id === playerId
+          ? { ...p, comped: nowComped, paid: nowComped ? false : p.paid, paidVia: nowComped ? 'comp' as const : null }
+          : p
       );
       tx.update(sessionRef, { players: updatedPlayers });
 
@@ -432,8 +475,10 @@ export async function togglePlayerCompStatus(
       };
 
       if (nowComped) {
-        // If they had paid the club, reverse that payment so it leaves the owner payout.
-        if (target.paid) log(-cost, 'payment', 'Reversed — paid owner directly (comp)');
+        // If they'd paid the club by e-Transfer, reverse that payment so it leaves the
+        // owner payout. A 'balance' settlement has no payment entry — the comp credit
+        // below restores the balance that was drawn at session time.
+        if (currentVia === 'etransfer') log(-cost, 'payment', 'Reversed — paid owner directly (comp)');
         log(cost, 'comp', 'Comped — player paid owner directly');
       } else {
         log(-cost, 'comp', 'Comp removed');
@@ -441,6 +486,108 @@ export async function togglePlayerCompStatus(
 
       const netDelta = before - initial;
       if (netDelta !== 0) tx.update(playerRef, { balance: increment(netDelta) });
+    });
+  });
+}
+
+/**
+ * Sets how a player's session cost was settled, adjusting their balance for the
+ * change between the old and new method. The session's cost debit is permanent;
+ * methods differ only by an extra settlement credit:
+ *   - 'etransfer' → +cost logged as 'payment' (money owed to the owner)
+ *   - 'comp'      → +cost logged as 'comp'    (excluded from the owner payout)
+ *   - 'balance'   → no extra entry; the session debit is drawn from prepaid credit
+ *   - null        → unpaid; no extra entry, the player owes the cost
+ * 'balance' may leave the player negative (the caller warns first) and never affects payout.
+ */
+export async function setPlayerSettlement(
+  sessionId: string,
+  playerId: string,
+  method: PaidVia
+): Promise<void> {
+  return serviceCall('setPlayerSettlement', async () => {
+    const sessionRef = doc(refs.sessions, sessionId);
+    const playerRef  = doc(refs.players, playerId);
+
+    await runTransaction(db, async (tx) => {
+      const [sessionSnap, playerSnap] = await Promise.all([
+        tx.get(sessionRef),
+        tx.get(playerRef),
+      ]);
+
+      if (!sessionSnap.exists()) throw new Error(`Session ${sessionId} not found`);
+      if (!playerSnap.exists()) throw new Error(`Player ${playerId} not found`);
+
+      const players = sessionSnap.data().players as SessionPlayer[];
+      const target  = players.find(p => p.id === playerId);
+      if (!target) throw new Error(`Player ${playerId} not in session ${sessionId}`);
+
+      const cost = target.cost;
+      const currentVia: PaidVia =
+        target.paidVia ?? (target.comped ? 'comp' : target.paid ? 'etransfer' : null);
+      if (currentVia === method) return; // no change
+
+      let before = (playerSnap.data()?.balance as number) ?? 0;
+      const initial = before;
+      let logged = false;
+      const log = (delta: number, reason: string, note: string) => {
+        tx.set(doc(refs.balanceLedger), {
+          playerId, sessionId, delta,
+          balanceBefore: before, balanceAfter: before + delta,
+          reason, note, createdAt: serverTimestamp(),
+        });
+        before += delta;
+        logged = true;
+      };
+
+      // 'balance' draws the cost from prepaid credit and may leave the player negative
+      // (the UI warns before selecting it); it never affects the owner payout.
+
+      // Reverse the current method's settlement credit…
+      if (currentVia === 'etransfer') log(-cost, 'payment', 'Reversed e-Transfer payment');
+      else if (currentVia === 'comp')  log(-cost, 'comp', 'Reversed comp');
+      // …then apply the new method's settlement credit.
+      if (method === 'etransfer') log(cost, 'payment', 'Paid by e-Transfer');
+      else if (method === 'comp')  log(cost, 'comp', 'Comped — player paid owner directly');
+      else if (!logged) {
+        // Balance/unpaid don't move the balance (the session debit already stands),
+        // so record a zero-delta entry to keep the change in the balance history.
+        log(0, 'settlement', method === 'balance' ? 'Settled from prepaid balance' : 'Marked unpaid');
+      }
+
+      const updatedPlayers = players.map(p =>
+        p.id === playerId
+          ? {
+              ...p,
+              paid:    method === 'etransfer' || method === 'balance',
+              comped:  method === 'comp',
+              paidVia: method,
+            }
+          : p
+      );
+      tx.update(sessionRef, { players: updatedPlayers });
+
+      const netDelta = before - initial;
+      if (netDelta !== 0) tx.update(playerRef, { balance: increment(netDelta) });
+    });
+  });
+}
+
+export async function togglePlayerHighlightStatus(
+  sessionId: string,
+  playerId: string
+): Promise<void> {
+  return serviceCall('togglePlayerHighlightStatus', async () => {
+    const sessionRef = doc(refs.sessions, sessionId);
+
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(sessionRef);
+      if (!snap.exists()) throw new Error(`Session ${sessionId} not found`);
+
+      const players = (snap.data().players as SessionPlayer[]).map(p =>
+        p.id === playerId ? { ...p, highlighted: !p.highlighted } : p
+      );
+      tx.update(sessionRef, { players });
     });
   });
 }
