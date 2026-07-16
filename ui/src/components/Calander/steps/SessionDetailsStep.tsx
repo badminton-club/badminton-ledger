@@ -13,6 +13,7 @@ import {
 } from '../../../features/SessionModal/sessionModalSlice';
 
 import { selectPlayerById, selectAllPlayers } from '../../../features/players/playersSlice';
+import { selectDisabledTabs } from '../../../features/club/clubSlice';
 import { fetchBirdieInventory, fetchCourtCredits } from '../../../services/firebase';
 import { addPlayer } from '../../../services/firebase/players';
 import AddPlayerModal from '../../AddPlayerModal';
@@ -58,6 +59,8 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
   const confirmedPlayers  = useAppSelector(selectConfirmedPlayers);
   const addError          = useAppSelector(selectAddError);
   const allPlayers        = useAppSelector(selectAllPlayers);
+  const disabledTabs      = useAppSelector(selectDisabledTabs);
+  const playersEnabled    = !disabledTabs.includes('players');
   const [playerToAdd, setPlayerToAdd] = useState('');
   const [showNewPlayerModal, setShowNewPlayerModal] = useState(false);
 
@@ -203,43 +206,47 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
       {addError && <Alert variant="danger">{addError}</Alert>}
 
       {/* ── Players ─────────────────────────────────────────────────────── */}
-      <Row className="fw-bold mb-1">
-        <Col md={6}>Player</Col>
-        <Col md={4}>Cost / Fraction</Col>
-      </Row>
-      {playerCosts.map((player, i) => (
-        <PlayerRow
-          key={player.id}
-          playerId={player.id}
-          cost={player.cost}
-          percentage={player.percentage}
-          onPercentageChange={v => handlePercentageChange(player.id, v)}
-          onRemove={() => dispatch(setConfirmedPlayers(confirmedPlayers.filter(p => p.id !== player.id)))}
-        />
-      ))}
+      {playersEnabled && (
+        <>
+          <Row className="fw-bold mb-1">
+            <Col md={6}>Player</Col>
+            <Col md={4}>Cost / Fraction</Col>
+          </Row>
+          {playerCosts.map((player, i) => (
+            <PlayerRow
+              key={player.id}
+              playerId={player.id}
+              cost={player.cost}
+              percentage={player.percentage}
+              onPercentageChange={v => handlePercentageChange(player.id, v)}
+              onRemove={() => dispatch(setConfirmedPlayers(confirmedPlayers.filter(p => p.id !== player.id)))}
+            />
+          ))}
 
-      <Row className="mb-3">
-        <Col md={9}>
-          <InputGroup size="sm">
-            <Form.Select value={playerToAdd} onChange={e => setPlayerToAdd(e.target.value)}>
-              <option value="">+ Add existing player…</option>
-              {allPlayers
-                .filter(p => !confirmedPlayers.some(cp => cp.id === p.id))
-                .map(p => (
-                  <option key={p.id} value={p.id}>
-                    {[p.firstName, p.lastName].filter(Boolean).join(' ')}
-                  </option>
-                ))}
-            </Form.Select>
-            <Button variant="outline-primary" disabled={!playerToAdd} onClick={handleAddPlayer}>
-              Add
-            </Button>
-            <Button variant="outline-success" onClick={() => setShowNewPlayerModal(true)}>
-              + New player
-            </Button>
-          </InputGroup>
-        </Col>
-      </Row>
+          <Row className="mb-3">
+            <Col md={9}>
+              <InputGroup size="sm">
+                <Form.Select value={playerToAdd} onChange={e => setPlayerToAdd(e.target.value)}>
+                  <option value="">+ Add existing player…</option>
+                  {allPlayers
+                    .filter(p => !confirmedPlayers.some(cp => cp.id === p.id))
+                    .map(p => (
+                      <option key={p.id} value={p.id}>
+                        {[p.firstName, p.lastName].filter(Boolean).join(' ')}
+                      </option>
+                    ))}
+                </Form.Select>
+                <Button variant="outline-primary" disabled={!playerToAdd} onClick={handleAddPlayer}>
+                  Add
+                </Button>
+                <Button variant="outline-success" onClick={() => setShowNewPlayerModal(true)}>
+                  + New player
+                </Button>
+              </InputGroup>
+            </Col>
+          </Row>
+        </>
+      )}
 
       {/* ── Courts ──────────────────────────────────────────────────────── */}
       <Form.Group className="my-3">
