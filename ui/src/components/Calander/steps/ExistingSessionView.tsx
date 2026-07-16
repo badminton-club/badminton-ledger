@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Button, Col, Form, ListGroup, Row } from 'react-bootstrap';
+import { Alert, Badge, Button, ButtonGroup, Col, Form, ListGroup, Row } from 'react-bootstrap';
+import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { useAppSelector } from 'hooks';
 import { selectPlayerById } from '../../../features/players/playersSlice';
-import { selectIsClubAdmin } from '../../../features/club/clubSlice';
-import { togglePlayerHighlightStatus, togglePlayerPaidStatus, togglePlayerCompStatus } from '../../../services/firebase';
-import type { Session, SessionPlayer } from 'types';
+import { selectDisabledTabs, selectIsClubAdmin } from '../../../features/club/clubSlice';
+import { setPlayerSettlement, togglePlayerHighlightStatus } from '../../../services/firebase';
+import type { PaidVia, Session, SessionPlayer } from 'types';
 import type { RootState } from '../../../store';
 
 interface Props {
@@ -17,6 +18,8 @@ interface Props {
 
 export default function ExistingSessionView({ session, onSessionUpdate, onEdit, onDelete }: Props) {
   const isAdmin = useAppSelector(selectIsClubAdmin);
+  const disabledTabs = useAppSelector(selectDisabledTabs);
+  const birdiesEnabled = !disabledTabs.includes('birdies');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteText, setDeleteText] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -52,7 +55,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
     <>
       <h6>Session Date: {format(session.date, 'PPP')}</h6>
       {session.location && <p><strong>Location:</strong> {session.location}</p>}
-      <p><strong>Birdies Used:</strong> {totalBirds || 'N/A'}</p>
+      {birdiesEnabled && <p><strong>Birdies Used:</strong> {totalBirds || 'N/A'}</p>}
 
       <h6 className="mt-3">Players</h6>
       <ListGroup variant="flush">
@@ -64,8 +67,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
             key={player.id}
             player={player}
             isAdmin={isAdmin}
-            onTogglePaid={() => refresh(() => togglePlayerPaidStatus(session.id, player.id))}
-            onToggleComp={() => refresh(() => togglePlayerCompStatus(session.id, player.id))}
+            onSetSettlement={(method) => refresh(() => setPlayerSettlement(session.id, player.id, method))}
             onToggleHighlight={() => refresh(() => togglePlayerHighlightStatus(session.id, player.id))}
           />
         ))}
@@ -74,7 +76,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
       <div className="mt-4 p-3 bg-light border rounded">
         <h6 className="mb-2">Session Cost Summary</h6>
         <SummaryRow label="Total Court Cost"              value={`$${(session.totalCourtCost ?? 0).toFixed(2)}`} />
-        <SummaryRow label="Total Birdie Cost"             value={`$${(session.totalBirdieCost ?? 0).toFixed(2)}`} />
+        {birdiesEnabled && <SummaryRow label="Total Birdie Cost" value={`$${(session.totalBirdieCost ?? 0).toFixed(2)}`} />}
         <SummaryRow label="Total Session Cost"            value={`$${(session.totalSessionCost ?? 0).toFixed(2)}`} bold />
         <SummaryRow label="Players"                       value={String(session.players.length)} />
         <SummaryRow label="Unpaid players"                value={String(session.players.filter(p => !p.paid).length)} />
@@ -131,18 +133,53 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
 }
 
 function PlayerRow({
-  player, isAdmin, onTogglePaid, onToggleComp, onToggleHighlight,
+  player, isAdmin, onSetSettlement, onToggleHighlight,
 }: {
   player:            SessionPlayer;
   isAdmin:           boolean;
-  onTogglePaid:      () => void;
-  onToggleComp:      () => void;
+  onSetSettlement:   (method: PaidVia) => void;
   onToggleHighlight: () => void;
 }) {
   const stored = useAppSelector((s: RootState) => selectPlayerById(s, player.id));
   const name   = stored
     ? [stored.firstName, stored.lastName].filter(Boolean).join(' ')
     : player.id;
+
+  const currentVia: PaidVia =
+    player.paidVia ?? (player.comped ? 'comp' : player.paid ? 'etransfer' : null);
+
+  // Choosing 'balance' draws the session cost from prepaid credit; the session debit
+  // stands, so it can leave the player negative. Compute the resulting balance to warn.
+  const settledCredit = currentVia === 'etransfer' || currentVia === 'comp' ? player.cost : 0;
+  const balanceIfDrawn = (stored?.balance ?? 0) - settledCredit;
+
+  const handleSelect = (method: PaidVia) => {
+    if (method === currentVia) return;
+    if (method === 'balance' && balanceIfDrawn < 0) {
+      const ok = window.confirm(
+        `${name} doesn't have enough balance to cover $${player.cost.toFixed(2)}.\n` +
+        `Their balance will go to $${balanceIfDrawn.toFixed(2)} (negative). Continue?`
+      );
+      if (!ok) return;
+    }
+    onSetSettlement(method);
+  };
+
+  // Clearly marks how the session was settled (shown to members).
+  const settlement = player.comped
+    ? { label: 'Comp', bg: 'info' }
+    : player.paid
+      ? (player.paidVia === 'balance'
+          ? { label: 'Balance', bg: 'primary' }
+          : { label: 'e-Transfer', bg: 'success' })
+      : { label: 'Unpaid', bg: 'danger' };
+
+  const options: { method: PaidVia; label: string; activeVariant: string }[] = [
+    { method: null,        label: 'Unpaid',  activeVariant: 'danger'  },
+    { method: 'comp',      label: 'Comp',    activeVariant: 'info'    },
+    { method: 'balance',   label: 'Balance', activeVariant: 'primary' },
+    { method: 'etransfer', label: 'e-Trans', activeVariant: 'success' },
+  ];
 
   return (
     <ListGroup.Item
@@ -152,7 +189,11 @@ function PlayerRow({
         transition:      'background-color 0.2s',
       }}
     >
-      <span>{name}</span>
+      <span>
+        {isAdmin
+          ? <Link to={`/players?playerId=${player.id}`}>{name}</Link>
+          : name}
+      </span>
       <div className="d-flex align-items-center gap-2">
         <span className={player.paid ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
         {isAdmin ? (
@@ -160,27 +201,25 @@ function PlayerRow({
             <Button size="sm" variant={player.highlighted ? 'warning' : 'outline-secondary'} onClick={onToggleHighlight}>
               {player.highlighted ? '★' : '☆'}
             </Button>
-            <Button
-              size="sm"
-              variant="warning"
-              onClick={onToggleComp}
-              style={{
-                minWidth: 72,
-                backgroundColor: player.comped ? '#b8860b' : 'transparent',
-                borderColor: '#b8860b',
-                color: player.comped ? '#fff' : '#b8860b',
-              }}
-            >
-              {player.comped ? '✓ Comp' : 'Comp'}
-            </Button>
-            <Button size="sm" variant={player.paid ? 'success' : 'outline-secondary'} onClick={onTogglePaid} style={{ minWidth: 110 }}>
-              {player.paid ? '✓ Paid' : 'Mark as Paid'}
-            </Button>
+            <ButtonGroup size="sm">
+              {options.map(o => {
+                const active = currentVia === o.method;
+                return (
+                  <Button
+                    key={o.label}
+                    variant={active ? o.activeVariant : 'outline-secondary'}
+                    onClick={() => handleSelect(o.method)}
+                  >
+                    {o.label}
+                  </Button>
+                );
+              })}
+            </ButtonGroup>
           </>
         ) : (
-          <span className={player.comped ? 'text-info' : player.paid ? 'text-success' : 'text-danger'}>
-            {player.comped ? 'Comped' : player.paid ? 'Paid' : 'Unpaid'}
-          </span>
+          <Badge bg={settlement.bg} style={{ fontSize: 10, minWidth: 72 }}>
+            {settlement.label}
+          </Badge>
         )}
       </div>
     </ListGroup.Item>

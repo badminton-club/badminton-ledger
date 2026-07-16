@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Container, Row, Col, Card, Form, Button,
+  Container, Row, Col, Card, Form, Button, ButtonGroup,
   ListGroup, Spinner, Alert, InputGroup,
   Dropdown, DropdownButton, Table, Badge,
 } from 'react-bootstrap';
@@ -14,7 +14,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { getMonthYear } from '../utils/dateUtils';
 import AddPlayerModal from '../components/AddPlayerModal';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { db, refs, togglePlayerPaidStatus, togglePlayerCompStatus } from '../services/firebase';
+import { db, refs, setPlayerSettlement } from '../services/firebase';
 import { addPlayer, updatePlayerProfile } from '../services/firebase/players';
 import {
   collection, query, where, getDocs, orderBy,
@@ -25,13 +25,15 @@ import {
   selectAllPlayers, selectPlayerById,
   selectPlayersStatus, selectPlayersError,
 } from '../features/players/playersSlice';
-import type { NewPlayerInput, Player, Session } from '../types';
+import { selectDisabledTabs } from '../features/club/clubSlice';
+import type { NewPlayerInput, PaidVia, Player, Session } from '../types';
 import type { RootState } from '../store';
 
 interface BalanceAdjustment {
   amount: string;
   reason: string;
   type:   'credit' | 'debit';
+  includeInPayout: boolean;
 }
 
 interface LedgerEntry {
@@ -45,7 +47,7 @@ interface LedgerEntry {
   sessionId?:    string;
 }
 
-const INIT_BALANCE: BalanceAdjustment = { amount: '', reason: '', type: 'credit' };
+const INIT_BALANCE: BalanceAdjustment = { amount: '', reason: '', type: 'credit', includeInPayout: true };
 
 function formatPlayerName(player: Pick<Player, 'firstName' | 'lastName'>): string {
   return [player.firstName, player.lastName].filter(Boolean).join(' ');
@@ -57,6 +59,8 @@ export default function PlayersPage() {
   const playersList   = useAppSelector(selectAllPlayers);
   const playersStatus = useAppSelector(selectPlayersStatus);
   const playersError  = useAppSelector(selectPlayersError);
+  const disabledTabs  = useAppSelector(selectDisabledTabs);
+  const payoutEnabled = !disabledTabs.includes('payout');
   const selectedPlayer = useAppSelector((s: RootState) =>
     searchParams.get('playerId') ? selectPlayerById(s, searchParams.get('playerId')!) : null
 );
@@ -99,8 +103,8 @@ console.log("selectedPlayer ==> ", selectedPlayer);
   }, [searchTerm, playersList]);
 
   // Balance ledger
-  const fetchLedger = useCallback(async (playerId: string) => {
-    setIsLoadingLedger(true);
+  const fetchLedger = useCallback(async (playerId: string, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setIsLoadingLedger(true);
     setLedgerError('');
     try {
       const q = query(
@@ -115,7 +119,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
     } catch {
       setLedgerError('Failed to load balance history.');
     } finally {
-      setIsLoadingLedger(false);
+      if (!opts?.silent) setIsLoadingLedger(false);
     }
   }, []);
 
@@ -144,9 +148,9 @@ console.log("selectedPlayer ==> ", selectedPlayer);
   }, [selectedPlayerId]);
 
   // Attended sessions
-  const fetchAttendedSessions = useCallback(async () => {
+  const fetchAttendedSessions = useCallback(async (opts?: { silent?: boolean }) => {
     if (!selectedPlayerId) { setAttendedSessions([]); return; }
-    setIsLoadingSessions(true);
+    if (!opts?.silent) setIsLoadingSessions(true);
     setSessionsError('');
     try {
       const q = query(
@@ -163,7 +167,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
     } catch {
       setSessionsError('Failed to load sessions.');
     } finally {
-      setIsLoadingSessions(false);
+      if (!opts?.silent) setIsLoadingSessions(false);
     }
   }, [selectedPlayerId, currentMonth]);
 
@@ -177,27 +181,16 @@ console.log("selectedPlayer ==> ", selectedPlayer);
     }
   }, [selectedPlayerId, fetchLedger, fetchAttendedSessions]);
 
-  const handleTogglePaid = async (sessionId: string) => {
+  const handleSetSettlement = async (sessionId: string, method: PaidVia) => {
     if (!selectedPlayerId) return;
     setSessionsError('');
     try {
-      await togglePlayerPaidStatus(sessionId, selectedPlayerId);
-      await fetchAttendedSessions();
-      await fetchLedger(selectedPlayerId);
+      await setPlayerSettlement(sessionId, selectedPlayerId, method);
+      // Refresh silently so the list doesn't collapse and jump the page to the top.
+      await fetchAttendedSessions({ silent: true });
+      await fetchLedger(selectedPlayerId, { silent: true });
     } catch (err) {
-      setSessionsError(err instanceof Error ? err.message : 'Failed to update payment status.');
-    }
-  };
-
-  const handleToggleComp = async (sessionId: string) => {
-    if (!selectedPlayerId) return;
-    setSessionsError('');
-    try {
-      await togglePlayerCompStatus(sessionId, selectedPlayerId);
-      await fetchAttendedSessions();
-      await fetchLedger(selectedPlayerId);
-    } catch (err) {
-      setSessionsError(err instanceof Error ? err.message : 'Failed to update comp status.');
+      setSessionsError(err instanceof Error ? err.message : 'Failed to update settlement.');
     }
   };
 
@@ -227,7 +220,9 @@ console.log("selectedPlayer ==> ", selectedPlayer);
           delta,
           balanceBefore: before,
           balanceAfter:  before + delta,
-          reason:        'manual',
+          // 'manual' counts toward the owner payout; 'manual-excluded' is a balance
+          // change the club doesn't owe the owner (e.g. correcting an error).
+          reason:        balanceAdjustment.includeInPayout ? 'manual' : 'manual-excluded',
           note:          balanceAdjustment.reason.trim(),
           createdAt:     serverTimestamp(),
         });
@@ -299,10 +294,15 @@ console.log("selectedPlayer ==> ", selectedPlayer);
 
   const getDeltaLabel = (reason: string) => {
     const map: Record<string, string> = {
-      session_add:  'Session',
-      session_edit: 'Edit',
-      payment:      'Payment',
-      manual:       'Manual',
+      session:           'Session',
+      session_add:       'Session',
+      'session-edit':    'Edit',
+      session_edit:      'Edit',
+      payment:           'Payment',
+      comp:              'Comp',
+      settlement:        'Settlement',
+      manual:            'Manual',
+      'manual-excluded': 'Manual (off payout)',
     };
     return map[reason] ?? reason;
   };
@@ -475,6 +475,16 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                           className="mb-2"
                           required
                         />
+                        {payoutEnabled && (
+                          <Form.Check
+                            type="checkbox"
+                            id="balance-include-in-payout"
+                            label="Include in owner payout"
+                            checked={balanceAdjustment.includeInPayout}
+                            onChange={e => setBalanceAdjustment(p => ({ ...p, includeInPayout: e.target.checked }))}
+                            className="mb-2"
+                          />
+                        )}
                         <Button type="submit" variant="primary" size="sm" disabled={isUpdatingBalance}>
                           {isUpdatingBalance
                             ? <Spinner as="span" size="sm" animation="border" />
@@ -578,7 +588,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                     <p className="text-muted small">No sessions attended this month.</p>
                   )}
                   {!isLoadingSessions && attendedSessions.length > 0 && (
-                    <ListGroup variant="flush" style={{ maxHeight: 200, overflowY: 'auto' }}>
+                    <ListGroup variant="flush" style={{ maxHeight: 440, overflowY: 'auto' }}>
                       {attendedSessions.map(s => {
                         const playerInSession = s.players.find(p => p.id === selectedPlayerId);
                         const sessionDate =
@@ -600,40 +610,46 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                               </div>
                               <div className="text-end">
                                 <div>${playerInSession?.cost?.toFixed(2) ?? 'N/A'}</div>
-                                {playerInSession && (
-                                  <div className="mt-1 d-flex flex-column align-items-end gap-1">
-                                    <Badge
-                                      bg={playerInSession.comped ? 'info' : playerInSession.paid ? 'success' : 'danger'}
-                                      style={{ fontSize: 10 }}
-                                    >
-                                      {playerInSession.comped ? 'Comped' : playerInSession.paid ? 'Paid' : 'Unpaid'}
-                                    </Badge>
-                                    <div className="d-flex gap-1">
-                                      <Button
-                                        variant="warning"
-                                        size="sm"
-                                        style={{
-                                          fontSize: 11,
-                                          padding: '1px 8px',
-                                          backgroundColor: playerInSession.comped ? '#b8860b' : 'transparent',
-                                          borderColor: '#b8860b',
-                                          color: playerInSession.comped ? '#fff' : '#b8860b',
-                                        }}
-                                        onClick={() => handleToggleComp(s.id)}
-                                      >
-                                        {playerInSession.comped ? 'Uncomp' : 'Comp'}
-                                      </Button>
-                                      <Button
-                                        variant={playerInSession.paid ? 'outline-secondary' : 'outline-success'}
-                                        size="sm"
-                                        style={{ fontSize: 11, padding: '1px 8px' }}
-                                        onClick={() => handleTogglePaid(s.id)}
-                                      >
-                                        {playerInSession.paid ? 'Mark as unpaid' : 'Mark as paid'}
-                                      </Button>
-                                    </div>
-                                  </div>
-                                )}
+                                {playerInSession && (() => {
+                                  const via: PaidVia =
+                                    playerInSession.paidVia ??
+                                    (playerInSession.comped ? 'comp' : playerInSession.paid ? 'etransfer' : null);
+                                  const settledCredit =
+                                    via === 'etransfer' || via === 'comp' ? playerInSession.cost : 0;
+                                  const balanceIfDrawn = (selectedPlayer?.balance ?? 0) - settledCredit;
+                                  const settleOptions: { method: PaidVia; label: string; activeVariant: string }[] = [
+                                    { method: null,        label: 'Unpaid',  activeVariant: 'danger'  },
+                                    { method: 'comp',      label: 'Comp',    activeVariant: 'info'    },
+                                    { method: 'balance',   label: 'Balance', activeVariant: 'primary' },
+                                    { method: 'etransfer', label: 'e-Trans', activeVariant: 'success' },
+                                  ];
+                                  const pick = (method: PaidVia) => {
+                                    if (method === via) return;
+                                    if (method === 'balance' && balanceIfDrawn < 0) {
+                                      const nm = selectedPlayer ? formatPlayerName(selectedPlayer) : 'This player';
+                                      const ok = window.confirm(
+                                        `${nm} doesn't have enough balance to cover $${playerInSession.cost.toFixed(2)}.\n` +
+                                        `Their balance will go to $${balanceIfDrawn.toFixed(2)} (negative). Continue?`
+                                      );
+                                      if (!ok) return;
+                                    }
+                                    handleSetSettlement(s.id, method);
+                                  };
+                                  return (
+                                    <ButtonGroup size="sm" className="mt-1">
+                                      {settleOptions.map(o => (
+                                        <Button
+                                          key={o.label}
+                                          variant={via === o.method ? o.activeVariant : 'outline-secondary'}
+                                          style={{ fontSize: 11, padding: '1px 8px' }}
+                                          onClick={() => pick(o.method)}
+                                        >
+                                          {o.label}
+                                        </Button>
+                                      ))}
+                                    </ButtonGroup>
+                                  );
+                                })()}
                               </div>
                             </div>
                           </ListGroup.Item>

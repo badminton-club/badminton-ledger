@@ -13,6 +13,7 @@ import {
 } from '../../../features/SessionModal/sessionModalSlice';
 
 import { selectPlayerById, selectAllPlayers } from '../../../features/players/playersSlice';
+import { selectDisabledTabs } from '../../../features/club/clubSlice';
 import { fetchBirdieInventory, fetchCourtCredits } from '../../../services/firebase';
 import { addPlayer } from '../../../services/firebase/players';
 import AddPlayerModal from '../../AddPlayerModal';
@@ -58,14 +59,22 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
   const confirmedPlayers  = useAppSelector(selectConfirmedPlayers);
   const addError          = useAppSelector(selectAddError);
   const allPlayers        = useAppSelector(selectAllPlayers);
+  const disabledTabs      = useAppSelector(selectDisabledTabs);
+  const birdiesEnabled    = !disabledTabs.includes('birdies');
   const [playerToAdd, setPlayerToAdd] = useState('');
   const [showNewPlayerModal, setShowNewPlayerModal] = useState(false);
 
-  const [courtCount,      setCourtCount]      = useState(session ? String(
-    Math.round((session.courtCreditUsage?.reduce((s, c) => s + c.hoursUsed, 0) ?? 0) / 2)
-  ) : '4');
-  const [useCredits,      setUseCredits]      = useState(true);
-  const [manualCourtCost, setManualCourtCost] = useState('');
+  const [courtCount,      setCourtCount]      = useState(
+    session ? String(session.courtCount ?? '') : '4',
+  );
+  // Whether the session was originally paid for with pre-purchased credits.
+  const usedCredits = (session?.courtCreditUsage?.length ?? 0) > 0;
+  const [useCredits,      setUseCredits]      = useState(session ? usedCredits : true);
+  const [manualCourtCost, setManualCourtCost] = useState(
+    session && !usedCredits && session.courtCount
+      ? String((session.totalCourtCost ?? 0) / session.courtCount)
+      : '',
+  );
   const [birdieUsage,     setBirdieUsage]     = useState<BirdieUsage[]>(
     session?.birdieUsage?.length ? session.birdieUsage : [{ ...EMPTY_BIRDIE }]
   );
@@ -75,8 +84,27 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
   // Load inventory once
   useEffect(() => {
     fetchBirdieInventory().then(setBirdieInventory).catch(console.error);
-    fetchCourtCredits().then(setCourtCredits).catch(console.error);
-  }, []);
+    fetchCourtCredits()
+      .then((batches) => {
+        // When editing, this session's hours were already deducted from these
+        // batches at creation. Add them back to the available pool so the
+        // allocation can re-select them instead of seeing depleted batches
+        // (which would reset the court hours/cost to 0).
+        const usedByBatch = new Map(
+          (session?.courtCreditUsage ?? []).map((u) => [u.id, u.hoursUsed]),
+        );
+        setCourtCredits(
+          usedByBatch.size
+            ? batches.map((b) =>
+                usedByBatch.has(b.id)
+                  ? { ...b, remainingHours: b.remainingHours + (usedByBatch.get(b.id) ?? 0) }
+                  : b,
+              )
+            : batches,
+        );
+      })
+      .catch(console.error);
+  }, [session]);
 
   // Pre-fill when editing
   useEffect(() => {
@@ -287,6 +315,7 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
       </Form.Group>
 
       {/* ── Birdies ─────────────────────────────────────────────────────── */}
+      {birdiesEnabled && (<>
       <Form.Label className="fw-semibold">Birdies Used</Form.Label>
       {birdieUsage.map((usage, i) => {
         const batch = birdieInventory.find(b => b.id === usage.id);
@@ -335,12 +364,13 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
       >
         + Add another birdie batch
       </Button>
+      </>)}
 
       {/* ── Cost summary ────────────────────────────────────────────────── */}
       <div className="p-3 bg-light border rounded mb-3">
         <h6 className="mb-2">Session Cost Summary</h6>
         <CostRow label="Court cost"  value={totalCourtCost} />
-        <CostRow label="Birdie cost" value={totalBirdieCost} />
+        {birdiesEnabled && <CostRow label="Birdie cost" value={totalBirdieCost} />}
         <CostRow label="Total"       value={totalSessionCost} bold />
         {confirmedPlayers.length > 0 && (
           <CostRow
