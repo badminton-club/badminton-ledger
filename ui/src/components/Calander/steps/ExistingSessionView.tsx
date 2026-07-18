@@ -40,8 +40,8 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
     () => session.players.filter(p => p.paid).reduce((s, p) => s + p.cost, 0),
     [session.players]
   );
-  const highlightedTotal = useMemo(
-    () => session.players.filter(p => p.highlighted).reduce((s, p) => s + p.cost, 0),
+  const compedTotal = useMemo(
+    () => session.players.filter(p => p.comped).reduce((s, p) => s + p.cost, 0),
     [session.players]
   );
   const totalBirds = session.birdieUsage?.reduce((s, u) => s + u.quantity, 0) ?? 0;
@@ -83,8 +83,8 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
         <SummaryRow label="Total Paid"                    value={`$${paidTotal.toFixed(2)}`} />
         <SummaryRow label="Total Due"                     value={`$${(session.totalSessionCost - paidTotal).toFixed(2)}`} />
         <SummaryRow
-          label="Total Due (excl. highlighted)"
-          value={`$${(session.totalSessionCost - highlightedTotal).toFixed(2)}`}
+          label="Total Due (excl. comped players)"
+          value={`$${(session.totalSessionCost - compedTotal).toFixed(2)}`}
         />
       </div>
 
@@ -185,7 +185,6 @@ function PlayerRow({
     <ListGroup.Item
       className="d-flex justify-content-between align-items-center"
       style={{
-        backgroundColor: player.highlighted ? '#fff3cd' : 'transparent',
         transition:      'background-color 0.2s',
       }}
     >

@@ -79,10 +79,10 @@ export default function HomePage() {
                                 </div>
                                 <div className="mt-3">
                                     <h3 className="unpaid-title">Unpaid Players:</h3>
-                                    {(currentSession.players ?? []).filter((p) => !p.paid).length > 0 ?
+                                    {(currentSession.players ?? []).filter((p) => !p.paid && !p.comped).length > 0 ?
                                         <ul className="list-disc list-inside">
                                             {(currentSession.players ?? [])
-                                                .filter((p) => !p.paid)
+                                                .filter((p) => !p.paid && !p.comped)
                                                 .map((p) => (
                                                     <UnpaidPlayerItem key={p.id} playerId={p.id} />
                                                 ))}
