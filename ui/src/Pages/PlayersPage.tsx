@@ -298,6 +298,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
       session_add:       'Session',
       'session-edit':    'Edit',
       session_edit:      'Edit',
+      'session-deleted': 'Session removed',
       payment:           'Payment',
       comp:              'Comp',
       settlement:        'Settlement',
@@ -306,6 +307,10 @@ console.log("selectedPlayer ==> ", selectedPlayer);
     };
     return map[reason] ?? reason;
   };
+
+  // The Balance History shows prepaid-wallet movements only. e-Transfer/comp
+  // settlements never touch the wallet, so they belong in the payout ledger, not here.
+  const walletLedger = ledger.filter(e => e.reason !== 'payment' && e.reason !== 'comp');
 
   return (
     <Container fluid className="mt-4">
@@ -343,9 +348,9 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                     className="d-flex justify-content-between align-items-center"
                   >
                     <span>{formatPlayerName(player)}</span>
-                    {player.balance < 0 && (
+                    {(player.owed ?? 0) > 0 && (
                       <Badge bg="danger" style={{ fontSize: 10 }}>
-                        ${Math.abs(player.balance).toFixed(2)} owed
+                        ${(player.owed ?? 0).toFixed(2)} owed
                       </Badge>
                     )}
                   </ListGroup.Item>
@@ -429,11 +434,17 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                           ${(selectedPlayer.balance ?? 0).toFixed(2)}
                         </span>
                         <small className="text-muted ms-2" style={{ fontSize: 13 }}>
-                          {selectedPlayer.balance > 0 ? '(Credit)'
-                            : selectedPlayer.balance < 0 ? '(Owes)' : ''}
+                          {selectedPlayer.balance > 0 ? '(Prepaid credit)'
+                            : selectedPlayer.balance < 0 ? '(Overdrawn)' : ''}
                         </small>
                       </h4>
-                      <p className="small text-muted mb-0">
+                      <h5 className="mb-0">Owed for sessions</h5>
+                      <h4>
+                        <span className={(selectedPlayer.owed ?? 0) > 0 ? 'text-danger' : 'text-success'}>
+                          ${(selectedPlayer.owed ?? 0).toFixed(2)}
+                        </span>
+                      </h4>
+                      <p className="small text-muted mb-0 mt-1">
                         Total Sessions attended: {selectedPlayer.sessionCount ?? 0}
                       </p>
                       <p className="small text-muted mb-0">
@@ -504,10 +515,10 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                     <div className="text-center"><Spinner animation="border" size="sm" /></div>
                   )}
                   {ledgerError && <Alert variant="danger" className="small">{ledgerError}</Alert>}
-                  {!isLoadingLedger && ledger.length === 0 && (
+                  {!isLoadingLedger && walletLedger.length === 0 && (
                     <p className="text-muted small mb-0">No balance history yet.</p>
                   )}
-                  {!isLoadingLedger && ledger.length > 0 && (
+                  {!isLoadingLedger && walletLedger.length > 0 && (
                     <Table size="sm" borderless className="mb-0">
                       <thead>
                         <tr className="small text-muted">
@@ -519,7 +530,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                         </tr>
                       </thead>
                       <tbody>
-                        {ledger.map(entry => (
+                        {walletLedger.map(entry => (
                           <tr key={entry.id} style={{ fontSize: 13 }}>
                             <td className="text-muted">
                               {entry.createdAt?.toDate

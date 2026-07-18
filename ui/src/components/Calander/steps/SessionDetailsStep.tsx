@@ -134,14 +134,19 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
   const playerCosts: SessionPlayer[] = useMemo(() => {
     const totalPercentage = confirmedPlayers.reduce((s, p) => s + p.percentage, 0);
     const perUnit         = totalPercentage > 0 ? totalSessionCost / totalPercentage : 0;
-    return confirmedPlayers.map(p => ({
-      id:         p.id,
-      percentage: p.percentage,
-      cost:       parseFloat((perUnit * p.percentage).toFixed(2)),
-      paid:       false,
-      highlighted: false,
-    }));
-  }, [confirmedPlayers, totalSessionCost]);
+    return confirmedPlayers.map(p => {
+      const existing = session?.players.find(sp => sp.id === p.id);
+      return {
+        id:          p.id,
+        percentage:  p.percentage,
+        cost:        parseFloat((perUnit * p.percentage).toFixed(2)),
+        paid:        existing?.paid ?? false,
+        paidVia:     existing?.paidVia ?? null,
+        comped:      existing?.comped ?? false,
+        highlighted: existing?.highlighted ?? false,
+      };
+    });
+  }, [confirmedPlayers, totalSessionCost, session]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 

@@ -10,6 +10,7 @@ export interface Player {
   lastNameLower: string | null;
   email: string | null;
   balance: number;
+  owed: number; // unsettled session debt (sum of costs for sessions the player hasn't settled)
   description: string;
   sessionCount: number; // replaces attendedSessionIds[] — cheap increment, no unbounded array
   createdAt: Timestamp;

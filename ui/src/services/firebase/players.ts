@@ -69,6 +69,7 @@ export async function addPlayer(input: NewPlayerInput): Promise<string> {
       lastNameLower:  input.lastName ? input.lastName.toLowerCase() : null,
       email:          input.email ?? null,
       balance:        input.balance ?? 0,
+      owed:           0,
       description:    input.description ?? '',
       sessionCount:   0,
       createdAt:      serverTimestamp(),
