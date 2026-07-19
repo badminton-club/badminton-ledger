@@ -157,6 +157,12 @@ export default function AttendancePage() {
                   <strong className={player.balance < 0 ? 'text-danger' : 'text-success'}>
                     {money(player.balance)}
                   </strong>
+                  {(player.owed ?? 0) > 0 && (
+                    <>
+                      {' · '}Owed:{' '}
+                      <strong className="text-danger">{money(player.owed ?? 0)}</strong>
+                    </>
+                  )}
                 </span>
               )}
             </Card.Body>

@@ -26,7 +26,7 @@ export default function HomePage() {
     const currentSession = sessions[sessionIndex] ?? null;
 
     const maxDisplay = 5;
-    const negativeBalancePlayers = players.filter((p) => p.balance < 0);
+    const negativeBalancePlayers = players.filter((p) => (p.owed ?? 0) > 0);
     const displayedPlayers = negativeBalancePlayers.slice(0, maxDisplay);
     const remainingCount = negativeBalancePlayers.length - displayedPlayers.length;
 
@@ -106,7 +106,7 @@ export default function HomePage() {
                                                     {player.firstName} {player.lastName ?? ""}
                                                 </Link>{" "}
                                                 —{" "}
-                                                <strong>${Math.abs(player.balance).toFixed(2)}</strong>
+                                                <strong>${(player.owed ?? 0).toFixed(2)}</strong>
                                             </li>
                                         ))}
                                     </ul>

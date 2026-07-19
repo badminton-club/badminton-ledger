@@ -73,7 +73,7 @@ export async function fetchSessionById(sessionId: string): Promise<Session> {
  *  1. Creates the session document
  *  2. Deducts birds from each birdie batch
  *  3. Deducts hours from each court credit batch
- *  4. Decrements each player's balance by their cost
+ *  4. Draws the prepaid balance only for players settling via 'balance'
  *  5. Increments each player's sessionCount by 1 (replaces attendedSessionIds push)
  *  6. Logs a transaction record for each resource used
  */
@@ -177,22 +177,27 @@ export async function addSession(data: NewSessionData): Promise<string> {
       });
 
       // ── 6. Update player balances + session counts ────────────────────────────────
-      data.players.forEach((player, i) => {
+      resolvedPlayers.forEach((player, i) => {
+        const drawsWallet = player.paidVia === 'balance';
+        const owesForSession = !player.paid && !player.comped;
         const before = (playerDocs[i].data()?.balance as number) ?? 0;
         tx.update(playerDocs[i].ref, {
-          balance:      increment(-player.cost),  // debit the cost
-          sessionCount: increment(1),             // replaces pushing to attendedSessionIds
+          sessionCount: increment(1),
+          ...(drawsWallet ? { balance: increment(-player.cost) } : {}),
+          ...(owesForSession ? { owed: increment(player.cost) } : {}),
         });
-        tx.set(doc(refs.balanceLedger), {
-          playerId:      player.id,
-          sessionId:     sessionRef.id,
-          delta:         -player.cost,
-          balanceBefore: before,
-          balanceAfter:  before - player.cost,
-          reason:        'session',
-          note:          `Session on ${data.date.toLocaleDateString()}`,
-          createdAt:     serverTimestamp(),
-        });
+        if (drawsWallet) {
+          tx.set(doc(refs.balanceLedger), {
+            playerId:      player.id,
+            sessionId:     sessionRef.id,
+            delta:         -player.cost,
+            balanceBefore: before,
+            balanceAfter:  before - player.cost,
+            reason:        'session',
+            note:          `Session on ${data.date.toLocaleDateString()}`,
+            createdAt:     serverTimestamp(),
+          });
+        }
       });
     });
 
@@ -248,18 +253,11 @@ export async function editSession(
       const courtMap   = new Map([...allCourtIds].map((id, i)  => [id, courtSnaps[i]]));
       const playerMap  = new Map([...allPlayerIds].map((id, i) => [id, playerSnaps[i]]));
 
-      // A player whose positive (prepaid) balance covers their session cost has
-      // effectively paid. Measure the balance on the same basis as addSession by
-      // reversing this session's currently-applied debit (an unsettled player was
-      // debited their old cost at creation), then auto-mark paid when it covers the
-      // new cost. editSession adjusts balances by cost delta regardless of paid
-      // state, so flipping this flag has no balance side effect.
+      // A player whose positive prepaid balance covers their session cost is
+      // auto-settled from that balance, matching addSession.
       const resolvedPlayers = updatedData.players.map((player) => {
-        const before    = (playerMap.get(player.id)?.data()?.balance as number) ?? 0;
-        const oldPlayer = original.players.find(p => p.id === player.id);
-        const appliedDebit = oldPlayer && !oldPlayer.paid && !oldPlayer.comped ? (oldPlayer.cost ?? 0) : 0;
-        const available = before + appliedDebit;
-        const coveredByBalance = available > 0 && player.cost > 0 && player.cost <= available;
+        const before = (playerMap.get(player.id)?.data()?.balance as number) ?? 0;
+        const coveredByBalance = before > 0 && player.cost > 0 && player.cost <= before;
         return coveredByBalance && !player.paid && !player.comped
           ? { ...player, paid: true, paidVia: 'balance' as const }
           : player;
@@ -320,39 +318,84 @@ export async function editSession(
           throw new Error(`Court credit ${id}: insufficient hours for edit`);
 
         tx.update(snap.ref, { remainingHours: d.remainingHours - delta });
+
+        // Log adjustment transaction
+        const cost = delta * (d.costPerHour ?? 0);
+        tx.set(doc(refs.transactions), {
+          resourceType: 'court',
+          batchId:      id,
+          hoursUsed:    delta,
+          cost,
+          sessionId,
+          date:        Timestamp.fromDate(updatedData.date),
+          createdAt:   serverTimestamp(),
+          description: 'Session Edit Adjustment',
+        });
       });
 
       // ── Player balance + membership deltas ─────────────────────────────────────────
-      // Every player is debited their cost at creation, so any cost change (including
-      // players added to or removed from the session) must adjust the balance, and the
-      // sessionCount must track membership — regardless of paid state.
       allPlayerIds.forEach(id => {
         const snap      = playerMap.get(id)!;
         if (!snap.exists()) return;
         const oldPlayer = original.players.find(p => p.id === id);
-        const newPlayer = updatedData.players.find(p => p.id === id);
+        const newPlayer = resolvedPlayers.find(p => p.id === id);
 
-        const oldCost   = oldPlayer?.cost ?? 0;
-        const newCost   = newPlayer?.cost ?? 0;
-        const costDelta = newCost - oldCost;
+        const viaOf = (p?: SessionPlayer): PaidVia =>
+          p ? (p.paidVia ?? (p.comped ? 'comp' : p.paid ? 'etransfer' : null)) : null;
+        const oldVia  = viaOf(oldPlayer);
+        const newVia  = viaOf(newPlayer);
+        const oldCost = oldPlayer?.cost ?? 0;
+        const newCost = newPlayer?.cost ?? 0;
+
+        const walletDelta  = (oldVia === 'balance' ? oldCost : 0) - (newVia === 'balance' ? newCost : 0);
+        const owedDelta    = (newPlayer && newVia === null ? newCost : 0) - (oldPlayer && oldVia === null ? oldCost : 0);
+        const paymentDelta = (newVia === 'etransfer' ? newCost : 0) - (oldVia === 'etransfer' ? oldCost : 0);
+        const compDelta    = (newVia === 'comp' ? newCost : 0) - (oldVia === 'comp' ? oldCost : 0);
         const membershipDelta = (newPlayer ? 1 : 0) - (oldPlayer ? 1 : 0);
-        if (costDelta === 0 && membershipDelta === 0) return;
+        if (walletDelta === 0 && owedDelta === 0 && paymentDelta === 0 && compDelta === 0 && membershipDelta === 0) return;
 
         const before = (snap.data()?.balance as number) ?? 0;
         tx.update(snap.ref, {
-          balance: increment(-costDelta),
+          ...(walletDelta !== 0 ? { balance: increment(walletDelta) } : {}),
+          ...(owedDelta !== 0 ? { owed: increment(owedDelta) } : {}),
           ...(membershipDelta !== 0 ? { sessionCount: increment(membershipDelta) } : {}),
         });
 
-        if (costDelta !== 0) {
+        if (walletDelta !== 0) {
           tx.set(doc(refs.balanceLedger), {
             playerId:      id,
             sessionId,
-            delta:         -costDelta,
+            delta:         walletDelta,
             balanceBefore: before,
-            balanceAfter:  before - costDelta,
+            balanceAfter:  before + walletDelta,
             reason:        'session-edit',
-            note:          `Session edit (${oldCost.toFixed(2)} → ${newCost.toFixed(2)})`,
+            note:          'Session edit',
+            createdAt:     serverTimestamp(),
+          });
+        }
+        // Payout adjustments are wallet-neutral: they only re-price the owner payout
+        // when a settled player's cost changes during the edit.
+        if (paymentDelta !== 0) {
+          tx.set(doc(refs.balanceLedger), {
+            playerId:      id,
+            sessionId,
+            delta:         paymentDelta,
+            balanceBefore: before,
+            balanceAfter:  before,
+            reason:        'payment',
+            note:          'Session edit adjustment',
+            createdAt:     serverTimestamp(),
+          });
+        }
+        if (compDelta !== 0) {
+          tx.set(doc(refs.balanceLedger), {
+            playerId:      id,
+            sessionId,
+            delta:         compDelta,
+            balanceBefore: before,
+            balanceAfter:  before,
+            reason:        'comp',
+            note:          'Session edit adjustment',
             createdAt:     serverTimestamp(),
           });
         }
@@ -491,14 +534,13 @@ export async function togglePlayerCompStatus(
 }
 
 /**
- * Sets how a player's session cost was settled, adjusting their balance for the
- * change between the old and new method. The session's cost debit is permanent;
- * methods differ only by an extra settlement credit:
- *   - 'etransfer' → +cost logged as 'payment' (money owed to the owner)
- *   - 'comp'      → +cost logged as 'comp'    (excluded from the owner payout)
- *   - 'balance'   → no extra entry; the session debit is drawn from prepaid credit
- *   - null        → unpaid; no extra entry, the player owes the cost
- * 'balance' may leave the player negative (the caller warns first) and never affects payout.
+ * Sets how a player's session cost was settled. The prepaid wallet is only touched
+ * by the 'balance' method; the others owe/settle with the owner directly:
+ *   - 'etransfer' → wallet unchanged; logs a wallet-neutral 'payment' (owed to owner)
+ *   - 'comp'      → wallet unchanged; logs a wallet-neutral 'comp' (off the payout)
+ *   - 'balance'   → draws −cost from prepaid credit (may go negative; caller warns)
+ *   - null        → unpaid; wallet unchanged, the player owes the cost
+ * Switching into 'balance' draws the cost; switching out of it refunds the cost.
  */
 export async function setPlayerSettlement(
   sessionId: string,
@@ -529,31 +571,34 @@ export async function setPlayerSettlement(
 
       let before = (playerSnap.data()?.balance as number) ?? 0;
       const initial = before;
-      let logged = false;
-      const log = (delta: number, reason: string, note: string) => {
+      const logWallet = (delta: number, reason: string, note: string) => {
         tx.set(doc(refs.balanceLedger), {
           playerId, sessionId, delta,
           balanceBefore: before, balanceAfter: before + delta,
           reason, note, createdAt: serverTimestamp(),
         });
         before += delta;
-        logged = true;
+      };
+      const logPayout = (delta: number, reason: string, note: string) => {
+        tx.set(doc(refs.balanceLedger), {
+          playerId, sessionId, delta,
+          balanceBefore: before, balanceAfter: before,
+          reason, note, createdAt: serverTimestamp(),
+        });
       };
 
-      // 'balance' draws the cost from prepaid credit and may leave the player negative
-      // (the UI warns before selecting it); it never affects the owner payout.
+      // Reverse the old payout signal, then record the new one (wallet-neutral).
+      if (currentVia === 'etransfer') logPayout(-cost, 'payment', 'Reversed e-Transfer payment');
+      else if (currentVia === 'comp')  logPayout(-cost, 'comp', 'Reversed comp');
+      if (method === 'etransfer') logPayout(cost, 'payment', 'Paid by e-Transfer');
+      else if (method === 'comp')  logPayout(cost, 'comp', 'Comped — player paid owner directly');
 
-      // Reverse the current method's settlement credit…
-      if (currentVia === 'etransfer') log(-cost, 'payment', 'Reversed e-Transfer payment');
-      else if (currentVia === 'comp')  log(-cost, 'comp', 'Reversed comp');
-      // …then apply the new method's settlement credit.
-      if (method === 'etransfer') log(cost, 'payment', 'Paid by e-Transfer');
-      else if (method === 'comp')  log(cost, 'comp', 'Comped — player paid owner directly');
-      else if (!logged) {
-        // Balance/unpaid don't move the balance (the session debit already stands),
-        // so record a zero-delta entry to keep the change in the balance history.
-        log(0, 'settlement', method === 'balance' ? 'Settled from prepaid balance' : 'Marked unpaid');
-      }
+      // The prepaid wallet only moves for the 'balance' method.
+      if (currentVia === 'balance') logWallet(cost, 'settlement', 'Refunded prepaid balance');
+      if (method === 'balance')     logWallet(-cost, 'settlement', 'Settled from prepaid balance');
+
+      // Session debt is owed only while unsettled (paidVia === null).
+      const owedDelta = (method === null ? cost : 0) - (currentVia === null ? cost : 0);
 
       const updatedPlayers = players.map(p =>
         p.id === playerId
@@ -568,7 +613,10 @@ export async function setPlayerSettlement(
       tx.update(sessionRef, { players: updatedPlayers });
 
       const netDelta = before - initial;
-      if (netDelta !== 0) tx.update(playerRef, { balance: increment(netDelta) });
+      const playerUpdate: Record<string, ReturnType<typeof increment>> = {};
+      if (netDelta !== 0)  playerUpdate.balance = increment(netDelta);
+      if (owedDelta !== 0) playerUpdate.owed = increment(owedDelta);
+      if (Object.keys(playerUpdate).length) tx.update(playerRef, playerUpdate);
     });
   });
 }
@@ -643,21 +691,41 @@ export async function deleteSession(sessionId: string): Promise<void> {
       players.forEach((p, i) => {
         const snap = playerSnaps[i];
         if (!snap.exists()) return;
+        const via: PaidVia = p.paidVia ?? (p.comped ? 'comp' : p.paid ? 'etransfer' : null);
         const before = (snap.data()?.balance as number) ?? 0;
+
+        if (via === 'etransfer' || via === 'comp') {
+          tx.set(doc(refs.balanceLedger), {
+            playerId:      p.id,
+            sessionId,
+            delta:         -p.cost,
+            balanceBefore: before,
+            balanceAfter:  before,
+            reason:        via === 'etransfer' ? 'payment' : 'comp',
+            note:          'Reversed — session deleted',
+            createdAt:     serverTimestamp(),
+          });
+        }
+
+        const walletRefund = via === 'balance' ? p.cost : 0;
+        const owedForSession = via === null ? p.cost : 0;
         tx.update(snap.ref, {
-          balance:      increment(p.cost),
           sessionCount: increment(-1),
+          ...(walletRefund !== 0 ? { balance: increment(walletRefund) } : {}),
+          ...(owedForSession !== 0 ? { owed: increment(-owedForSession) } : {}),
         });
-        tx.set(doc(refs.balanceLedger), {
-          playerId:      p.id,
-          sessionId,
-          delta:         p.cost,
-          balanceBefore: before,
-          balanceAfter:  before + p.cost,
-          reason:        'session-deleted',
-          note:          'Session deleted',
-          createdAt:     serverTimestamp(),
-        });
+        if (walletRefund !== 0) {
+          tx.set(doc(refs.balanceLedger), {
+            playerId:      p.id,
+            sessionId,
+            delta:         walletRefund,
+            balanceBefore: before,
+            balanceAfter:  before + walletRefund,
+            reason:        'session-deleted',
+            note:          'Session deleted',
+            createdAt:     serverTimestamp(),
+          });
+        }
       });
 
       // Archive a copy, then delete the original.

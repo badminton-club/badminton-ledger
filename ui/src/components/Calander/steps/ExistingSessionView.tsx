@@ -148,10 +148,9 @@ function PlayerRow({
   const currentVia: PaidVia =
     player.paidVia ?? (player.comped ? 'comp' : player.paid ? 'etransfer' : null);
 
-  // Choosing 'balance' draws the session cost from prepaid credit; the session debit
-  // stands, so it can leave the player negative. Compute the resulting balance to warn.
-  const settledCredit = currentVia === 'etransfer' || currentVia === 'comp' ? player.cost : 0;
-  const balanceIfDrawn = (stored?.balance ?? 0) - settledCredit;
+  // Choosing 'balance' draws the session cost from prepaid credit, which can leave the
+  // player negative. Compute the resulting balance to warn.
+  const balanceIfDrawn = (stored?.balance ?? 0) - (currentVia === 'balance' ? 0 : player.cost);
 
   const handleSelect = (method: PaidVia) => {
     if (method === currentVia) return;
