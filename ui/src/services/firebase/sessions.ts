@@ -318,6 +318,19 @@ export async function editSession(
           throw new Error(`Court credit ${id}: insufficient hours for edit`);
 
         tx.update(snap.ref, { remainingHours: d.remainingHours - delta });
+
+        // Log adjustment transaction
+        const cost = delta * (d.costPerHour ?? 0);
+        tx.set(doc(refs.transactions), {
+          resourceType: 'court',
+          batchId:      id,
+          hoursUsed:    delta,
+          cost,
+          sessionId,
+          date:        Timestamp.fromDate(updatedData.date),
+          createdAt:   serverTimestamp(),
+          description: 'Session Edit Adjustment',
+        });
       });
 
       // ── Player balance + membership deltas ─────────────────────────────────────────
