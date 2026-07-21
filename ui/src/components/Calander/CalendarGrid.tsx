@@ -191,7 +191,7 @@ const styles: Record<string, React.CSSProperties> = {
         opacity: 0.4,
     },
     dayNumber: {
-        width: 28,
+        minWidth: 24,
         height: 28,
         display: "flex",
         alignItems: "center",
