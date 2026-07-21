@@ -201,6 +201,7 @@ const styles: Record<string, React.CSSProperties> = {
     outerWrap: {
         display: "flex",
         alignItems: "flex-start",
+        flexWrap: "wrap",
         gap: 16,
         width: "100%",
         paddingBottom: 40, 
@@ -209,7 +210,7 @@ const styles: Record<string, React.CSSProperties> = {
     // Calendar panel — its own card with header + grid inside
     calendarPanel: {
         flex: 1,
-        minWidth: 0,
+        minWidth: 300,
         border: "0.5px solid var(--color-border-tertiary)",
         borderRadius: 12,
         overflow: "hidden",

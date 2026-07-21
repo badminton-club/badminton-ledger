@@ -95,7 +95,7 @@ export default function HomePage() {
 
                     {/* ── Negative balances ── */}
                     <Col md={6}>
-                        <div className="session-card">
+                        <div className="session-card" style={{ marginTop:4 }}>
                             <h2 className="session-title">Player Balances</h2>
                             {negativeBalancePlayers.length > 0 ?
                                 <>
