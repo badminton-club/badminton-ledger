@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0d6efd"/>
+  <!-- feather skirt -->
+  <path d="M19 15 L45 15 L38 45 L26 45 Z" fill="#ffffff"/>
+  <!-- feather dividers -->
+  <g stroke="#0d6efd" stroke-width="1.6" stroke-linecap="round" fill="none">
+    <path d="M32 15 L32 45"/>
+    <path d="M25 15 L28.5 45"/>
+    <path d="M39 15 L35.5 45"/>
+    <path d="M26.5 39 L37.5 39"/>
+  </g>
+  <!-- cork base -->
+  <path d="M26 45 L38 45 L37 52 a5 6 0 0 1 -10 0 Z" fill="#f4c99a" stroke="#dca971" stroke-width="1.2"/>
+</svg>
