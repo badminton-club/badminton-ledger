@@ -82,8 +82,15 @@ export async function addSession(data: NewSessionData): Promise<string> {
     const sessionRef = doc(refs.sessions); // generate ID before transaction
 
     await runTransaction(db, async (tx) => {
+      // Players whose prepaid balance covers *another* player's cost via a 'transfer'
+      // settlement — their docs must be read/written even if they aren't participants.
+      const payerIds = data.players
+        .filter(p => p.paidVia === 'transfer' && p.paidBy)
+        .map(p => p.paidBy as string);
+      const balanceIds = [...new Set([...data.players.map(p => p.id), ...payerIds])];
+
       // ── 1. Read all affected documents first (Firestore rule: reads before writes) ──
-      const [birdieDocs, courtDocs, playerDocs] = await Promise.all([
+      const [birdieDocs, courtDocs, balanceDocs] = await Promise.all([
         Promise.all(
           data.birdieUsage.map(u => tx.get(doc(refs.birdieInventory, u.id)))
         ),
@@ -91,9 +98,11 @@ export async function addSession(data: NewSessionData): Promise<string> {
           data.courtCreditUsage.map(u => tx.get(doc(refs.courtCredits, u.id)))
         ),
         Promise.all(
-          data.players.map(p => tx.get(doc(refs.players, p.id)))
+          balanceIds.map(id => tx.get(doc(refs.players, id)))
         ),
       ]);
+      const playerSnapMap = new Map(balanceIds.map((id, i) => [id, balanceDocs[i]]));
+      const playerDocs = data.players.map(p => playerSnapMap.get(p.id)!);
 
       // ── 2. Validate before any writes ────────────────────────────────────────────
       data.birdieUsage.forEach((usage, i) => {
@@ -177,27 +186,63 @@ export async function addSession(data: NewSessionData): Promise<string> {
       });
 
       // ── 6. Update player balances + session counts ────────────────────────────────
+      // Aggregate every prepaid-balance draw: a player settling their own cost via
+      // 'balance', plus any player covering *others* via a 'transfer'. Both reduce the
+      // paying player's balance, so they're summed per payer for a single balance write.
+      const sessionDate = data.date.toLocaleDateString();
+      const walletDraw = new Map<string, { amount: number; note: string }[]>();
+      const addDraw = (id: string, amount: number, note: string) => {
+        const list = walletDraw.get(id) ?? [];
+        list.push({ amount, note });
+        walletDraw.set(id, list);
+      };
+      resolvedPlayers.forEach(player => {
+        if (player.paidVia === 'balance') {
+          addDraw(player.id, player.cost, `Session on ${sessionDate}`);
+        } else if (player.paidVia === 'transfer' && player.paidBy) {
+          addDraw(player.paidBy, player.cost, `Covered a player's dues — session on ${sessionDate}`);
+        }
+      });
+
+      // Validate every payer exists and can cover what's drawn from their balance.
+      walletDraw.forEach((entries, id) => {
+        const snap = playerSnapMap.get(id);
+        if (!snap?.exists()) throw new Error(`Paying player ${id} not found`);
+        const before = (snap.data()?.balance as number) ?? 0;
+        const total  = entries.reduce((s, e) => s + e.amount, 0);
+        if (total > before)
+          throw new Error(`Player ${id} has $${before.toFixed(2)} but $${total.toFixed(2)} was drawn from their balance`);
+      });
+
+      // Bump attendance + record session debt for participants who still owe.
       resolvedPlayers.forEach((player, i) => {
-        const drawsWallet = player.paidVia === 'balance';
         const owesForSession = !player.paid && !player.comped;
-        const before = (playerDocs[i].data()?.balance as number) ?? 0;
         tx.update(playerDocs[i].ref, {
           sessionCount: increment(1),
-          ...(drawsWallet ? { balance: increment(-player.cost) } : {}),
           ...(owesForSession ? { owed: increment(player.cost) } : {}),
         });
-        if (drawsWallet) {
+      });
+
+      // Apply each payer's aggregated balance draw once, logging a ledger entry per draw.
+      walletDraw.forEach((entries, id) => {
+        const snap  = playerSnapMap.get(id)!;
+        const total = entries.reduce((s, e) => s + e.amount, 0);
+        tx.update(snap.ref, { balance: increment(-total) });
+
+        let before = (snap.data()?.balance as number) ?? 0;
+        entries.forEach(entry => {
           tx.set(doc(refs.balanceLedger), {
-            playerId:      player.id,
+            playerId:      id,
             sessionId:     sessionRef.id,
-            delta:         -player.cost,
+            delta:         -entry.amount,
             balanceBefore: before,
-            balanceAfter:  before - player.cost,
+            balanceAfter:  before - entry.amount,
             reason:        'session',
-            note:          `Session on ${data.date.toLocaleDateString()}`,
+            note:          entry.note,
             createdAt:     serverTimestamp(),
           });
-        }
+          before -= entry.amount;
+        });
       });
     });
 
@@ -241,6 +286,10 @@ export async function editSession(
       const allPlayerIds = new Set([
         ...original.players.map(p => p.id),
         ...updatedData.players.map(p => p.id),
+        // Players covering others' dues from their balance ('transfer') must be
+        // read/written too, even when they aren't participants themselves.
+        ...original.players.filter(p => p.paidVia === 'transfer' && p.paidBy).map(p => p.paidBy as string),
+        ...updatedData.players.filter(p => p.paidVia === 'transfer' && p.paidBy).map(p => p.paidBy as string),
       ]);
 
       const [birdieSnaps, courtSnaps, playerSnaps] = await Promise.all([
@@ -261,6 +310,31 @@ export async function editSession(
         return coveredByBalance && !player.paid && !player.comped
           ? { ...player, paid: true, paidVia: 'balance' as const }
           : player;
+      });
+
+      // Aggregate prepaid-balance draws (own 'balance' + 'transfer' coverage of others)
+      // per paying player, for both the original and updated session. Deltas below are
+      // applied to whoever's balance was drawn — which, for a transfer, is the payer.
+      const walletDrawOf = (players: SessionPlayer[]): Map<string, number> => {
+        const m = new Map<string, number>();
+        const add = (id: string, amt: number) => m.set(id, (m.get(id) ?? 0) + amt);
+        players.forEach(p => {
+          const via = p.paidVia ?? (p.comped ? 'comp' : p.paid ? 'etransfer' : null);
+          if (via === 'balance') add(p.id, p.cost);
+          else if (via === 'transfer' && p.paidBy) add(p.paidBy, p.cost);
+        });
+        return m;
+      };
+      const oldDraw = walletDrawOf(original.players);
+      const newDraw = walletDrawOf(resolvedPlayers);
+
+      // A payer's balance, after refunding the old draw, must cover the new draw.
+      newDraw.forEach((amount, id) => {
+        const snap = playerMap.get(id);
+        if (!snap?.exists()) throw new Error(`Paying player ${id} not found`);
+        const available = ((snap.data()?.balance as number) ?? 0) + (oldDraw.get(id) ?? 0);
+        if (amount > available)
+          throw new Error(`Player ${id} has $${available.toFixed(2)} available but $${amount.toFixed(2)} was drawn from their balance`);
       });
 
       // ── Write phase: update session ────────────────────────────────────────────────
@@ -347,7 +421,9 @@ export async function editSession(
         const oldCost = oldPlayer?.cost ?? 0;
         const newCost = newPlayer?.cost ?? 0;
 
-        const walletDelta  = (oldVia === 'balance' ? oldCost : 0) - (newVia === 'balance' ? newCost : 0);
+        // Balance draws are keyed by the *paying* player (own 'balance' or, for a
+        // 'transfer', the payer), so read the delta straight from the draw maps.
+        const walletDelta  = (oldDraw.get(id) ?? 0) - (newDraw.get(id) ?? 0);
         const owedDelta    = (newPlayer && newVia === null ? newCost : 0) - (oldPlayer && oldVia === null ? oldCost : 0);
         const paymentDelta = (newVia === 'etransfer' ? newCost : 0) - (oldVia === 'etransfer' ? oldCost : 0);
         const compDelta    = (newVia === 'comp' ? newCost : 0) - (oldVia === 'comp' ? oldCost : 0);
@@ -552,13 +628,11 @@ export async function setPlayerSettlement(
     const playerRef  = doc(refs.players, playerId);
 
     await runTransaction(db, async (tx) => {
-      const [sessionSnap, playerSnap] = await Promise.all([
-        tx.get(sessionRef),
-        tx.get(playerRef),
-      ]);
+      if (method === 'transfer')
+        throw new Error("Use setPlayerPaidBy to settle a player from another player's balance");
 
+      const sessionSnap = await tx.get(sessionRef);
       if (!sessionSnap.exists()) throw new Error(`Session ${sessionId} not found`);
-      if (!playerSnap.exists()) throw new Error(`Player ${playerId} not found`);
 
       const players = sessionSnap.data().players as SessionPlayer[];
       const target  = players.find(p => p.id === playerId);
@@ -568,6 +642,14 @@ export async function setPlayerSettlement(
       const currentVia: PaidVia =
         target.paidVia ?? (target.comped ? 'comp' : target.paid ? 'etransfer' : null);
       if (currentVia === method) return; // no change
+
+      // Leaving a 'transfer' refunds the *payer* (not the payee), so read them too.
+      const oldPayerId = currentVia === 'transfer' ? (target.paidBy ?? null) : null;
+      const [playerSnap, oldPayerSnap] = await Promise.all([
+        tx.get(playerRef),
+        oldPayerId ? tx.get(doc(refs.players, oldPayerId)) : Promise.resolve(null),
+      ]);
+      if (!playerSnap.exists()) throw new Error(`Player ${playerId} not found`);
 
       let before = (playerSnap.data()?.balance as number) ?? 0;
       const initial = before;
@@ -607,6 +689,7 @@ export async function setPlayerSettlement(
               paid:    method === 'etransfer' || method === 'balance',
               comped:  method === 'comp',
               paidVia: method,
+              paidBy:  null,
             }
           : p
       );
@@ -617,6 +700,139 @@ export async function setPlayerSettlement(
       if (netDelta !== 0)  playerUpdate.balance = increment(netDelta);
       if (owedDelta !== 0) playerUpdate.owed = increment(owedDelta);
       if (Object.keys(playerUpdate).length) tx.update(playerRef, playerUpdate);
+
+      // If this player had been covered from someone else's balance, refund that payer.
+      if (oldPayerId && oldPayerSnap?.exists()) {
+        const payerBefore = (oldPayerSnap.data()?.balance as number) ?? 0;
+        tx.update(oldPayerSnap.ref, { balance: increment(cost) });
+        tx.set(doc(refs.balanceLedger), {
+          playerId:      oldPayerId,
+          sessionId,
+          delta:         cost,
+          balanceBefore: payerBefore,
+          balanceAfter:  payerBefore + cost,
+          reason:        'settlement',
+          note:          'Refunded — no longer covering another player',
+          createdAt:     serverTimestamp(),
+        });
+      }
+    });
+  });
+}
+
+/**
+ * Settles a player's session cost from *another* player's prepaid balance.
+ * The paying player's balance is drawn (may go negative; caller warns) and the payee is
+ * marked paid via 'transfer'. Any prior settlement on the payee is reversed first —
+ * including refunding a previous payer when the payer is being changed.
+ */
+export async function setPlayerPaidBy(
+  sessionId: string,
+  playerId: string,
+  payerId: string,
+): Promise<void> {
+  return serviceCall('setPlayerPaidBy', async () => {
+    if (payerId === playerId)
+      throw new Error("A player cannot cover their own dues — use the Balance option instead");
+
+    const sessionRef = doc(refs.sessions, sessionId);
+    const payeeRef   = doc(refs.players, playerId);
+    const payerRef   = doc(refs.players, payerId);
+
+    await runTransaction(db, async (tx) => {
+      const sessionSnap = await tx.get(sessionRef);
+      if (!sessionSnap.exists()) throw new Error(`Session ${sessionId} not found`);
+
+      const players = sessionSnap.data().players as SessionPlayer[];
+      const target  = players.find(p => p.id === playerId);
+      if (!target) throw new Error(`Player ${playerId} not in session ${sessionId}`);
+
+      const cost = target.cost;
+      const currentVia: PaidVia =
+        target.paidVia ?? (target.comped ? 'comp' : target.paid ? 'etransfer' : null);
+      const oldPayerId = currentVia === 'transfer' ? (target.paidBy ?? null) : null;
+      if (currentVia === 'transfer' && oldPayerId === payerId) return; // no change
+
+      const oldPayerRef = oldPayerId && oldPayerId !== payerId ? doc(refs.players, oldPayerId) : null;
+      const [payeeSnap, payerSnap, oldPayerSnap] = await Promise.all([
+        tx.get(payeeRef),
+        tx.get(payerRef),
+        oldPayerRef ? tx.get(oldPayerRef) : Promise.resolve(null),
+      ]);
+      if (!payeeSnap.exists()) throw new Error(`Player ${playerId} not found`);
+      if (!payerSnap.exists()) throw new Error(`Paying player ${payerId} not found`);
+
+      // ── Reverse the payee's current settlement ──────────────────────────────────
+      // Wallet-neutral payout reversal for a prior e-Transfer/comp.
+      if (currentVia === 'etransfer' || currentVia === 'comp') {
+        tx.set(doc(refs.balanceLedger), {
+          playerId, sessionId,
+          delta:         -cost,
+          balanceBefore: 0,
+          balanceAfter:  0,
+          reason:        currentVia === 'etransfer' ? 'payment' : 'comp',
+          note:          currentVia === 'etransfer' ? 'Reversed e-Transfer payment' : 'Reversed comp',
+          createdAt:     serverTimestamp(),
+        });
+      }
+
+      // Refund the payee's own prepaid balance if they'd settled from it.
+      if (currentVia === 'balance') {
+        const payeeBefore = (payeeSnap.data()?.balance as number) ?? 0;
+        tx.update(payeeRef, { balance: increment(cost) });
+        tx.set(doc(refs.balanceLedger), {
+          playerId, sessionId,
+          delta:         cost,
+          balanceBefore: payeeBefore,
+          balanceAfter:  payeeBefore + cost,
+          reason:        'settlement',
+          note:          'Refunded prepaid balance',
+          createdAt:     serverTimestamp(),
+        });
+      }
+
+      // If a *different* player previously covered this, refund them.
+      if (oldPayerRef && oldPayerSnap?.exists()) {
+        const p = (oldPayerSnap.data()?.balance as number) ?? 0;
+        tx.update(oldPayerRef, { balance: increment(cost) });
+        tx.set(doc(refs.balanceLedger), {
+          playerId:      oldPayerId as string,
+          sessionId,
+          delta:         cost,
+          balanceBefore: p,
+          balanceAfter:  p + cost,
+          reason:        'settlement',
+          note:          'Refunded — no longer covering another player',
+          createdAt:     serverTimestamp(),
+        });
+      }
+
+      // The payee no longer owes the club (if they were unsettled).
+      if (currentVia === null) tx.update(payeeRef, { owed: increment(-cost) });
+
+      // ── Draw the new payer's balance ────────────────────────────────────────────
+      const payeeData = payeeSnap.data() as { firstName?: string; lastName?: string } | undefined;
+      const payeeName = [payeeData?.firstName, payeeData?.lastName].filter(Boolean).join(' ') || 'another player';
+      const payerBefore = (payerSnap.data()?.balance as number) ?? 0;
+      tx.update(payerRef, { balance: increment(-cost) });
+      tx.set(doc(refs.balanceLedger), {
+        playerId:      payerId,
+        sessionId,
+        delta:         -cost,
+        balanceBefore: payerBefore,
+        balanceAfter:  payerBefore - cost,
+        reason:        'session',
+        note:          `Covered ${payeeName}'s dues`,
+        createdAt:     serverTimestamp(),
+      });
+
+      // ── Mark the payee settled via transfer ─────────────────────────────────────
+      const updatedPlayers = players.map(p =>
+        p.id === playerId
+          ? { ...p, paid: true, comped: false, paidVia: 'transfer' as const, paidBy: payerId }
+          : p
+      );
+      tx.update(sessionRef, { players: updatedPlayers });
     });
   });
 }
@@ -660,11 +876,20 @@ export async function deleteSession(sessionId: string): Promise<void> {
       const courtUsage  = session.courtCreditUsage ?? [];
       const players     = session.players ?? [];
 
-      const [birdieSnaps, courtSnaps, playerSnaps] = await Promise.all([
+      // Players who covered others' dues from their balance ('transfer') must be
+      // refunded even when they aren't participants themselves.
+      const payerIds = players
+        .filter(p => p.paidVia === 'transfer' && p.paidBy)
+        .map(p => p.paidBy as string);
+      const balanceIds = [...new Set([...players.map(p => p.id), ...payerIds])];
+
+      const [birdieSnaps, courtSnaps, balanceSnaps] = await Promise.all([
         Promise.all(birdieUsage.map(u => tx.get(doc(refs.birdieInventory, u.id)))),
         Promise.all(courtUsage.map(u  => tx.get(doc(refs.courtCredits, u.id)))),
-        Promise.all(players.map(p     => tx.get(doc(refs.players, p.id)))),
+        Promise.all(balanceIds.map(id => tx.get(doc(refs.players, id)))),
       ]);
+      const playerSnapMap = new Map(balanceIds.map((id, i) => [id, balanceSnaps[i]]));
+      const playerSnaps = players.map(p => playerSnapMap.get(p.id)!);
 
       // Refund birds to each batch.
       birdieUsage.forEach((u, i) => {
@@ -726,6 +951,29 @@ export async function deleteSession(sessionId: string): Promise<void> {
             createdAt:     serverTimestamp(),
           });
         }
+      });
+
+      // Refund each payer who covered another player's dues from their balance.
+      const transferRefund = new Map<string, number>();
+      players.forEach(p => {
+        if (p.paidVia === 'transfer' && p.paidBy)
+          transferRefund.set(p.paidBy, (transferRefund.get(p.paidBy) ?? 0) + p.cost);
+      });
+      transferRefund.forEach((amount, id) => {
+        const snap = playerSnapMap.get(id);
+        if (!snap?.exists()) return;
+        const before = (snap.data()?.balance as number) ?? 0;
+        tx.update(snap.ref, { balance: increment(amount) });
+        tx.set(doc(refs.balanceLedger), {
+          playerId:      id,
+          sessionId,
+          delta:         amount,
+          balanceBefore: before,
+          balanceAfter:  before + amount,
+          reason:        'session-deleted',
+          note:          'Session deleted — refunded covered dues',
+          createdAt:     serverTimestamp(),
+        });
       });
 
       // Archive a copy, then delete the original.
