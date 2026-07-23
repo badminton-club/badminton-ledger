@@ -217,6 +217,13 @@ function PlayerRow({
 
   const otherPlayers = payerOptions.filter(o => o.id !== player.id);
 
+  // Search box for the "Paid by" dropdown — filters otherPlayers by name.
+  const [payerSearch, setPayerSearch] = useState('');
+  const filteredPayers = useMemo(
+    () => otherPlayers.filter(o => o.name.toLowerCase().includes(payerSearch.trim().toLowerCase())),
+    [otherPlayers, payerSearch]
+  );
+
   return (
     <ListGroup.Item
       className="d-flex justify-content-between align-items-center"
@@ -242,7 +249,11 @@ function PlayerRow({
                     {o.label}
                   </Button>
                   {o.method === null && otherPlayers.length > 0 && (
-                    <Dropdown as={ButtonGroup} align="end">
+                    <Dropdown
+                      as={ButtonGroup}
+                      align="end"
+                      onToggle={(isOpen) => { if (!isOpen) setPayerSearch(''); }}
+                    >
                       <Dropdown.Toggle
                         size="sm"
                         variant={currentVia === 'transfer' ? 'primary' : 'outline-secondary'}
@@ -252,19 +263,36 @@ function PlayerRow({
                       >
                         {currentVia === 'transfer' && payerName ? payerName : 'Paid by'}
                       </Dropdown.Toggle>
-                      <Dropdown.Menu style={{ maxHeight: 320, overflowY: 'auto' }}>
+                      <Dropdown.Menu style={{ maxHeight: 360, overflowY: 'auto' }}>
                         <Dropdown.Header>Pay from another's balance</Dropdown.Header>
-                        {otherPlayers.map(op => (
-                          <Dropdown.Item
-                            key={op.id}
-                            active={currentVia === 'transfer' && player.paidBy === op.id}
-                            onClick={() => handlePaidBy(op.id)}
-                            className="d-flex justify-content-between align-items-center gap-3"
-                          >
-                            <span>{op.name}</span>
-                            <span className="text-muted small">${op.balance.toFixed(2)}</span>
-                          </Dropdown.Item>
-                        ))}
+                        <div className="px-2 pb-2">
+                          <Form.Control
+                            size="sm"
+                            autoFocus
+                            placeholder="Search players…"
+                            value={payerSearch}
+                            onChange={(e) => setPayerSearch(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                          />
+                        </div>
+                        {filteredPayers.length === 0 ? (
+                          <Dropdown.ItemText className="text-muted small px-3">
+                            No players found.
+                          </Dropdown.ItemText>
+                        ) : (
+                          filteredPayers.map(op => (
+                            <Dropdown.Item
+                              key={op.id}
+                              active={currentVia === 'transfer' && player.paidBy === op.id}
+                              onClick={() => handlePaidBy(op.id)}
+                              className="d-flex justify-content-between align-items-center gap-3"
+                            >
+                              <span>{op.name}</span>
+                              <span className="text-muted small">${op.balance.toFixed(2)}</span>
+                            </Dropdown.Item>
+                          ))
+                        )}
                       </Dropdown.Menu>
                     </Dropdown>
                   )}
