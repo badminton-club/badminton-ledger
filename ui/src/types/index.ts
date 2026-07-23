@@ -41,10 +41,11 @@ export interface Session {
 
 // How a player's session cost was settled:
 //  'etransfer' — paid the club directly by e-Transfer (owed to the owner, counts in payout)
-//  'balance'   — drawn from the player's prepaid balance at session time
+//  'balance'   — drawn from the player's own prepaid balance at session time
+//  'transfer'  — drawn from *another* player's prepaid balance (see SessionPlayer.paidBy)
 //  'comp'      — settled directly with the owner (excluded from payout)
 //  null        — unpaid / owing
-export type PaidVia = 'etransfer' | 'balance' | 'comp' | null;
+export type PaidVia = 'etransfer' | 'balance' | 'transfer' | 'comp' | null;
 
 // Minimal — names are resolved from the Redux players slice, never stored in sessions
 export interface SessionPlayer {
@@ -53,6 +54,7 @@ export interface SessionPlayer {
   cost: number;
   paid: boolean;
   paidVia?: PaidVia; // how `paid`/`comped` was settled; disambiguates balance accounting
+  paidBy?: string | null; // when paidVia === 'transfer', the id of the player whose balance covered this cost
   comped?: boolean; // player settled directly with the owner — excluded from owner payout
   highlighted: boolean;
 }

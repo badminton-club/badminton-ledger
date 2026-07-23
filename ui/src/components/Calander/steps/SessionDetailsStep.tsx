@@ -142,6 +142,7 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
         cost:        parseFloat((perUnit * p.percentage).toFixed(2)),
         paid:        existing?.paid ?? false,
         paidVia:     existing?.paidVia ?? null,
+        paidBy:      existing?.paidBy ?? null,
         comped:      existing?.comped ?? false,
         highlighted: existing?.highlighted ?? false,
       };

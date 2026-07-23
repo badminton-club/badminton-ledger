@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Badge, Button, ButtonGroup, Col, Form, ListGroup, Row } from 'react-bootstrap';
+import { Alert, Badge, Button, ButtonGroup, Col, Dropdown, Form, ListGroup, Row } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { useAppSelector } from 'hooks';
-import { selectPlayerById } from '../../../features/players/playersSlice';
+import { selectPlayerById, selectAllPlayers } from '../../../features/players/playersSlice';
 import { selectDisabledTabs, selectIsClubAdmin } from '../../../features/club/clubSlice';
-import { setPlayerSettlement, togglePlayerHighlightStatus } from '../../../services/firebase';
+import { setPlayerSettlement, setPlayerPaidBy } from '../../../services/firebase';
 import type { PaidVia, Session, SessionPlayer } from 'types';
 import type { RootState } from '../../../store';
 
@@ -20,6 +20,15 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
   const isAdmin = useAppSelector(selectIsClubAdmin);
   const disabledTabs = useAppSelector(selectDisabledTabs);
   const birdiesEnabled = !disabledTabs.includes('birdies');
+  const allPlayers = useAppSelector(selectAllPlayers);
+  const payerOptions = useMemo(
+    () => allPlayers.map(p => ({
+      id:      p.id,
+      name:    [p.firstName, p.lastName].filter(Boolean).join(' '),
+      balance: p.balance,
+    })),
+    [allPlayers],
+  );
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteText, setDeleteText] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -67,8 +76,9 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
             key={player.id}
             player={player}
             isAdmin={isAdmin}
+            payerOptions={payerOptions}
             onSetSettlement={(method) => refresh(() => setPlayerSettlement(session.id, player.id, method))}
-            onToggleHighlight={() => refresh(() => togglePlayerHighlightStatus(session.id, player.id))}
+            onSetPaidBy={(payerId) => refresh(() => setPlayerPaidBy(session.id, player.id, payerId))}
           />
         ))}
       </ListGroup>
@@ -133,12 +143,13 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
 }
 
 function PlayerRow({
-  player, isAdmin, onSetSettlement, onToggleHighlight,
+  player, isAdmin, payerOptions, onSetSettlement, onSetPaidBy,
 }: {
   player:            SessionPlayer;
   isAdmin:           boolean;
+  payerOptions:      { id: string; name: string; balance: number }[];
   onSetSettlement:   (method: PaidVia) => void;
-  onToggleHighlight: () => void;
+  onSetPaidBy:       (payerId: string) => void;
 }) {
   const stored = useAppSelector((s: RootState) => selectPlayerById(s, player.id));
   const name   = stored
@@ -147,6 +158,14 @@ function PlayerRow({
 
   const currentVia: PaidVia =
     player.paidVia ?? (player.comped ? 'comp' : player.paid ? 'etransfer' : null);
+
+  // Resolve the payer's name when this player's dues were covered from another's balance.
+  const payer = useAppSelector((s: RootState) =>
+    player.paidBy ? selectPlayerById(s, player.paidBy) : undefined
+  );
+  const payerName = payer
+    ? [payer.firstName, payer.lastName].filter(Boolean).join(' ')
+    : player.paidBy;
 
   // Choosing 'balance' draws the session cost from prepaid credit, which can leave the
   // player negative. Compute the resulting balance to warn.
@@ -164,21 +183,46 @@ function PlayerRow({
     onSetSettlement(method);
   };
 
+  // Cover this player's dues from another player's prepaid balance ('transfer').
+  const handlePaidBy = (payerId: string) => {
+    if (!payerId || payerId === player.paidBy) return;
+    const opt = payerOptions.find(o => o.id === payerId);
+    if (opt && opt.balance < player.cost) {
+      const ok = window.confirm(
+        `${opt.name} has $${opt.balance.toFixed(2)} — covering $${player.cost.toFixed(2)} ` +
+        `will leave them at $${(opt.balance - player.cost).toFixed(2)} (negative). Continue?`
+      );
+      if (!ok) return;
+    }
+    onSetPaidBy(payerId);
+  };
+
   // Clearly marks how the session was settled (shown to members).
   const settlement = player.comped
     ? { label: 'Comp', bg: 'info' }
-    : player.paid
-      ? (player.paidVia === 'balance'
-          ? { label: 'Balance', bg: 'primary' }
-          : { label: 'e-Transfer', bg: 'success' })
-      : { label: 'Unpaid', bg: 'danger' };
+    : currentVia === 'transfer'
+      ? { label: payerName ? `Paid by ${payerName}` : 'Covered', bg: 'primary' }
+      : player.paid
+        ? (player.paidVia === 'balance'
+            ? { label: 'Balance', bg: 'primary' }
+            : { label: 'e-Transfer', bg: 'success' })
+        : { label: 'Unpaid', bg: 'danger' };
 
   const options: { method: PaidVia; label: string; activeVariant: string }[] = [
-    { method: null,        label: 'Unpaid',  activeVariant: 'danger'  },
-    { method: 'comp',      label: 'Comp',    activeVariant: 'info'    },
-    { method: 'balance',   label: 'Balance', activeVariant: 'primary' },
-    { method: 'etransfer', label: 'e-Trans', activeVariant: 'success' },
+    { method: null,        label: 'Unpaid',     activeVariant: 'danger'  },
+    { method: 'comp',      label: 'Comp',       activeVariant: 'info'    },
+    { method: 'balance',   label: 'Balance',    activeVariant: 'primary' },
+    { method: 'etransfer', label: 'e-Transfer', activeVariant: 'success' },
   ];
+
+  const otherPlayers = payerOptions.filter(o => o.id !== player.id);
+
+  // Search box for the "Paid by" dropdown — filters otherPlayers by name.
+  const [payerSearch, setPayerSearch] = useState('');
+  const filteredPayers = useMemo(
+    () => otherPlayers.filter(o => o.name.toLowerCase().includes(payerSearch.trim().toLowerCase())),
+    [otherPlayers, payerSearch]
+  );
 
   return (
     <ListGroup.Item
@@ -195,25 +239,66 @@ function PlayerRow({
       <div className="d-flex align-items-center gap-2">
         <span className={player.paid ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
         {isAdmin ? (
-          <>
-            <Button size="sm" variant={player.highlighted ? 'warning' : 'outline-secondary'} onClick={onToggleHighlight}>
-              {player.highlighted ? '★' : '☆'}
-            </Button>
-            <ButtonGroup size="sm">
-              {options.map(o => {
-                const active = currentVia === o.method;
-                return (
+          <ButtonGroup size="sm">
+              {options.map(o => (
+                <React.Fragment key={o.label}>
                   <Button
-                    key={o.label}
-                    variant={active ? o.activeVariant : 'outline-secondary'}
+                    variant={currentVia === o.method ? o.activeVariant : 'outline-secondary'}
                     onClick={() => handleSelect(o.method)}
                   >
                     {o.label}
                   </Button>
-                );
-              })}
+                  {o.method === null && otherPlayers.length > 0 && (
+                    <Dropdown
+                      as={ButtonGroup}
+                      align="end"
+                      onToggle={(isOpen) => { if (!isOpen) setPayerSearch(''); }}
+                    >
+                      <Dropdown.Toggle
+                        size="sm"
+                        variant={currentVia === 'transfer' ? 'primary' : 'outline-secondary'}
+                        title="Pay this player's dues from another player's balance"
+                        className="text-truncate"
+                        style={{ maxWidth: 150 }}
+                      >
+                        {currentVia === 'transfer' && payerName ? payerName : 'Paid by'}
+                      </Dropdown.Toggle>
+                      <Dropdown.Menu style={{ maxHeight: 360, overflowY: 'auto' }}>
+                        <Dropdown.Header>Pay from another's balance</Dropdown.Header>
+                        <div className="px-2 pb-2">
+                          <Form.Control
+                            size="sm"
+                            autoFocus
+                            placeholder="Search players…"
+                            value={payerSearch}
+                            onChange={(e) => setPayerSearch(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                          />
+                        </div>
+                        {filteredPayers.length === 0 ? (
+                          <Dropdown.ItemText className="text-muted small px-3">
+                            No players found.
+                          </Dropdown.ItemText>
+                        ) : (
+                          filteredPayers.map(op => (
+                            <Dropdown.Item
+                              key={op.id}
+                              active={currentVia === 'transfer' && player.paidBy === op.id}
+                              onClick={() => handlePaidBy(op.id)}
+                              className="d-flex justify-content-between align-items-center gap-3"
+                            >
+                              <span>{op.name}</span>
+                              <span className="text-muted small">${op.balance.toFixed(2)}</span>
+                            </Dropdown.Item>
+                          ))
+                        )}
+                      </Dropdown.Menu>
+                    </Dropdown>
+                  )}
+                </React.Fragment>
+              ))}
             </ButtonGroup>
-          </>
         ) : (
           <Badge bg={settlement.bg} style={{ fontSize: 10, minWidth: 72 }}>
             {settlement.label}

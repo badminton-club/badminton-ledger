@@ -14,7 +14,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { getMonthYear } from '../utils/dateUtils';
 import AddPlayerModal from '../components/AddPlayerModal';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { db, refs, setPlayerSettlement } from '../services/firebase';
+import { db, refs, setPlayerSettlement, setPlayerPaidBy } from '../services/firebase';
 import { addPlayer, updatePlayerProfile } from '../services/firebase/players';
 import {
   collection, query, where, getDocs, orderBy,
@@ -194,6 +194,18 @@ console.log("selectedPlayer ==> ", selectedPlayer);
     }
   };
 
+  const handleSetPaidBy = async (sessionId: string, payerId: string) => {
+    if (!selectedPlayerId) return;
+    setSessionsError('');
+    try {
+      await setPlayerPaidBy(sessionId, selectedPlayerId, payerId);
+      await fetchAttendedSessions({ silent: true });
+      await fetchLedger(selectedPlayerId, { silent: true });
+    } catch (err) {
+      setSessionsError(err instanceof Error ? err.message : 'Failed to update settlement.');
+    }
+  };
+
   // Balance adjustment
   const handleBalanceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -313,7 +325,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
   const walletLedger = ledger.filter(e => e.reason !== 'payment' && e.reason !== 'comp');
 
   return (
-    <Container fluid className="mt-4">
+    <Container fluid className="mt-4 pb-4">
       <Row className="mb-3">
         <Col className="text-end">
           <Button variant="success" onClick={() => setShowAddModal(true)}>+ Add New Player</Button>
@@ -599,7 +611,7 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                     <p className="text-muted small">No sessions attended this month.</p>
                   )}
                   {!isLoadingSessions && attendedSessions.length > 0 && (
-                    <ListGroup variant="flush" style={{ maxHeight: 440, overflowY: 'auto' }}>
+                    <ListGroup variant="flush" style={{ maxHeight: 'calc(100vh - 320px)', overflowY: 'auto' }}>
                       {attendedSessions.map(s => {
                         const playerInSession = s.players.find(p => p.id === selectedPlayerId);
                         const sessionDate =
@@ -646,17 +658,64 @@ console.log("selectedPlayer ==> ", selectedPlayer);
                                     }
                                     handleSetSettlement(s.id, method);
                                   };
+                                  // Cover the selected player's dues from another player's balance.
+                                  const otherPlayers = playersList
+                                    .filter(pp => pp.id !== selectedPlayerId)
+                                    .map(pp => ({ id: pp.id, name: formatPlayerName(pp), balance: pp.balance }));
+                                  const currentPayer = via === 'transfer' && playerInSession.paidBy
+                                    ? playersList.find(pp => pp.id === playerInSession.paidBy)
+                                    : undefined;
+                                  const payerName = currentPayer ? formatPlayerName(currentPayer) : undefined;
+                                  const pickPaidBy = (payerId: string) => {
+                                    if (payerId === playerInSession.paidBy) return;
+                                    const opt = otherPlayers.find(o => o.id === payerId);
+                                    if (opt && opt.balance < playerInSession.cost) {
+                                      const ok = window.confirm(
+                                        `${opt.name} has $${opt.balance.toFixed(2)} — covering $${playerInSession.cost.toFixed(2)} ` +
+                                        `will leave them at $${(opt.balance - playerInSession.cost).toFixed(2)} (negative). Continue?`
+                                      );
+                                      if (!ok) return;
+                                    }
+                                    handleSetPaidBy(s.id, payerId);
+                                  };
                                   return (
                                     <ButtonGroup size="sm" className="mt-1">
                                       {settleOptions.map(o => (
-                                        <Button
-                                          key={o.label}
-                                          variant={via === o.method ? o.activeVariant : 'outline-secondary'}
-                                          style={{ fontSize: 11, padding: '1px 8px' }}
-                                          onClick={() => pick(o.method)}
-                                        >
-                                          {o.label}
-                                        </Button>
+                                        <React.Fragment key={o.label}>
+                                          <Button
+                                            variant={via === o.method ? o.activeVariant : 'outline-secondary'}
+                                            style={{ fontSize: 11, padding: '1px 8px' }}
+                                            onClick={() => pick(o.method)}
+                                          >
+                                            {o.label}
+                                          </Button>
+                                          {o.method === null && otherPlayers.length > 0 && (
+                                            <Dropdown as={ButtonGroup} align="end">
+                                              <Dropdown.Toggle
+                                                variant={via === 'transfer' ? 'primary' : 'outline-secondary'}
+                                                style={{ fontSize: 11, padding: '1px 8px', maxWidth: 130 }}
+                                                className="text-truncate"
+                                                title="Pay these dues from another player's balance"
+                                              >
+                                                {via === 'transfer' && payerName ? payerName : 'Paid by'}
+                                              </Dropdown.Toggle>
+                                              <Dropdown.Menu style={{ maxHeight: 320, overflowY: 'auto' }}>
+                                                <Dropdown.Header>Pay from another's balance</Dropdown.Header>
+                                                {otherPlayers.map(op => (
+                                                  <Dropdown.Item
+                                                    key={op.id}
+                                                    active={via === 'transfer' && playerInSession.paidBy === op.id}
+                                                    onClick={() => pickPaidBy(op.id)}
+                                                    className="d-flex justify-content-between align-items-center gap-3"
+                                                  >
+                                                    <span>{op.name}</span>
+                                                    <span className="text-muted small">${op.balance.toFixed(2)}</span>
+                                                  </Dropdown.Item>
+                                                ))}
+                                              </Dropdown.Menu>
+                                            </Dropdown>
+                                          )}
+                                        </React.Fragment>
                                       ))}
                                     </ButtonGroup>
                                   );
