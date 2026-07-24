@@ -216,8 +216,6 @@ function PlayerRow({
   ];
 
   const otherPlayers = payerOptions.filter(o => o.id !== player.id);
-
-  // Search box for the "Paid by" dropdown — filters otherPlayers by name.
   const [payerSearch, setPayerSearch] = useState('');
   const filteredPayers = useMemo(
     () => otherPlayers.filter(o => o.name.toLowerCase().includes(payerSearch.trim().toLowerCase())),

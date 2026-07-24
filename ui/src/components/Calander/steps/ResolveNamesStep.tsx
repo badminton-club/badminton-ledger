@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Alert, Button, Card, Row, Col, Form, InputGroup, Spinner, Badge } from "react-bootstrap";
+import { Alert, Button, Card, Row, Col, Form, InputGroup, Spinner, Tooltip, OverlayTrigger } from "react-bootstrap";
 import { useAppDispatch, useAppSelector } from "../../../hooks";
 import {
     selectResolutionItems,
@@ -20,7 +20,6 @@ interface Props {
 export default function ResolveNamesStep({ onComplete, onBack }: Props) {
     const dispatch = useAppDispatch();
     const items = useAppSelector(selectResolutionItems);
-    console.log("items ==> ", items);
     const formError = useAppSelector(selectFormError);
     const allDone = useAppSelector(selectAllResolved);
 
@@ -66,9 +65,31 @@ export default function ResolveNamesStep({ onComplete, onBack }: Props) {
                             {items.length - unresolvedCount} / {items.length} confirmed
                         </span>
                     )}
-                    <Button variant="primary" disabled={!allDone} onClick={() => onComplete(items)}>
-                        Confirm & Add Details →
-                    </Button>
+                    {duplicateIds.size > 0 ?
+                        <OverlayTrigger
+                            placement="right"
+                            delay={{ show: 250, hide: 400 }}
+                            overlay={
+                                <Tooltip id="button-tooltip">
+                                    Duplicate names found — please resolve before continuing. You can edit names or
+                                    clear selections to fix duplicates.
+                                </Tooltip>
+                            }
+                        >
+                            <span className="d-inline-block" tabIndex={0}>
+                                <Button
+                                    variant="primary"
+                                    disabled={!allDone || duplicateIds.size > 0}
+                                    onClick={() => onComplete(items)}
+                                >
+                                    Confirm & Add Details →
+                                </Button>
+                            </span>
+                        </OverlayTrigger>
+                    :   <Button variant="primary" disabled={!allDone} onClick={() => onComplete(items)}>
+                            Confirm & Add Details →
+                        </Button>
+                    }
                 </div>
             </div>
         </>

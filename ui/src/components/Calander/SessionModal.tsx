@@ -38,7 +38,14 @@ const MODAL_TITLES: Record<string, string> = {
     view: "Session Details",
 };
 
-export default function SessionModal({ show, onHide, session, onSessionUpdate, onSaveSession, onDeleteSession }: Props) {
+export default function SessionModal({
+    show,
+    onHide,
+    session,
+    onSessionUpdate,
+    onSaveSession,
+    onDeleteSession,
+}: Props) {
     const dispatch = useAppDispatch();
     const mode = useAppSelector(selectModalMode);
 
@@ -52,8 +59,13 @@ export default function SessionModal({ show, onHide, session, onSessionUpdate, o
         async (rawInput: string) => {
             dispatch(clearErrors());
 
+            const waitlistMarker = /^\s*wait\s?list\s*:?/i;
+            const linesByNewline = rawInput.split("\n");
+            const waitlistIndex = linesByNewline.findIndex((l) => waitlistMarker.test(l));
+            const cleanedInput = waitlistIndex === -1 ? rawInput : linesByNewline.slice(0, waitlistIndex).join("\n");
+
             // Parse numbered list: "1. Name"
-            const lines = rawInput
+            const lines = cleanedInput
                 .trim()
                 .split(/[\n,]+/)
                 .map((l) => l.trim())
@@ -62,7 +74,7 @@ export default function SessionModal({ show, onHide, session, onSessionUpdate, o
             const names = lines
                 .map((l) => {
                     const m = l.match(nameRegex);
-                    return m ? m[1].trim() : l;
+                    return m ? m[1].trim() : null;
                 })
                 .filter(Boolean);
 
