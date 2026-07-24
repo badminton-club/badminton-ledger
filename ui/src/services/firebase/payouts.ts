@@ -77,23 +77,35 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
 }
 
 /**
- * Records a cashout to the owner for the current pending balance, bringing it to
- * zero. Recomputes pending at call time so the recorded amount is never stale.
- * Returns the amount paid.
+ * Records a cashout to the owner. When `amount` is omitted, the full pending
+ * balance is paid out; otherwise the given custom amount is recorded. Recomputes
+ * pending at call time so a full payout is never stale and a custom payout can't
+ * exceed what's owed. Returns the amount paid.
  */
-export async function payOwner(note?: string): Promise<number> {
+export async function payOwner(note?: string, amount?: number): Promise<number> {
   return serviceCall('payOwner', async () => {
     const { pending } = await fetchOwnerPayoutSummary();
     if (pending <= 0) throw new Error('Nothing to pay out — the balance is already zero.');
 
+    let payoutAmount = pending;
+    if (amount !== undefined) {
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Enter a payout amount greater than zero.');
+      }
+      if (amount > pending) {
+        throw new Error(`Amount can't exceed the pending balance of $${pending.toFixed(2)}.`);
+      }
+      payoutAmount = amount;
+    }
+
     await setDoc(doc(refs.payouts), {
-      amount:    pending,
+      amount:    payoutAmount,
       note:      note?.trim() || null,
       paidByUid: auth.currentUser?.uid ?? null,
       date:      Timestamp.now(),
       createdAt: serverTimestamp(),
     });
 
-    return pending;
+    return payoutAmount;
   });
 }
