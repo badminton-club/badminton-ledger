@@ -16,6 +16,7 @@ export default function PayoutPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
+  const [customAmount, setCustomAmount] = useState('');
   const [paying, setPaying] = useState(false);
   const [payResult, setPayResult] = useState('');
 
@@ -40,19 +41,28 @@ export default function PayoutPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handlePayOwner = async () => {
+  const handlePayOwner = async (custom?: number) => {
     if (!summary || summary.pending <= 0) return;
-    if (!window.confirm(
-      `Record a payout of ${money(summary.pending)} to the owner? This resets the pending balance to zero.`
-    )) return;
+
+    const isPartial = custom !== undefined;
+    const confirmMsg = isPartial
+      ? `Record a payout of ${money(custom!)} to the owner?`
+      : `Record a payout of ${money(summary.pending)} to the owner? This resets the pending balance to zero.`;
+    if (!window.confirm(confirmMsg)) return;
 
     setPaying(true);
     setError('');
     setPayResult('');
     try {
-      const amount = await payOwner(note);
-      setPayResult(`Paid ${money(amount)} to the owner. Pending balance is now zero.`);
+      const amount = await payOwner(note, custom);
+      const remaining = summary.pending - amount;
+      setPayResult(
+        remaining > 0
+          ? `Paid ${money(amount)} to the owner. Pending balance is now ${money(remaining)}.`
+          : `Paid ${money(amount)} to the owner. Pending balance is now zero.`
+      );
       setNote('');
+      setCustomAmount('');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Payout failed.');
@@ -78,6 +88,8 @@ export default function PayoutPage() {
   }
 
   const pending = summary?.pending ?? 0;
+  const parsedCustom = parseFloat(customAmount);
+  const customValid = Number.isFinite(parsedCustom) && parsedCustom > 0 && parsedCustom <= pending;
 
   return (
     <Container className="py-4">
@@ -117,10 +129,10 @@ export default function PayoutPage() {
         <Card.Body>
           <Card.Title>Cash out to owner</Card.Title>
           <Card.Text className="text-muted">
-            Records a payout for the money collected from players and resets the pending balance to zero.
+            Pay out the full pending balance, or enter a custom amount for a partial payout.
           </Card.Text>
-          <Row className="g-2 align-items-end">
-            <Col md={8}>
+          <Row className="g-3">
+            <Col md={12}>
               <Form.Label>Note (optional)</Form.Label>
               <Form.Control
                 type="text"
@@ -130,13 +142,36 @@ export default function PayoutPage() {
                 disabled={paying}
               />
             </Col>
-            <Col md={4} className="text-md-end">
+            <Col md={6}>
+              <Form.Label>Custom amount</Form.Label>
+              <div className="d-flex gap-2">
+                <Form.Control
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  max={pending}
+                  placeholder="0.00"
+                  value={customAmount}
+                  onChange={(e) => setCustomAmount(e.target.value)}
+                  disabled={paying || pending <= 0}
+                />
+                <Button
+                  variant="outline-success"
+                  className="text-nowrap"
+                  onClick={() => handlePayOwner(parsedCustom)}
+                  disabled={paying || loading || !customValid}
+                >
+                  {paying ? <Spinner size="sm" animation="border" /> : 'Pay this'}
+                </Button>
+              </div>
+            </Col>
+            <Col md={6} className="d-flex align-items-end justify-content-md-end">
               <Button
                 variant="success"
-                onClick={handlePayOwner}
+                onClick={() => handlePayOwner()}
                 disabled={paying || loading || pending <= 0}
               >
-                {paying ? <Spinner size="sm" animation="border" /> : `Pay owner ${money(pending)}`}
+                {paying ? <Spinner size="sm" animation="border" /> : `Pay full balance ${money(pending)}`}
               </Button>
             </Col>
           </Row>
