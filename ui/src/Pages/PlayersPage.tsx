@@ -64,14 +64,12 @@ export default function PlayersPage() {
   const selectedPlayer = useAppSelector((s: RootState) =>
     searchParams.get('playerId') ? selectPlayerById(s, searchParams.get('playerId')!) : null
 );
-console.log("selectedPlayer ==> ", selectedPlayer);
   const selectedPlayerId = searchParams.get('playerId');
 
   const [searchTerm,         setSearchTerm]         = useState('');
   const [filteredPlayers,    setFilteredPlayers]     = useState<Player[]>(playersList);
   const [currentMonth,       setCurrentMonth]        = useState(new Date());
   const [attendedSessions,   setAttendedSessions]    = useState<Session[]>([]);
-  console.log("attendedSessions ==> ", attendedSessions);
   const [isLoadingSessions,  setIsLoadingSessions]   = useState(false);
   const [sessionsError,      setSessionsError]       = useState('');
   const [sessionsThisYear,   setSessionsThisYear]    = useState(0);
