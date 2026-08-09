@@ -6,8 +6,8 @@ import { getMonth, getYear, lastDayOfMonth } from "date-fns";
 import { useSearchParams } from "react-router-dom";
 
 import { useAppDispatch, useAppSelector } from "../../hooks";
-import { selectModalMode, setMode } from "../../features/SessionModal/sessionModalSlice";
-import { selectCurrentClubId } from "../../features/club/clubSlice";
+import { selectModalMode, setMode, setConfirmedPlayers } from "../../features/SessionModal/sessionModalSlice";
+import { selectCurrentClubId, selectDisabledTabs } from "../../features/club/clubSlice";
 import { fetchSessions, fetchSessionById, addSession, editSession, deleteSession } from "../../services/firebase";
 import { getMonthYear, getNextMonth, getPrevMonth } from "../../utils/dateUtils";
 import type { Session } from "../../types";
@@ -27,6 +27,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
     const [isLoading, setIsLoading] = useState(false);
     const modalMode = useAppSelector(selectModalMode);
     const currentClubId = useAppSelector(selectCurrentClubId);
+    const playersEnabled = !useAppSelector(selectDisabledTabs).includes("players");
     const dispatch = useAppDispatch();
     const [searchParams, setSearchParams] = useSearchParams();
 
@@ -84,7 +85,14 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
         if (!selectedDate) return;
         setClickedDate(selectedDate);
         setModalSession(undefined);
-        dispatch(setMode("paste"));
+        // With players disabled, skip the name paste/resolve steps and go straight to a
+        // cost-only session form (no attendees).
+        if (playersEnabled) {
+            dispatch(setMode("paste"));
+        } else {
+            dispatch(setConfirmedPlayers([]));
+            dispatch(setMode("details"));
+        }
         setShowModal(true);
     };
 

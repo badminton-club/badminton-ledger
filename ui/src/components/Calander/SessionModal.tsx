@@ -12,6 +12,7 @@ import {
     selectResolutionItems,
 } from "../../features/SessionModal/sessionModalSlice";
 import { findPlayersByName } from "../../services/firebase/players";
+import { selectDisabledTabs } from "../../features/club/clubSlice";
 import type { Session, NameResolutionItem, ConfirmedPlayer } from "../../types";
 import { formatPlayerName } from "../../services/firebase/players";
 
@@ -48,6 +49,7 @@ export default function SessionModal({
 }: Props) {
     const dispatch = useAppDispatch();
     const mode = useAppSelector(selectModalMode);
+    const playersEnabled = !useAppSelector(selectDisabledTabs).includes("players");
 
     // Reset when modal closes
     useEffect(() => {
@@ -124,8 +126,9 @@ export default function SessionModal({
         [onSaveSession, onHide],
     );
 
-    const title = MODAL_TITLES[mode] ?? "Session Details";
-
+    const title = !playersEnabled && mode === "details"
+        ? "Add Session"
+        : MODAL_TITLES[mode] ?? "Session Details";
     return (
         <Modal show={show} onHide={onHide} centered size="lg">
             <Modal.Header closeButton>
@@ -154,7 +157,18 @@ export default function SessionModal({
                         }}
                     />
                 )}
-                {mode === "view" && !session?.id && <NoSessionView onAddSession={() => dispatch(setMode("paste"))} />}
+                {mode === "view" && !session?.id && (
+                    <NoSessionView
+                        onAddSession={() => {
+                            if (playersEnabled) {
+                                dispatch(setMode("paste"));
+                            } else {
+                                dispatch(setConfirmedPlayers([]));
+                                dispatch(setMode("details"));
+                            }
+                        }}
+                    />
+                )}
             </Modal.Body>
         </Modal>
     );
