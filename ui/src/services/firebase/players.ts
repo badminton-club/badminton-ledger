@@ -5,10 +5,9 @@ import {
   doc,
   query,
   where,
-  orderBy,
   serverTimestamp,
 } from 'firebase/firestore';
-import { db, refs } from './client';
+import { refs } from './client';
 import { serviceCall } from './utils';
 import type { Player, NewPlayerInput } from 'types';
 

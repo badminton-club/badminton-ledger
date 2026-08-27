@@ -20,7 +20,7 @@ import {
   fetchBirdieUsageForBatch,
   fetchSessions,
 } from '../services/firebase';
-import type { BirdieBatch, InventoryAdjustment } from '../types';
+import type { BirdieBatch } from '../types';
 
 // ─── Local types ──────────────────────────────────────────────────────────────
 
@@ -131,19 +131,20 @@ export default function BirdiesPage() {
     try {
       const data = await fetchBirdieInventory();
       setBatches(data);
-      if (selectAfterFetch) {
-        setSelectedBatch(data.find(b => b.id === selectAfterFetch) ?? null);
-      } else if (selectedBatch) {
-        setSelectedBatch(data.find(b => b.id === selectedBatch.id) ?? null);
-      }
+      // Functional updater reads the latest selection without needing it in the
+      // dependency array below — keeps this callback's identity stable.
+      setSelectedBatch(prev => {
+        const targetId = selectAfterFetch ?? prev?.id;
+        return targetId ? data.find(b => b.id === targetId) ?? null : prev;
+      });
     } catch {
       setError('Failed to load birdie inventory.');
     } finally {
       setIsLoading(false);
     }
-  }, [selectedBatch?.id]);
+  }, []);
 
-  useEffect(() => { loadInventory(); }, []);
+  useEffect(() => { loadInventory(); }, [loadInventory]);
 
   // ── Birds-used-per-session trend ────────────────────────────────────
   useEffect(() => {

@@ -9,11 +9,9 @@ import {
     setFormError,
     clearErrors,
     selectModalMode,
-    selectResolutionItems,
 } from "../../features/SessionModal/sessionModalSlice";
 import { findPlayersByName } from "../../services/firebase/players";
 import type { Session, NameResolutionItem, ConfirmedPlayer } from "../../types";
-import { formatPlayerName } from "../../services/firebase/players";
 
 import PasteNamesStep from "./steps/PasteNamesStep";
 import ResolveNamesStep from "./steps/ResolveNamesStep";

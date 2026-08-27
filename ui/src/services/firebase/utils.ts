@@ -1,5 +1,4 @@
 import { Timestamp } from 'firebase/firestore';
-import { serverTimestamp } from 'firebase/firestore';
 
 /** Converts a Firestore Timestamp, Date, or string to a JS Date. */
 export function toJSDate(value: Timestamp | Date | string | null | undefined): Date | null {

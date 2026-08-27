@@ -8,7 +8,6 @@ import {
   where,
   writeBatch,
   serverTimestamp,
-  Timestamp,
 } from 'firebase/firestore';
 import { refs } from './client';
 import { serviceCall, toJSDate, toTimestamp } from './utils';

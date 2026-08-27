@@ -17,8 +17,8 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { db, refs, setPlayerSettlement, setPlayerPaidBy } from '../services/firebase';
 import { addPlayer, updatePlayerProfile } from '../services/firebase/players';
 import {
-  collection, query, where, getDocs, orderBy,
-  doc, runTransaction, increment, serverTimestamp, updateDoc, deleteDoc,
+  query, where, getDocs, orderBy,
+  doc, runTransaction, increment, serverTimestamp, deleteDoc,
 } from 'firebase/firestore';
 import { useAppSelector } from '../hooks';
 import {

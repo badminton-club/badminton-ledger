@@ -95,7 +95,7 @@ export default function CourtCreditsPage() {
     }
   }, []);
 
-  useEffect(() => { loadBatches(); }, []);
+  useEffect(() => { loadBatches(); }, [loadBatches]);
 
   // ── Load history when accordion opens ────────────────────────────────────────
   useEffect(() => {
