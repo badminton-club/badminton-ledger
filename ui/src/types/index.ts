@@ -94,6 +94,7 @@ export interface CourtCreditBatch {
   remainingHours: number;
   purchaserName: string;
   purchaseDate: Date;
+  notes?: string;
   createdAt: Timestamp;
 }
 

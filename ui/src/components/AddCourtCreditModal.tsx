@@ -13,20 +13,36 @@ interface Props {
 }
 
 export default function AddCourtCreditModal({ show, onHide, onAddBatch }: Props) {
-  const [purchaseDate,   setPurchaseDate]  = useState(new Date());
-  const [costPerHour,    setCostPerHour]   = useState('');
-  const [hoursPurchased, setHoursPurchased]= useState('');
-  const [totalCost,      setTotalCost]     = useState('');
-  const [purchaserName,  setPurchaserName] = useState('');
-  const [error,          setError]         = useState('');
-  const [isSubmitting,   setIsSubmitting]  = useState(false);
+  const [purchaseDate,     setPurchaseDate]     = useState(new Date());
+  const [costPerHour,      setCostPerHour]      = useState('');
+  const [hoursPurchased,   setHoursPurchased]   = useState('');
+  const [totalCost,        setTotalCost]        = useState('');
+  const [totalCostEdited,  setTotalCostEdited]  = useState(false);
+  const [purchaserName,    setPurchaserName]    = useState('');
+  const [notes,            setNotes]            = useState('');
+  const [error,            setError]            = useState('');
+  const [isSubmitting,     setIsSubmitting]     = useState(false);
 
   useEffect(() => {
     if (!show) {
       setPurchaseDate(new Date()); setCostPerHour(''); setHoursPurchased('');
-      setTotalCost(''); setPurchaserName(''); setError('');
+      setTotalCost(''); setTotalCostEdited(false); setPurchaserName(''); setNotes(''); setError('');
     }
   }, [show]);
+
+  // Auto-calculate total cost from cost/hr * hours, unless the user has
+  // manually overridden the total cost field themselves.
+  useEffect(() => {
+    if (totalCostEdited) return;
+    const cost  = parseFloat(costPerHour);
+    const hours = parseFloat(hoursPurchased);
+    setTotalCost(!isNaN(cost) && !isNaN(hours) ? (cost * hours).toFixed(2) : '');
+  }, [costPerHour, hoursPurchased, totalCostEdited]);
+
+  const handleTotalCostChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setTotalCostEdited(true);
+    setTotalCost(e.target.value);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +56,14 @@ export default function AddCourtCreditModal({ show, onHide, onAddBatch }: Props)
     if (!purchaserName.trim())       { setError('Purchaser name is required.'); return; }
     setIsSubmitting(true);
     try {
-      await onAddBatch({ purchaseDate, purchaserName: purchaserName.trim(), costPerHour: cost, hoursPurchased: hours, totalCost: parseFloat(total.toFixed(2)) });
+      await onAddBatch({
+        purchaseDate,
+        purchaserName:  purchaserName.trim(),
+        costPerHour:    cost,
+        hoursPurchased: hours,
+        totalCost:      parseFloat(total.toFixed(2)),
+        notes:          notes.trim(),
+      });
       onHide();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to add court credits.');
@@ -70,12 +93,17 @@ export default function AddCourtCreditModal({ show, onHide, onAddBatch }: Props)
               <Form.Control type="number" min="0.5" step="0.5" value={hoursPurchased} onChange={e => setHoursPurchased(e.target.value)} disabled={isSubmitting} required />
             </Form.Group>
             <Form.Group as={Col}><Form.Label>Total Cost ($) <span className="text-danger">*</span></Form.Label>
-              <Form.Control type="number" min="0.01" step="0.01" value={totalCost} onChange={e => setTotalCost(e.target.value)} disabled={isSubmitting} required />
+              <Form.Control type="number" min="0.01" step="0.01" value={totalCost} onChange={handleTotalCostChange} disabled={isSubmitting} required />
+              <Form.Text muted>Auto-calculated as Cost/Hr × Hours — edit to override.</Form.Text>
             </Form.Group>
           </Row>
           <Form.Group className="mb-3">
             <Form.Label>Purchaser Name <span className="text-danger">*</span></Form.Label>
             <Form.Control placeholder="Who bought them" value={purchaserName} onChange={e => setPurchaserName(e.target.value)} disabled={isSubmitting} required />
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Notes</Form.Label>
+            <Form.Control as="textarea" rows={2} placeholder="Optional notes about this batch" value={notes} onChange={e => setNotes(e.target.value)} disabled={isSubmitting} />
           </Form.Group>
         </Modal.Body>
         <Modal.Footer>

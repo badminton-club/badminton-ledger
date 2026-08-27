@@ -145,7 +145,7 @@ export default function CourtCreditsPage() {
       hoursPurchased: batch.hoursPurchased,
       totalCost:      batch.totalCost,
       remainingHours: batch.remainingHours,
-      notes:          (batch as any).notes ?? '',
+      notes:          batch.notes ?? '',
     });
     setEditReason('');
     setFormError('');
@@ -290,6 +290,10 @@ export default function CourtCreditsPage() {
                         </Col>
                       </Row>
                       <Form.Group className="mb-3">
+                        <Form.Label>Notes</Form.Label>
+                        <Form.Control as="textarea" rows={2} name="notes" value={editForm.notes} onChange={handleFormChange} />
+                      </Form.Group>
+                      <Form.Group className="mb-3">
                         <Form.Label>Reason for Edit <span className="text-danger">*</span></Form.Label>
                         <Form.Control as="textarea" rows={2} value={editReason} onChange={e => setEditReason(e.target.value)} required />
                       </Form.Group>
@@ -314,6 +318,9 @@ export default function CourtCreditsPage() {
                           <p><strong>Remaining Hours:</strong> <strong>{batch.remainingHours}</strong></p>
                         </Col>
                       </Row>
+                      {batch.notes && (
+                        <p><strong>Notes:</strong> <span style={{ whiteSpace: 'pre-wrap' }}>{batch.notes}</span></p>
+                      )}
                       <Button variant="outline-primary" size="sm" className="mb-3" onClick={() => handleStartEdit(batch)}>
                         Edit Batch Details
                       </Button>
