@@ -7,7 +7,7 @@
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
-    "@testing-library/user-event": "^13.5.0",
+    "@testing-library/user-event": "^14.6.5",
     "bootstrap": "^5.3.3",
     "date-fns": "^4.1.0",
     "firebase": "^11.6.0",
@@ -36,7 +36,10 @@
   },
   "jest": {
     "moduleNameMapper": {
-      "^react-router/dom$": "<rootDir>/node_modules/react-router/dist/development/dom-export.js"
+      "^react-router/dom$": "<rootDir>/node_modules/react-router/dist/development/dom-export.js",
+      "^firebase/firestore$": "<rootDir>/src/test-utils/fakeFirestore.ts",
+      "^firebase/auth$": "<rootDir>/src/test-utils/fakeAuth.ts",
+      "^firebase/app$": "<rootDir>/src/test-utils/fakeApp.ts"
     }
   },
   "browserslist": {
@@ -52,6 +55,7 @@
     ]
   },
   "devDependencies": {
+    "@types/jest": "^27.5.2",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
