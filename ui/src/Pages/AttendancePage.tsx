@@ -113,7 +113,7 @@ export default function AttendancePage() {
   }
 
   return (
-    <Container className="py-4" style={{ maxWidth: 720 }}>
+    <Container className="py-4" style={{ maxWidth: 840 }}>
       <h3>My attendance</h3>
       {error && <Alert variant="danger">{error}</Alert>}
 
@@ -232,7 +232,7 @@ export default function AttendancePage() {
                         <tr key={e.id}>
                           <td className="text-nowrap">{d ? format(d, 'MMM d, yyyy h:mm a') : '—'}</td>
                           <td><Badge bg={REASON_BADGE[e.reason] ?? 'secondary'}>{REASON_LABELS[e.reason] ?? e.reason}</Badge></td>
-                          <td className="text-truncate" style={{ maxWidth: 220 }} title={e.note || undefined}>
+                          <td style={{ maxWidth: 320, whiteSpace: 'normal', wordBreak: 'break-word' }}>
                             {e.note || <span className="text-muted">—</span>}
                           </td>
                           <td
