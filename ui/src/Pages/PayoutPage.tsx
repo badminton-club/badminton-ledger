@@ -60,6 +60,7 @@ export default function PayoutPage() {
   const [columnFilters, setColumnFilters] = useState<Record<LedgerColumn, string>>({
     dateRecorded: '', sessionDate: '', player: '', type: '', note: '', amount: '', runningTotal: '',
   });
+  const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
 
   const players = useAppSelector(selectAllPlayers);
@@ -157,6 +158,14 @@ export default function PayoutPage() {
 
   const handleFilterChange = (key: LedgerColumn, value: string) => {
     setColumnFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const activeFilterCount = Object.values(columnFilters).filter((v) => v.trim()).length;
+
+  const clearFilters = () => {
+    setColumnFilters({
+      dateRecorded: '', sessionDate: '', player: '', type: '', note: '', amount: '', runningTotal: '',
+    });
   };
 
   const handlePayOwner = async (custom?: number) => {
@@ -297,7 +306,28 @@ export default function PayoutPage() {
       </Card>
 
       <Card>
-        <Card.Header>Payout ledger</Card.Header>
+        <Card.Header className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <span>Payout ledger</span>
+          {summary && summary.ledger.length > 0 && (
+            <div className="d-flex align-items-center gap-2">
+              <Button
+                size="sm"
+                variant={showFilters ? 'secondary' : 'outline-secondary'}
+                onClick={() => setShowFilters((v) => !v)}
+              >
+                {showFilters ? 'Hide search' : 'Search'}
+                {activeFilterCount > 0 && (
+                  <Badge bg="light" text="dark" className="ms-2">{activeFilterCount}</Badge>
+                )}
+              </Button>
+              {activeFilterCount > 0 && (
+                <Button size="sm" variant="link" className="text-decoration-none p-0" onClick={clearFilters}>
+                  Clear
+                </Button>
+              )}
+            </div>
+          )}
+        </Card.Header>
         <Card.Body>
           {loading ? (
             <div className="text-center py-3"><Spinner animation="border" /></div>
@@ -305,83 +335,101 @@ export default function PayoutPage() {
             <p className="text-muted mb-0">No payments or adjustments yet.</p>
           ) : (
             <>
-              <Table hover responsive size="sm" className="mb-2">
-                <thead>
-                  <tr>
-                    {LEDGER_COLUMNS.map((col) => (
-                      <th
-                        key={col.key}
-                        onClick={() => handleSort(col.key)}
-                        role="button"
-                        className={col.align === 'end' ? 'text-end' : ''}
-                        style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
-                      >
-                        {col.label}
-                        {sortColumn === col.key && (
-                          <span className="ms-1">{sortDirection === 'asc' ? '▲' : '▼'}</span>
-                        )}
-                      </th>
-                    ))}
-                  </tr>
-                  <tr>
-                    {LEDGER_COLUMNS.map((col) => (
-                      <th key={col.key} className="p-1">
-                        {col.searchable === false ? null : (
-                          <Form.Control
-                            size="sm"
-                            placeholder="Search…"
-                            value={columnFilters[col.key]}
-                            onChange={(e) => handleFilterChange(col.key, e.target.value)}
-                          />
-                        )}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedLedger.length === 0 ? (
-                    <tr>
-                      <td colSpan={LEDGER_COLUMNS.length} className="text-center text-muted py-3">
-                        No entries match your search.
-                      </td>
+              <div className="border rounded" style={{ maxHeight: 600, overflowY: 'auto' }}>
+                <Table hover striped responsive className="mb-0 align-middle">
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                    <tr className="table-light">
+                      {LEDGER_COLUMNS.map((col) => (
+                        <th
+                          key={col.key}
+                          onClick={() => handleSort(col.key)}
+                          role="button"
+                          className={col.align === 'end' ? 'text-end' : ''}
+                          style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                        >
+                          {col.label}
+                          <span className="ms-1 text-muted">
+                            {sortColumn === col.key ? (sortDirection === 'asc' ? '▲' : '▼') : ''}
+                          </span>
+                        </th>
+                      ))}
                     </tr>
-                  ) : (
-                    paginatedLedger.map((entry) => {
-                      const runningTotal = runningTotals.get(`${entry.type}-${entry.id}`) ?? 0;
-                      return (
-                        <tr key={`${entry.type}-${entry.id}`}>
-                          <td>{format(entry.date, 'MMM d, yyyy h:mm a')}</td>
-                          <td>{entry.sessionDate ? format(entry.sessionDate, 'MMM d, yyyy') : '—'}</td>
-                          <td>{playerName(entry.playerId)}</td>
-                          <td>
-                            {entry.type === 'payout' ? (
-                              <Badge bg="success">Payout</Badge>
-                            ) : entry.type === 'payment' ? (
-                              <Badge bg="primary">Payment</Badge>
-                            ) : entry.type === 'comp' ? (
-                              <Badge bg="info">Comp</Badge>
-                            ) : (
-                              <Badge bg="secondary">Adjustment</Badge>
+                    {showFilters && (
+                      <tr className="table-light">
+                        {LEDGER_COLUMNS.map((col) => (
+                          <th key={col.key} className="p-1 pb-2">
+                            {col.searchable === false ? null : (
+                              <Form.Control
+                                size="sm"
+                                placeholder="Search…"
+                                value={columnFilters[col.key]}
+                                onChange={(e) => handleFilterChange(col.key, e.target.value)}
+                              />
                             )}
-                          </td>
-                          <td>{entry.note}</td>
-                          {entry.type === 'comp' ? (
-                            <td className="text-end text-muted">
-                              {money(entry.amount)} <span className="small">(not counted)</span>
+                          </th>
+                        ))}
+                      </tr>
+                    )}
+                  </thead>
+                  <tbody>
+                    {paginatedLedger.length === 0 ? (
+                      <tr>
+                        <td colSpan={LEDGER_COLUMNS.length} className="text-center text-muted py-4">
+                          No entries match your search.
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedLedger.map((entry) => {
+                        const runningTotal = runningTotals.get(`${entry.type}-${entry.id}`) ?? 0;
+                        return (
+                          <tr key={`${entry.type}-${entry.id}`}>
+                            <td className="text-nowrap">{format(entry.date, 'MMM d, yyyy h:mm a')}</td>
+                            <td className="text-nowrap">{entry.sessionDate ? format(entry.sessionDate, 'MMM d, yyyy') : <span className="text-muted">—</span>}</td>
+                            <td>{playerName(entry.playerId) || <span className="text-muted">—</span>}</td>
+                            <td>
+                              {entry.type === 'payout' ? (
+                                <Badge bg="dark">Payout</Badge>
+                              ) : entry.type === 'payment' ? (
+                                <Badge bg="primary">Payment</Badge>
+                              ) : entry.type === 'comp' ? (
+                                <Badge bg="info">Comp</Badge>
+                              ) : (
+                                <Badge bg="secondary">Adjustment</Badge>
+                              )}
                             </td>
-                          ) : (
-                            <td className={`text-end ${entry.type === 'payout' ? 'text-success' : entry.amount < 0 ? 'text-danger' : ''}`}>
-                              {entry.type === 'payout' ? `- ${money(entry.amount)}` : money(entry.amount)}
+                            <td
+                              className="text-truncate"
+                              style={{ maxWidth: 220 }}
+                              title={entry.note || undefined}
+                            >
+                              {entry.note || <span className="text-muted">—</span>}
                             </td>
-                          )}
-                          <td className="text-end">{moneySigned(runningTotal)}</td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </Table>
-              <div className="d-flex justify-content-between align-items-center">
+                            {entry.type === 'comp' ? (
+                              <td className="text-end text-muted" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                {money(entry.amount)} <span className="small">(not counted)</span>
+                              </td>
+                            ) : (
+                              <td
+                                className={`text-end fw-medium ${entry.type === 'payout' ? 'text-danger' : entry.amount < 0 ? 'text-danger' : 'text-success'}`}
+                                style={{ fontVariantNumeric: 'tabular-nums' }}
+                              >
+                                {entry.type === 'payout' ? `- ${money(entry.amount)}` : money(entry.amount)}
+                              </td>
+                            )}
+                            <td
+                              className={`text-end fw-semibold ${runningTotal < 0 ? 'text-danger' : ''}`}
+                              style={{ fontVariantNumeric: 'tabular-nums' }}
+                            >
+                              {moneySigned(runningTotal)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </Table>
+              </div>
+              <div className="d-flex justify-content-between align-items-center mt-2">
                 <span className="text-muted small">
                   {sortedLedger.length === 0
                     ? 'No entries match your search.'
