@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import AddCourtCreditModal from 'components/AddCourtCreditModal';
+import { auth } from '../services/firebase/client';
 import {
   fetchCourtCredits,
   addCourtCreditBatch,
@@ -52,6 +53,14 @@ const INIT_EDIT: EditFormState = {
 
 const SESSION_ROW_STYLE:    React.CSSProperties = { backgroundColor: '#e9f7ef' };
 const ADJUSTMENT_ROW_STYLE: React.CSSProperties = { backgroundColor: '#feefd8' };
+
+// This app only supports Google sign-in, so displayName/email are reliably
+// populated — used to attribute batch edits to the actual admin instead of a
+// generic "Admin" placeholder.
+function currentUserName(): string {
+  const user = auth.currentUser;
+  return user?.displayName || user?.email || 'Admin';
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -191,8 +200,8 @@ export default function CourtCreditsPage() {
         original,
         { ...editForm, name: editForm.name.trim(), hoursPurchased: hours, totalCost: cost, remainingHours: remaining },
         editReason,
-        'admin',
-        'Admin',
+        auth.currentUser?.uid ?? 'admin',
+        currentUserName(),
       );
       await loadBatches(editingId);
       setEditingId(null);

@@ -10,6 +10,7 @@ import { Link } from 'react-router-dom';
 
 import AddBirdieBatchModal from 'components/AddBirdieBatchModal';
 import BirdieUsageChart, { type UsagePoint } from 'components/BirdieUsageChart';
+import { auth } from '../services/firebase/client';
 import {
   fetchBirdieInventory,
   addBirdieBatch,
@@ -46,6 +47,14 @@ interface HistoryItem {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// This app only supports Google sign-in, so displayName/email are reliably
+// populated — used to attribute batch edits to the actual admin instead of a
+// generic "Admin" placeholder.
+function currentUserName(): string {
+  const user = auth.currentUser;
+  return user?.displayName || user?.email || 'Admin';
+}
 
 function totalRemainingBirds(batch: Partial<BirdieBatch>): number {
   const { unopenedTubesRemaining = 0, birdsPerTube = 0, birdsInOpenTube = 0 } = batch;
@@ -255,8 +264,8 @@ export default function BirdiesPage() {
         { ...editForm, costPerTube: cost, tubesPurchased: tubes, birdsPerTube: birds,
           unopenedTubesRemaining: unopened, birdsInOpenTube: open, notes: editForm.notes.trim() },
         editReason,
-        'admin',
-        'Admin',
+        auth.currentUser?.uid ?? 'admin',
+        currentUserName(),
       );
       await loadInventory(selectedBatch.id);
       setIsEditing(false);
