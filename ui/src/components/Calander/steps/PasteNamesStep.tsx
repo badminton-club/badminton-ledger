@@ -34,7 +34,7 @@ export default function PasteNamesStep({ onSubmit, onCancel }: Props) {
         </Alert>
       )}
 
-      <Form.Group className="mb-3">
+      <Form.Group className="mb-3" controlId="paste-names-textarea">
         <Form.Label>Players</Form.Label>
         <Form.Control
           as="textarea"

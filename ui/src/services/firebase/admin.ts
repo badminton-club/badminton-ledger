@@ -110,7 +110,10 @@ export async function exportAllData(): Promise<BackupData> {
  */
 export async function restoreAllData(backup: BackupData): Promise<ClearSummary> {
   return serviceCall('restoreAllData', async () => {
-    if (!backup || backup.version !== 1 || typeof backup.collections !== 'object') {
+    // `typeof null === 'object'` in JS, so this must be checked separately from
+    // the typeof check below — otherwise a backup with `collections: null` slips
+    // past this guard and throws a raw TypeError instead of the intended message.
+    if (!backup || backup.version !== 1 || !backup.collections || typeof backup.collections !== 'object') {
       throw new Error('Invalid or unsupported backup file.');
     }
 

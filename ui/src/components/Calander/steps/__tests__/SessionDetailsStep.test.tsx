@@ -88,6 +88,24 @@ describe('SessionDetailsStep', () => {
     expect(await screen.findByRole('option', { name: /Yonex AS-50/ })).toBeInTheDocument();
   });
 
+  it('keeps the over-allocation error visible instead of clearing it immediately', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('birdieInventory', 'b1', {
+      name: 'Yonex AS-50', purchaseDate: ts('2026-01-01'), costPerTube: 30,
+      birdsPerTube: 12, unopenedTubesRemaining: 0, birdsInOpenTube: 3, purchaserName: 'Admin',
+    });
+    renderStep([{ id: 'p1', percentage: 1 }], [makePlayer()]);
+    await screen.findByRole('option', { name: /Yonex AS-50/ });
+
+    // The birdie batch select comes after the "+ Add existing player…" combobox.
+    const batchSelect = screen.getAllByRole('combobox')[1];
+    await user.selectOptions(batchSelect, 'b1');
+    const qtyInput = screen.getByPlaceholderText('# birds');
+    await user.type(qtyInput, '5'); // only 3 available
+
+    expect(await screen.findByText('Only 3 birds remain in this batch.')).toBeInTheDocument();
+  });
+
   it('calls onCancel when Cancel is clicked', async () => {
     const user = userEvent.setup();
     const { onCancel } = renderStep([{ id: 'p1', percentage: 1 }], [makePlayer()]);

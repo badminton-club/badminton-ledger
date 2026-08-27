@@ -134,8 +134,17 @@ describe('exportAllData / restoreAllData', () => {
         collections: 'bad-shape' as unknown as BackupData['collections'],
       })
     ).rejects.toThrow('Invalid or unsupported backup file.');
+    // `typeof null === 'object'` in JS — a naive `typeof` check alone wouldn't
+    // catch this and would instead throw a raw, unfriendly TypeError.
+    await expect(
+      restoreAllData({
+        version: 1,
+        exportedAt: '2026-01-01T00:00:00.000Z',
+        collections: null as unknown as BackupData['collections'],
+      })
+    ).rejects.toThrow('Invalid or unsupported backup file.');
 
-    expect(consoleSpy).toHaveBeenCalledTimes(3);
+    expect(consoleSpy).toHaveBeenCalledTimes(4);
   });
 
   it('upserts documents by original id without deleting unrelated docs', async () => {

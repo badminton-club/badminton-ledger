@@ -296,15 +296,15 @@ export default function AuthPage() {
             <Card.Text className="text-muted">
               Your player details for {clubs.find((c) => c.id === currentClubId)?.name ?? 'this club'}.
             </Card.Text>
-            <Form.Group className="mb-2">
+            <Form.Group className="mb-2" controlId="auth-profile-first-name">
               <Form.Label>First name</Form.Label>
               <Form.Control value={pFirst} onChange={(e) => setPFirst(e.target.value)} disabled={savingProfile} />
             </Form.Group>
-            <Form.Group className="mb-2">
+            <Form.Group className="mb-2" controlId="auth-profile-last-name">
               <Form.Label>Last name</Form.Label>
               <Form.Control value={pLast} onChange={(e) => setPLast(e.target.value)} disabled={savingProfile} />
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="auth-profile-email">
               <Form.Label>Email</Form.Label>
               <Form.Control type="email" value={pEmail} onChange={(e) => setPEmail(e.target.value)} disabled={savingProfile} />
             </Form.Group>

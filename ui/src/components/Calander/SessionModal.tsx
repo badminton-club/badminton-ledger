@@ -62,7 +62,8 @@ export default function SessionModal({
             const waitlistIndex = linesByNewline.findIndex((l) => waitlistMarker.test(l));
             const cleanedInput = waitlistIndex === -1 ? rawInput : linesByNewline.slice(0, waitlistIndex).join("\n");
 
-            // Parse numbered list: "1. Name"
+            // Parses both a numbered list ("1. Name") and plain names separated by
+            // newlines/commas — the paste step's help text promises both work.
             const lines = cleanedInput
                 .trim()
                 .split(/[\n,]+/)
@@ -72,7 +73,7 @@ export default function SessionModal({
             const names = lines
                 .map((l) => {
                     const m = l.match(nameRegex);
-                    return m ? m[1].trim() : null;
+                    return m ? m[1].trim() : l; // no numbering — use the plain line as-is
                 })
                 .filter(Boolean);
 

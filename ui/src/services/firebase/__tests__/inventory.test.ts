@@ -513,6 +513,7 @@ describe('court credit inventory service', () => {
       userName: 'Admin Two',
       resourceType: 'courtCreditBatch',
       batchId: 'c1',
+      batchNameSnapshot: '', // original batch had no name set
       reason: 'Reconciled receipt and unused hours',
     });
     expect(adjustment.adjustmentDate).toBeInstanceOf(Timestamp);
@@ -523,6 +524,30 @@ describe('court credit inventory service', () => {
       { field: 'remainingHours', oldValue: 6, newValue: 7 },
       { field: 'notes', oldValue: null, newValue: 'Added two bonus hours' },
     ]));
+  });
+
+  it('snapshots the original batch name on the adjustment log even when only other fields change', async () => {
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Tuesday pack',
+      totalCost: 100, costPerHour: 20, hoursPurchased: 5, remainingHours: 5,
+      purchaserName: 'Dana', purchaseDate: ts('2026-06-11'), createdAt: ts('2026-06-11'),
+    });
+    const original: CourtCreditBatch = {
+      id: 'c1', name: 'Tuesday pack',
+      totalCost: 100, costPerHour: 20, hoursPurchased: 5, remainingHours: 5,
+      purchaserName: 'Dana', purchaseDate: new Date('2026-06-11'), createdAt: ts('2026-06-11') as any,
+    };
+
+    await updateCourtCreditBatch(
+      'c1', original,
+      { ...original, remainingHours: 3 },
+      'Used 2 hours off-book', 'admin-2', 'Admin Two'
+    );
+
+    const adjustmentIds = collectionDocIds('inventoryAdjustments');
+    expect(getClubDocData('inventoryAdjustments', adjustmentIds[0])).toMatchObject({
+      batchNameSnapshot: 'Tuesday pack',
+    });
   });
 
   it('treats a same-day court credit edit as a no-op and writes no adjustment row', async () => {

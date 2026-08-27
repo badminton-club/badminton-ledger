@@ -72,25 +72,25 @@ export default function AddPlayerModal({
         <Modal.Body>
           {error && <Alert variant="danger" dismissible onClose={() => setError('')}>{error}</Alert>}
           <Row className="mb-3">
-            <Form.Group as={Col} md={6}>
+            <Form.Group as={Col} md={6} controlId="add-player-first-name">
               <Form.Label>First Name <span className="text-danger">*</span></Form.Label>
               <Form.Control value={form.firstName} onChange={e => set('firstName', e.target.value)} disabled={isSubmitting} required />
             </Form.Group>
-            <Form.Group as={Col} md={6}>
+            <Form.Group as={Col} md={6} controlId="add-player-last-name">
               <Form.Label>Last Name</Form.Label>
               <Form.Control value={form.lastName} onChange={e => set('lastName', e.target.value)} disabled={isSubmitting} />
             </Form.Group>
           </Row>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="add-player-email">
             <Form.Label>Email (optional)</Form.Label>
             <Form.Control type="email" value={form.email} onChange={e => set('email', e.target.value)} disabled={isSubmitting} />
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="add-player-balance">
             <Form.Label>Initial Balance ($)</Form.Label>
             <Form.Control type="number" step="0.01" value={form.balance} onChange={e => set('balance', parseFloat(e.target.value) || 0)} disabled={isSubmitting} />
             <Form.Text muted>Positive = credit, negative = debt. Defaults to 0.</Form.Text>
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="add-player-description">
             <Form.Label>Description / Notes (optional)</Form.Label>
             <Form.Control as="textarea" rows={2} value={form.description} onChange={e => set('description', e.target.value)} disabled={isSubmitting} />
           </Form.Group>

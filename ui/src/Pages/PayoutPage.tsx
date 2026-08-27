@@ -114,6 +114,7 @@ export default function PayoutPage() {
   }, [players]);
 
   const load = useCallback(async () => {
+    if (!isAdmin) { setLoading(false); return; }
     setLoading(true);
     setError('');
     try {
@@ -123,7 +124,7 @@ export default function PayoutPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -696,7 +697,7 @@ export default function PayoutPage() {
                 {' '}The original entry is kept for the record — nothing is deleted.
               </p>
             )}
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="payout-undo-reason">
               <Form.Label>Reason for undoing this <span className="text-danger">*</span></Form.Label>
               <Form.Control
                 as="textarea"

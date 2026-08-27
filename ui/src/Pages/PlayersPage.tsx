@@ -424,19 +424,19 @@ export default function PlayersPage() {
                       {detailsError && <Alert variant="danger" className="small py-1">{detailsError}</Alert>}
                       <Row>
                         <Col md={6}>
-                          <Form.Group className="mb-2">
+                          <Form.Group className="mb-2" controlId="players-edit-first-name">
                             <Form.Label>First name</Form.Label>
                             <Form.Control value={edFirst} onChange={(e) => setEdFirst(e.target.value)} disabled={savingDetails} />
                           </Form.Group>
                         </Col>
                         <Col md={6}>
-                          <Form.Group className="mb-2">
+                          <Form.Group className="mb-2" controlId="players-edit-last-name">
                             <Form.Label>Last name</Form.Label>
                             <Form.Control value={edLast} onChange={(e) => setEdLast(e.target.value)} disabled={savingDetails} />
                           </Form.Group>
                         </Col>
                       </Row>
-                      <Form.Group className="mb-2">
+                      <Form.Group className="mb-2" controlId="players-edit-email">
                         <Form.Label>Email</Form.Label>
                         <Form.Control type="email" value={edEmail} onChange={(e) => setEdEmail(e.target.value)} disabled={savingDetails} />
                       </Form.Group>

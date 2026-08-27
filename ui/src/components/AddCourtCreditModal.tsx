@@ -80,34 +80,34 @@ export default function AddCourtCreditModal({ show, onHide, onAddBatch }: Props)
       <Form onSubmit={handleSubmit}>
         <Modal.Body>
           {error && <Alert variant="danger">{error}</Alert>}
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="add-court-credit-name">
             <Form.Label>Batch Name</Form.Label>
             <Form.Control placeholder="Optional label, e.g. Winter block" value={name} onChange={e => setName(e.target.value)} disabled={isSubmitting} />
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="add-court-credit-purchase-date">
             <Form.Label>Purchase Date <span className="text-danger">*</span></Form.Label>
             <div>
-              <DatePicker selected={purchaseDate} onChange={(d: Date) => setPurchaseDate(d)}
+              <DatePicker id="add-court-credit-purchase-date" selected={purchaseDate} onChange={(d: Date) => setPurchaseDate(d)}
                 dateFormat="yyyy-MM-dd" className="form-control" maxDate={new Date()} disabled={isSubmitting} />
             </div>
           </Form.Group>
           <Row className="mb-3">
-            <Form.Group as={Col}><Form.Label>Cost/Hr ($) <span className="text-danger">*</span></Form.Label>
+            <Form.Group as={Col} controlId="add-court-credit-cost-per-hour"><Form.Label>Cost/Hr ($) <span className="text-danger">*</span></Form.Label>
               <Form.Control type="number" min="0.01" step="0.01" value={costPerHour} onChange={e => setCostPerHour(e.target.value)} disabled={isSubmitting} required />
             </Form.Group>
-            <Form.Group as={Col}><Form.Label>Hours Purchased <span className="text-danger">*</span></Form.Label>
+            <Form.Group as={Col} controlId="add-court-credit-hours-purchased"><Form.Label>Hours Purchased <span className="text-danger">*</span></Form.Label>
               <Form.Control type="number" min="0.5" step="0.5" value={hoursPurchased} onChange={e => setHoursPurchased(e.target.value)} disabled={isSubmitting} required />
             </Form.Group>
-            <Form.Group as={Col}><Form.Label>Total Cost ($) <span className="text-danger">*</span></Form.Label>
+            <Form.Group as={Col} controlId="add-court-credit-total-cost"><Form.Label>Total Cost ($) <span className="text-danger">*</span></Form.Label>
               <Form.Control type="number" min="0.01" step="0.01" value={totalCost} onChange={handleTotalCostChange} disabled={isSubmitting} required />
               <Form.Text muted>Auto-calculated as Cost/Hr × Hours — edit to override.</Form.Text>
             </Form.Group>
           </Row>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="add-court-credit-purchaser-name">
             <Form.Label>Purchaser Name <span className="text-danger">*</span></Form.Label>
             <Form.Control placeholder="Who bought them" value={purchaserName} onChange={e => setPurchaserName(e.target.value)} disabled={isSubmitting} required />
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="add-court-credit-notes">
             <Form.Label>Notes</Form.Label>
             <Form.Control as="textarea" rows={2} placeholder="Optional notes about this batch" value={notes} onChange={e => setNotes(e.target.value)} disabled={isSubmitting} />
           </Form.Group>

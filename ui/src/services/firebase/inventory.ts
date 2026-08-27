@@ -182,6 +182,7 @@ export async function updateCourtCreditBatch(
       userName,
       resourceType:   'courtCreditBatch',
       batchId,
+      batchNameSnapshot: original.name ?? '',
       reason,
       changes,
     });

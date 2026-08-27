@@ -250,7 +250,7 @@ function StatusContent({
 
     if (item.status === "conflict") {
         return (
-            <Form.Group>
+            <Form.Group controlId={`resolve-name-conflict-${item.id}`}>
                 <Form.Label className="text-warning small mb-1">Multiple matches — please select:</Form.Label>
                 <Form.Select
                     size="sm"

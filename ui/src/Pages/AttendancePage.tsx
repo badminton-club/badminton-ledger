@@ -138,19 +138,19 @@ export default function AttendancePage() {
               </Card.Text>
               <Row>
                 <Col sm={6}>
-                  <Form.Group className="mb-2">
+                  <Form.Group className="mb-2" controlId="attendance-link-request-first-name">
                     <Form.Label>First name</Form.Label>
                     <Form.Control value={reqFirst} onChange={(e) => setReqFirst(e.target.value)} disabled={submitting} />
                   </Form.Group>
                 </Col>
                 <Col sm={6}>
-                  <Form.Group className="mb-2">
+                  <Form.Group className="mb-2" controlId="attendance-link-request-last-name">
                     <Form.Label>Last name</Form.Label>
                     <Form.Control value={reqLast} onChange={(e) => setReqLast(e.target.value)} disabled={submitting} />
                   </Form.Group>
                 </Col>
               </Row>
-              <Form.Group className="mb-3">
+              <Form.Group className="mb-3" controlId="attendance-link-request-email">
                 <Form.Label>Email</Form.Label>
                 <Form.Control type="email" value={reqEmail} onChange={(e) => setReqEmail(e.target.value)} disabled={submitting} />
               </Form.Group>

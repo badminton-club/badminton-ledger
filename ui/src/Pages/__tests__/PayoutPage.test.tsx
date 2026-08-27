@@ -162,13 +162,14 @@ beforeEach(() => {
 });
 
 describe('PayoutPage', () => {
-  it('shows a warning instead of admin controls for non-admins', async () => {
+  it('shows a warning instead of admin controls for non-admins, without fetching the payout summary', async () => {
     renderPage('member');
 
     expect(await screen.findByText('You must be an admin to view owner payouts.')).toBeInTheDocument();
     expect(screen.queryByText('Cash out to owner')).not.toBeInTheDocument();
     expect(screen.queryByText('Add custom transaction')).not.toBeInTheDocument();
     expect(screen.queryByText('Payout ledger')).not.toBeInTheDocument();
+    expect(mockedFetchOwnerPayoutSummary).not.toHaveBeenCalled();
   });
 
   it('shows the loading state, then renders the summary cards and default ledger rows', async () => {

@@ -212,6 +212,21 @@ describe('SessionModal', () => {
     });
   });
 
+  it('also parses plain names separated by newlines or commas, with no numbering required', async () => {
+    const user = userEvent.setup();
+    const { store } = renderSessionModal({ mode: 'paste' });
+
+    await user.type(screen.getByRole('textbox'), 'John Smith{enter}Jane Doe, Bob Martin');
+    await user.click(screen.getByRole('button', { name: 'Next: Confirm Players' }));
+
+    expect(store.getState().sessionModal.mode).toBe('resolve');
+    expect(store.getState().sessionModal.resolutionItems.map((item) => item.rawName)).toEqual([
+      'John Smith',
+      'Jane Doe',
+      'Bob Martin',
+    ]);
+  });
+
   it('shows a form error when no valid numbered names are found', async () => {
     const user = userEvent.setup();
     renderSessionModal({ mode: 'paste' });

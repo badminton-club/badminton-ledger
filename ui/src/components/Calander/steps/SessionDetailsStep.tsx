@@ -153,6 +153,7 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const handleBirdieChange = (index: number, field: keyof BirdieUsage, value: string) => {
+    let rejected = false;
     const updated = birdieUsage.map((u, i) => {
       if (i !== index) return u;
       if (field === 'quantity') {
@@ -162,6 +163,7 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
           const avail = batch.unopenedTubesRemaining * batch.birdsPerTube + batch.birdsInOpenTube;
           if (!isNaN(qty) && qty > avail) {
             dispatch(setAddError(`Only ${avail} birds remain in this batch.`));
+            rejected = true;
             return u;
           }
         }
@@ -170,7 +172,10 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
       return { ...u, [field]: value };
     });
     setBirdieUsage(updated);
-    dispatch(setAddError(''));
+    // Only clear a previous error on a change that actually succeeds — otherwise
+    // this would immediately wipe out the "Only N birds remain" message set
+    // above, in the same call, before the user ever sees it.
+    if (!rejected) dispatch(setAddError(''));
   };
 
   const handlePercentageChange = (id: string, value: string) => {

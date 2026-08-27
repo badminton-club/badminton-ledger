@@ -431,7 +431,13 @@ describe('PlayersPage', () => {
     expect(screen.getByText('Regular guest')).toBeInTheDocument();
   });
 
-  it('currently still shows balance-adjustment controls to non-admin members', async () => {
+  it('does not itself gate balance-adjustment controls by role (protection lives one level up)', async () => {
+    // PlayersPage has no internal admin check — but it's only ever reachable via
+    // the "/players" route, which App.tsx wraps in <RequireAdmin> (reactive to
+    // role changes), so a non-admin can never actually load this page in the
+    // real app. This test documents that intentionally, so a future refactor
+    // that removes the route guard without adding an in-page check doesn't
+    // silently regress into a real exposure.
     renderPage({
       players: [makePlayer({ id: 'p1' })],
       route: '/?playerId=p1',

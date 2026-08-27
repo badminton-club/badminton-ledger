@@ -629,7 +629,7 @@ export default function SettingsPage() {
             className="d-flex gap-2 align-items-end mb-3"
             onSubmit={(e) => { e.preventDefault(); handleOpenDriveRestore(driveRestoreFolderName); }}
           >
-            <Form.Group className="flex-grow-1">
+            <Form.Group className="flex-grow-1" controlId="drive-restore-folder">
               <Form.Label className="small mb-1">Folder</Form.Label>
               <Form.Control
                 size="sm"
@@ -692,7 +692,7 @@ export default function SettingsPage() {
         </Modal.Header>
         <Form onSubmit={(e) => { e.preventDefault(); handleDriveBackup(); }}>
           <Modal.Body>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="drive-backup-file-name">
               <Form.Label>File name</Form.Label>
               <Form.Control
                 placeholder={defaultBackupFileName()}
@@ -702,7 +702,7 @@ export default function SettingsPage() {
               />
               <Form.Text className="text-muted">Leave blank to use the default name shown above.</Form.Text>
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="drive-backup-folder-name">
               <Form.Label>Folder</Form.Label>
               <Form.Control
                 placeholder={DEFAULT_BACKUP_FOLDER_NAME}
@@ -750,7 +750,7 @@ export default function SettingsPage() {
             ))}
           </ListGroup>
 
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="settings-clear-all-confirm">
             <Form.Label>
               Type <strong>{CONFIRM_PHRASE}</strong> to enable the button.
             </Form.Label>

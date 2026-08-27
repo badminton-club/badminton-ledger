@@ -251,9 +251,13 @@ export async function deleteClub(clubId: string, uid: string): Promise<void> {
       }
     }
 
-    const members = await getDocs(membersRef(clubId));
+    const [members, linkRequests] = await Promise.all([
+      getDocs(membersRef(clubId)),
+      getDocs(linkRequestsRef(clubId)),
+    ]);
     const batch = writeBatch(db);
     members.docs.forEach((d) => batch.delete(d.ref));
+    linkRequests.docs.forEach((d) => batch.delete(d.ref));
     batch.delete(clubDoc(clubId));
     await batch.commit();
 

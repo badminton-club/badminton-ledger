@@ -363,4 +363,15 @@ describe('deleteClub', () => {
       lastVisitedClub: null,
     });
   });
+
+  it('also deletes any pending link requests, leaving nothing orphaned', async () => {
+    seedClubMetaDoc('club-a', { name: 'Alpha Club' });
+    seedMemberDoc('owner-1', { role: 'superAdmin' }, 'club-a');
+    seedUserDoc('owner-1', { clubs: ['club-a'], lastVisitedClub: 'club-a' });
+    __seedDoc('clubs/club-a/linkRequests/pending-uid', { uid: 'pending-uid', firstName: 'Jamie', lastName: null, email: '' });
+
+    await deleteClub('club-a', 'owner-1');
+
+    expect(__getDocData('clubs/club-a/linkRequests/pending-uid')).toBeUndefined();
+  });
 });
