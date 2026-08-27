@@ -11,8 +11,9 @@ import {
   ts,
 } from '../../test-utils/firebaseTestHelpers';
 import { fetchPlayerLedger } from '../../services/firebase/attendance';
-import { __seedDoc } from '../../test-utils/fakeFirestore';
+import { __seedDoc, __getDocData } from '../../test-utils/fakeFirestore';
 import AttendancePage from '../AttendancePage';
+import type { Player } from 'types';
 
 // Full integration-style test: seeds the fake Firestore/Auth directly and lets
 // AttendancePage's real service calls (fetchMemberPlayerId, fetchPlayerLedger,
@@ -29,6 +30,23 @@ jest.mock('../../services/firebase/attendance', () => ({
 
 const currentUser = { uid: 'user-1', displayName: 'Grace Hopper', email: 'grace@example.com' };
 
+function makePlayer(overrides: Partial<Player> = {}): Player {
+  return {
+    id: 'p1',
+    firstName: 'Grace',
+    firstNameLower: 'grace',
+    lastName: 'Hopper',
+    lastNameLower: 'hopper',
+    email: 'grace@example.com',
+    balance: 0,
+    owed: 0,
+    description: '',
+    sessionCount: 0,
+    createdAt: undefined as never,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   jest.mocked(fetchPlayerLedger).mockImplementation(
     jest.requireActual('../../services/firebase/attendance').fetchPlayerLedger
@@ -37,11 +55,11 @@ beforeEach(() => {
   setCurrentUser(currentUser);
 });
 
-function renderPage() {
+function renderPage(players: Parameters<typeof makePlayersState>[0] = []) {
   return renderWithProviders(<AttendancePage />, {
     preloadedState: {
       club: makeClubState({ currentClubId: TEST_CLUB_ID }),
-      players: makePlayersState([]),
+      players: makePlayersState(players),
     },
   });
 }
@@ -94,6 +112,42 @@ describe('AttendancePage', () => {
 
     expect(await screen.findByText('Marked paid')).toBeInTheDocument();
     expect(screen.queryByText(/not linked to a player/)).not.toBeInTheDocument();
+  });
+
+  it('lets an already-linked member submit a details-edit request for admin approval', async () => {
+    const user = userEvent.setup();
+    seedMemberDoc(currentUser.uid, { role: 'member', playerId: 'p1' });
+    const player = makePlayer({ firstName: 'Grace', lastName: 'Hopper', email: 'grace@old.com' });
+
+    renderPage([player]);
+    await screen.findByText('Grace Hopper');
+
+    await user.click(screen.getByRole('button', { name: 'Edit details' }));
+    const textboxes = screen.getAllByRole('textbox');
+    expect(textboxes[0]).toHaveValue('Grace'); // prefilled from the current player record
+    expect(textboxes[1]).toHaveValue('Hopper');
+    expect(textboxes[2]).toHaveValue('grace@old.com');
+
+    await user.clear(textboxes[2]);
+    await user.type(textboxes[2], 'grace@new.com');
+    await user.click(screen.getByRole('button', { name: 'Submit for approval' }));
+
+    expect(await screen.findByText(/awaiting admin approval/)).toBeInTheDocument();
+    // The player record itself must be untouched — only a pending request was written.
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}/profileEditRequests/${currentUser.uid}`)).toMatchObject({
+      playerId: 'p1', firstName: 'Grace', lastName: 'Hopper', email: 'grace@new.com',
+    });
+  });
+
+  it('shows the pending-approval banner (instead of the edit button) when a request is already pending', async () => {
+    seedMemberDoc(currentUser.uid, { role: 'member', playerId: 'p1' });
+    __seedDoc(`clubs/${TEST_CLUB_ID}/profileEditRequests/${currentUser.uid}`, {
+      uid: currentUser.uid, playerId: 'p1', firstName: 'Grace', lastName: 'H.', email: 'grace@example.com',
+    });
+
+    renderPage([makePlayer()]);
+
+    expect(await screen.findByText(/awaiting admin approval/)).toBeInTheDocument();
   });
 
   it('shows an error message if the initial data load fails', async () => {

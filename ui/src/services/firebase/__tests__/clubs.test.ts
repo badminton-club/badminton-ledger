@@ -4,12 +4,15 @@ import {
   createClub,
   deleteClub,
   deleteLinkRequest,
+  deleteProfileEditRequest,
   fetchClub,
   fetchClubMembers,
   fetchLinkRequests,
   fetchMemberPlayerId,
   fetchMemberRole,
   fetchMyLinkRequest,
+  fetchMyProfileEditRequest,
+  fetchProfileEditRequests,
   fetchUserClubs,
   fetchUserProfile,
   removeClubFromUser,
@@ -18,6 +21,7 @@ import {
   setLastVisitedClub,
   setMemberPlayer,
   submitLinkRequest,
+  submitProfileEditRequest,
 } from '../clubs';
 import {
   resetFirebaseTestState,
@@ -313,6 +317,73 @@ describe('fetchMyLinkRequest', () => {
   });
 });
 
+describe('submitProfileEditRequest', () => {
+  it('stores a pending edit request keyed by uid, normalizing an empty last name to null', async () => {
+    await submitProfileEditRequest('club-a', 'user-1', 'player-1', 'Jamie', '', 'jamie@example.com');
+
+    expect(__getDocData('clubs/club-a/profileEditRequests/user-1')).toMatchObject({
+      uid: 'user-1',
+      playerId: 'player-1',
+      firstName: 'Jamie',
+      lastName: null,
+      email: 'jamie@example.com',
+      createdAt: expect.any(Timestamp),
+    });
+  });
+
+  it('resubmitting overwrites the previous pending request for the same user', async () => {
+    await submitProfileEditRequest('club-a', 'user-1', 'player-1', 'Jamie', 'Lee', 'jamie@example.com');
+    await submitProfileEditRequest('club-a', 'user-1', 'player-1', 'James', 'Lee-Smith', null);
+
+    expect(__getDocData('clubs/club-a/profileEditRequests/user-1')).toMatchObject({
+      firstName: 'James',
+      lastName: 'Lee-Smith',
+      email: null,
+    });
+  });
+});
+
+describe('fetchProfileEditRequests', () => {
+  it('lists every pending profile-edit request for a club', async () => {
+    __seedDoc('clubs/club-a/profileEditRequests/user-1', {
+      uid: 'user-1', playerId: 'player-1', firstName: 'Jamie', lastName: 'Lee', email: 'jamie@example.com',
+    });
+    __seedDoc('clubs/club-a/profileEditRequests/user-2', {
+      uid: 'user-2', playerId: 'player-2', firstName: 'Ada', lastName: null, email: null,
+    });
+
+    const requests = await fetchProfileEditRequests('club-a');
+
+    expect(requests.sort((a, b) => a.uid.localeCompare(b.uid))).toEqual([
+      { uid: 'user-1', playerId: 'player-1', firstName: 'Jamie', lastName: 'Lee', email: 'jamie@example.com', createdAt: undefined },
+      { uid: 'user-2', playerId: 'player-2', firstName: 'Ada', lastName: null, email: null, createdAt: undefined },
+    ]);
+  });
+});
+
+describe('fetchMyProfileEditRequest', () => {
+  it('returns the caller\'s own pending edit request when present and null otherwise', async () => {
+    __seedDoc('clubs/club-a/profileEditRequests/user-1', {
+      uid: 'user-1', playerId: 'player-1', firstName: 'Jamie', lastName: 'Lee', email: 'jamie@example.com',
+    });
+
+    await expect(fetchMyProfileEditRequest('club-a', 'user-1')).resolves.toEqual({
+      uid: 'user-1', playerId: 'player-1', firstName: 'Jamie', lastName: 'Lee', email: 'jamie@example.com', createdAt: undefined,
+    });
+    await expect(fetchMyProfileEditRequest('club-a', 'missing-user')).resolves.toBeNull();
+  });
+});
+
+describe('deleteProfileEditRequest', () => {
+  it('deletes a pending profile-edit request', async () => {
+    __seedDoc('clubs/club-a/profileEditRequests/user-1', { uid: 'user-1', playerId: 'player-1', firstName: 'Jamie' });
+
+    await deleteProfileEditRequest('club-a', 'user-1');
+
+    expect(__getDocData('clubs/club-a/profileEditRequests/user-1')).toBeUndefined();
+  });
+});
+
 describe('setClubTabEnabled', () => {
   it('adds disabled tabs idempotently and removes them again when re-enabled', async () => {
     seedClubMetaDoc('club-a', { name: 'Alpha Club', disabledTabs: ['ledger'] });
@@ -369,9 +440,11 @@ describe('deleteClub', () => {
     seedMemberDoc('owner-1', { role: 'superAdmin' }, 'club-a');
     seedUserDoc('owner-1', { clubs: ['club-a'], lastVisitedClub: 'club-a' });
     __seedDoc('clubs/club-a/linkRequests/pending-uid', { uid: 'pending-uid', firstName: 'Jamie', lastName: null, email: '' });
+    __seedDoc('clubs/club-a/profileEditRequests/pending-uid-2', { uid: 'pending-uid-2', playerId: 'p1', firstName: 'Ada' });
 
     await deleteClub('club-a', 'owner-1');
 
     expect(__getDocData('clubs/club-a/linkRequests/pending-uid')).toBeUndefined();
+    expect(__getDocData('clubs/club-a/profileEditRequests/pending-uid-2')).toBeUndefined();
   });
 });

@@ -254,11 +254,62 @@ describe('SettingsPage', () => {
     confirmSpy.mockRestore();
   });
 
+  it('approves a pending profile-edit request, applying the change to the player and clearing the request', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', firstName: 'Jamie', lastName: 'Lee', email: 'jamie@example.com' })];
+    __seedDoc(`clubs/${TEST_CLUB_ID}/profileEditRequests/requester-3`, {
+      uid: 'requester-3',
+      playerId: 'p1',
+      firstName: 'Jamie',
+      lastName: 'Lee-Smith',
+      email: 'jamie.new@example.com',
+      createdAt: ts('2026-05-01T00:00:00.000Z'),
+    });
+
+    renderPage({ role: 'admin', players });
+
+    const requestRow = (await screen.findByText('Lee-Smith', { exact: false })).closest('.list-group-item') as HTMLElement;
+    await user.click(within(requestRow).getByRole('button', { name: 'Approve' }));
+
+    await waitFor(() => {
+      expect(__getDocData(`clubs/${TEST_CLUB_ID}/profileEditRequests/requester-3`)).toBeUndefined();
+      expect(__getDocData(`clubs/${TEST_CLUB_ID}/players/p1`)).toMatchObject({
+        firstName: 'Jamie',
+        lastName: 'Lee-Smith',
+        email: 'jamie.new@example.com',
+      });
+    });
+  });
+
+  it('dismisses a pending profile-edit request without changing the player', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', firstName: 'Jamie', lastName: 'Lee', email: 'jamie@example.com' })];
+    __seedDoc(`clubs/${TEST_CLUB_ID}/profileEditRequests/requester-4`, {
+      uid: 'requester-4',
+      playerId: 'p1',
+      firstName: 'Not Jamie',
+      lastName: null,
+      email: null,
+      createdAt: ts('2026-05-02T00:00:00.000Z'),
+    });
+
+    renderPage({ role: 'admin', players });
+
+    const requestRow = (await screen.findByText('Not Jamie', { selector: 'strong' })).closest('.list-group-item') as HTMLElement;
+    await user.click(within(requestRow).getByRole('button', { name: 'Dismiss' }));
+
+    await waitFor(() => {
+      expect(__getDocData(`clubs/${TEST_CLUB_ID}/profileEditRequests/requester-4`)).toBeUndefined();
+    });
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}/players/p1`)).toBeUndefined(); // never touched
+  });
+
   it('refreshes the link-request list on demand', async () => {
     const user = userEvent.setup();
     renderPage({ role: 'admin' });
 
-    expect(await screen.findByText('No pending requests.')).toBeInTheDocument();
+    const linkRequestsCard = (await screen.findByText('Link requests')).closest('.card') as HTMLElement;
+    expect(await within(linkRequestsCard).findByText('No pending requests.')).toBeInTheDocument();
 
     // Simulates a request submitted after the page first loaded — nothing
     // refetches it automatically, so the admin needs a manual way to see it.
@@ -271,7 +322,7 @@ describe('SettingsPage', () => {
     });
     expect(screen.queryByText('Casey Jordan')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    await user.click(within(linkRequestsCard).getByRole('button', { name: 'Refresh' }));
 
     expect(await screen.findByText('Casey Jordan', { selector: 'strong' })).toBeInTheDocument();
   });

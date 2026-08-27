@@ -248,6 +248,17 @@ export interface LinkRequest {
   createdAt?: Timestamp;
 }
 
+// clubs/{clubId}/profileEditRequests/{uid} — a linked member's proposed change to
+// their own player's name/email, pending an admin's approval.
+export interface ProfileEditRequest {
+  uid: string;
+  playerId: string;
+  firstName: string;
+  lastName: string | null;
+  email: string | null;
+  createdAt?: Timestamp;
+}
+
 // clubs/{clubId}/balanceLedger/{id} — one balance change for a player.
 export interface BalanceLedgerEntry {
   id: string;

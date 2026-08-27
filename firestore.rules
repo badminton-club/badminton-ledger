@@ -60,6 +60,14 @@ service cloud.firestore {
         allow delete:         if isClubAdmin(clubId) || request.auth.uid == uid;
       }
 
+      // Profile edit requests: a linked member proposes a name/email change here
+      // for an admin to review and apply — same shape as linkRequests above.
+      match /profileEditRequests/{uid} {
+        allow read:           if isSignedIn() && (request.auth.uid == uid || isClubAdmin(clubId));
+        allow create, update: if isSignedIn() && request.auth.uid == uid;
+        allow delete:         if isClubAdmin(clubId) || request.auth.uid == uid;
+      }
+
       // Calendar data: any member may read; only admins may write.
       match /sessions/{doc} { allow read: if isMember(clubId); allow write: if isClubAdmin(clubId); }
       match /players/{doc} {

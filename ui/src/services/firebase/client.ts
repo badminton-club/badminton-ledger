@@ -99,6 +99,12 @@ export function linkRequestsRef(clubId: string): CollectionReference {
 export function linkRequestDoc(clubId: string, uid: string): DocumentReference {
   return doc(db, 'clubs', clubId, 'linkRequests', uid);
 }
+export function profileEditRequestsRef(clubId: string): CollectionReference {
+  return collection(db, 'clubs', clubId, 'profileEditRequests') as CollectionReference;
+}
+export function profileEditRequestDoc(clubId: string, uid: string): DocumentReference {
+  return doc(db, 'clubs', clubId, 'profileEditRequests', uid);
+}
 export function userDoc(uid: string): DocumentReference {
   return doc(db, 'users', uid);
 }

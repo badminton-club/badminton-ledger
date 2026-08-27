@@ -11,7 +11,7 @@ import {
   type DriveBackupResult,
   type DriveBackupFile,
 } from '../services/firebase/drive';
-import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer } from '../services/firebase';
+import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, updatePlayerProfile } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
@@ -25,7 +25,7 @@ import {
   setCurrentClub,
 } from '../features/club/clubSlice';
 import { TOGGLEABLE_TABS } from '../features/club/tabs';
-import type { ClubMember, ClubRole, LinkRequest, Player } from '../types';
+import type { ClubMember, ClubRole, LinkRequest, ProfileEditRequest, Player } from '../types';
 
 const CONFIRM_PHRASE = 'CLEAR ALL DATA';
 
@@ -73,6 +73,11 @@ export default function SettingsPage() {
   const [requestsError, setRequestsError] = useState('');
   const [reqSel, setReqSel] = useState<Record<string, string>>({});
   const [processingReq, setProcessingReq] = useState<string | null>(null);
+
+  const [editRequests, setEditRequests] = useState<ProfileEditRequest[]>([]);
+  const [editRequestsLoading, setEditRequestsLoading] = useState(false);
+  const [editRequestsError, setEditRequestsError] = useState('');
+  const [processingEditReq, setProcessingEditReq] = useState<string | null>(null);
 
   const [deleteClubText, setDeleteClubText] = useState('');
   const [deletingClub, setDeletingClub] = useState(false);
@@ -227,6 +232,49 @@ export default function SettingsPage() {
       setRequestsError(err instanceof Error ? err.message : 'Failed to dismiss request.');
     } finally {
       setProcessingReq(null);
+    }
+  };
+
+  const loadEditRequests = useCallback(async () => {
+    if (!clubId) { setEditRequests([]); return; }
+    setEditRequestsLoading(true);
+    setEditRequestsError('');
+    try {
+      setEditRequests(await fetchProfileEditRequests(clubId));
+    } catch (err) {
+      setEditRequestsError(err instanceof Error ? err.message : 'Failed to load requests.');
+    } finally {
+      setEditRequestsLoading(false);
+    }
+  }, [clubId]);
+
+  useEffect(() => { if (isAdmin && clubId) loadEditRequests(); }, [isAdmin, clubId, loadEditRequests]);
+
+  const handleApproveEditRequest = async (req: ProfileEditRequest) => {
+    if (!clubId) return;
+    setEditRequestsError('');
+    setProcessingEditReq(req.uid);
+    try {
+      await updatePlayerProfile(req.playerId, { firstName: req.firstName, lastName: req.lastName, email: req.email });
+      await deleteProfileEditRequest(clubId, req.uid);
+      await loadEditRequests();
+    } catch (err) {
+      setEditRequestsError(err instanceof Error ? err.message : 'Failed to approve request.');
+    } finally {
+      setProcessingEditReq(null);
+    }
+  };
+
+  const handleDismissEditRequest = async (req: ProfileEditRequest) => {
+    if (!clubId) return;
+    setProcessingEditReq(req.uid);
+    try {
+      await deleteProfileEditRequest(clubId, req.uid);
+      await loadEditRequests();
+    } catch (err) {
+      setEditRequestsError(err instanceof Error ? err.message : 'Failed to dismiss request.');
+    } finally {
+      setProcessingEditReq(null);
     }
   };
 
@@ -492,6 +540,69 @@ export default function SettingsPage() {
                         Create player
                       </Button>
                       <Button size="sm" variant="outline-secondary" disabled={processingReq === r.uid} onClick={() => handleDismissRequest(r)}>
+                        Dismiss
+                      </Button>
+                    </span>
+                  </ListGroup.Item>
+                );
+              })}
+            </ListGroup>
+          )}
+        </Card.Body>
+      </Card>
+
+      <Card className="mt-3">
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span>Profile edit requests</span>
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            onClick={loadEditRequests}
+            disabled={editRequestsLoading}
+          >
+            {editRequestsLoading ? <Spinner size="sm" animation="border" /> : 'Refresh'}
+          </Button>
+        </Card.Header>
+        <Card.Body>
+          <Card.Text className="text-muted">
+            Already-linked members can't edit their own player record directly — proposed name/email
+            changes land here for you to approve or dismiss.
+          </Card.Text>
+          {editRequestsError && <Alert variant="danger" className="py-2">{editRequestsError}</Alert>}
+          {editRequestsLoading ? (
+            <Spinner animation="border" size="sm" />
+          ) : editRequests.length === 0 ? (
+            <p className="text-muted mb-0">No pending requests.</p>
+          ) : (
+            <ListGroup variant="flush">
+              {editRequests.map((r) => {
+                const currentPlayer = players.find((p) => p.id === r.playerId);
+                const currentName = currentPlayer
+                  ? `${currentPlayer.firstName} ${currentPlayer.lastName ?? ''}`.trim()
+                  : '(unknown player)';
+                const proposedName = `${r.firstName} ${r.lastName ?? ''}`.trim();
+                return (
+                  <ListGroup.Item key={r.uid} className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                    <span>
+                      <span className="text-muted small">{currentName} →</span>{' '}
+                      <strong>{proposedName || '(no name)'}</strong>
+                      {r.email && <span className="text-muted small ms-2">{r.email}</span>}
+                    </span>
+                    <span className="d-flex align-items-center gap-2 flex-wrap">
+                      <Button
+                        size="sm"
+                        variant="success"
+                        disabled={processingEditReq === r.uid}
+                        onClick={() => handleApproveEditRequest(r)}
+                      >
+                        {processingEditReq === r.uid ? <Spinner size="sm" animation="border" /> : 'Approve'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline-secondary"
+                        disabled={processingEditReq === r.uid}
+                        onClick={() => handleDismissEditRequest(r)}
+                      >
                         Dismiss
                       </Button>
                     </span>
