@@ -152,7 +152,7 @@ describe('AuthPage', () => {
     renderPage();
 
     await user.click(screen.getByRole('button', { name: 'Need an account? Sign up' }));
-    await user.type(screen.getByLabelText('Username'), 'JamieL');
+    await user.type(screen.getByLabelText('Display name (optional)'), 'JamieL');
     await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
     await user.type(screen.getByLabelText('Password'), 'hunter22');
     await user.type(screen.getByLabelText('Confirm password'), 'hunter22');
@@ -167,12 +167,25 @@ describe('AuthPage', () => {
     expect(__getVerificationEmailsSent()).toHaveLength(2);
   });
 
+  it('signs up without a display name, falling back to showing the email', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: 'Need an account? Sign up' }));
+    await user.type(screen.getByLabelText('Email'), 'nodisplay@example.com');
+    await user.type(screen.getByLabelText('Password'), 'hunter22');
+    await user.type(screen.getByLabelText('Confirm password'), 'hunter22');
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+
+    expect(await screen.findByText(/Signed in as/)).toHaveTextContent('nodisplay@example.com');
+  });
+
   it('shows a validation error when sign-up passwords do not match', async () => {
     const user = userEvent.setup();
     renderPage();
 
     await user.click(screen.getByRole('button', { name: 'Need an account? Sign up' }));
-    await user.type(screen.getByLabelText('Username'), 'JamieL');
+    await user.type(screen.getByLabelText('Display name (optional)'), 'JamieL');
     await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
     await user.type(screen.getByLabelText('Password'), 'hunter22');
     await user.type(screen.getByLabelText('Confirm password'), 'different');
@@ -187,7 +200,7 @@ describe('AuthPage', () => {
     renderPage();
 
     await user.click(screen.getByRole('button', { name: 'Need an account? Sign up' }));
-    await user.type(screen.getByLabelText('Username'), 'JamieL');
+    await user.type(screen.getByLabelText('Display name (optional)'), 'JamieL');
     await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
     await user.type(screen.getByLabelText('Password'), 'hunter22');
     await user.type(screen.getByLabelText('Confirm password'), 'hunter22');

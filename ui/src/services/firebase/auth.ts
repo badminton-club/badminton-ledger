@@ -24,16 +24,20 @@ export async function signInWithGoogle(): Promise<User> {
 }
 
 /**
- * Creates a new email/password account, sets the display name shown across the
- * app (the same role Google's displayName plays), and sends a verification
- * email. Doesn't block on verification — the account is usable immediately;
- * see `EmailVerificationBanner` for the non-blocking reminder shown until the
- * user confirms their address.
+ * Creates a new email/password account. `username` is optional — if given, it
+ * sets the display name shown across the app (the same role Google's
+ * displayName plays); if left blank, the app falls back to showing the
+ * user's email everywhere displayName would normally appear. Also sends a
+ * verification email but doesn't block on it — the account is usable
+ * immediately; see `EmailVerificationBanner` for the non-blocking reminder
+ * shown until the user confirms their address.
  */
 export async function signUpWithEmail(email: string, username: string, password: string): Promise<User> {
   return serviceCall('signUpWithEmail', async () => {
     const credential = await createUserWithEmailAndPassword(auth, email, password);
-    await updateProfile(credential.user, { displayName: username });
+    if (username.trim()) {
+      await updateProfile(credential.user, { displayName: username.trim() });
+    }
     try {
       await sendEmailVerification(credential.user);
     } catch (err) {

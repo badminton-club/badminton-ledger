@@ -123,7 +123,6 @@ export default function AuthPage() {
     const email = emailInput.trim();
     const username = usernameInput.trim();
     if (!email) { setEmailAuthError('Enter your email.'); return; }
-    if (!username) { setEmailAuthError('Enter a username.'); return; }
     if (passwordInput.length < 6) { setEmailAuthError('Password should be at least 6 characters.'); return; }
     if (passwordInput !== confirmPasswordInput) { setEmailAuthError('Passwords do not match.'); return; }
 
@@ -314,11 +313,12 @@ export default function AuthPage() {
               >
                 {authMode === 'signup' && (
                   <Form.Group className="mb-2" controlId="auth-email-username">
-                    <Form.Label>Username</Form.Label>
+                    <Form.Label>Display name (optional)</Form.Label>
                     <Form.Control
                       value={usernameInput}
                       onChange={(e) => setUsernameInput(e.target.value)}
                       disabled={emailAuthBusy}
+                      placeholder="Shown instead of your email around the app"
                     />
                   </Form.Group>
                 )}

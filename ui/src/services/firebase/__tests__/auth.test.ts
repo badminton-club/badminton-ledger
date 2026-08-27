@@ -121,6 +121,13 @@ describe('signUpWithEmail', () => {
     expect(__getVerificationEmailsSent()).toEqual(['jamie@example.com']);
   });
 
+  it('leaves displayName unset when no username is given (falls back to email in the UI)', async () => {
+    const user = await signUpWithEmail('nodisplay@example.com', '', 'hunter22');
+
+    expect(user.email).toBe('nodisplay@example.com');
+    expect(user.displayName).toBeFalsy();
+  });
+
   it('rejects a duplicate email with auth/email-already-in-use', async () => {
     await signUpWithEmail('jamie@example.com', 'JamieL', 'hunter22');
     const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
