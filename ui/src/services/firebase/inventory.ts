@@ -234,7 +234,14 @@ function diffFields<T extends Record<string, unknown>>(
       v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? '');
 
     if (normalise(oldVal) !== normalise(newVal)) {
-      acc.push({ field: String(field), oldValue: oldVal, newValue: newVal });
+      // Firestore rejects `undefined` field values (e.g. an optional field like
+      // `name` or `notes` that was never set on older documents) — store `null`
+      // instead so the adjustment log can always be written.
+      acc.push({
+        field: String(field),
+        oldValue: oldVal === undefined ? null : oldVal,
+        newValue: newVal === undefined ? null : newVal,
+      });
     }
     return acc;
   }, []);

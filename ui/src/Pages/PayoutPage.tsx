@@ -14,14 +14,14 @@ const PAGE_SIZE = 100;
 
 type LedgerColumn = 'dateRecorded' | 'sessionDate' | 'player' | 'type' | 'note' | 'amount' | 'runningTotal';
 
-const LEDGER_COLUMNS: { key: LedgerColumn; label: string; align?: 'end' }[] = [
+const LEDGER_COLUMNS: { key: LedgerColumn; label: string; align?: 'end'; searchable?: boolean }[] = [
   { key: 'dateRecorded', label: 'Date Recorded' },
   { key: 'sessionDate',  label: 'Session Date' },
   { key: 'player',       label: 'Player' },
   { key: 'type',         label: 'Type' },
   { key: 'note',         label: 'Note' },
   { key: 'amount',       label: 'Amount', align: 'end' },
-  { key: 'runningTotal', label: 'Running Total', align: 'end' },
+  { key: 'runningTotal', label: 'Running Total', align: 'end', searchable: false },
 ];
 
 const ledgerTypeLabel = (type: PayoutLedgerEntry['type']) =>
@@ -326,12 +326,14 @@ export default function PayoutPage() {
                   <tr>
                     {LEDGER_COLUMNS.map((col) => (
                       <th key={col.key} className="p-1">
-                        <Form.Control
-                          size="sm"
-                          placeholder="Search…"
-                          value={columnFilters[col.key]}
-                          onChange={(e) => handleFilterChange(col.key, e.target.value)}
-                        />
+                        {col.searchable === false ? null : (
+                          <Form.Control
+                            size="sm"
+                            placeholder="Search…"
+                            value={columnFilters[col.key]}
+                            onChange={(e) => handleFilterChange(col.key, e.target.value)}
+                          />
+                        )}
                       </th>
                     ))}
                   </tr>

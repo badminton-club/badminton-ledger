@@ -59,7 +59,7 @@ export default function AddCourtCreditModal({ show, onHide, onAddBatch }: Props)
     try {
       await onAddBatch({
         purchaseDate,
-        name:           name.trim() || undefined,
+        name:           name.trim(),
         purchaserName:  purchaserName.trim(),
         costPerHour:    cost,
         hoursPurchased: hours,
