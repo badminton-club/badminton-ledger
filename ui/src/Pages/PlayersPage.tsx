@@ -315,7 +315,11 @@ export default function PlayersPage() {
       'session-deleted': 'Session removed',
       payment:           'Payment',
       comp:              'Comp',
-      settlement:        'Settlement',
+      // 'settlement' is logged when an admin manually switches a player's
+      // settlement method after the session was created (vs. 'session', logged
+      // automatically at session-creation time) — same kind of event from the
+      // player's perspective, so it's shown with the same "Session" label.
+      settlement:        'Session',
       manual:            'Manual',
       'manual-excluded': 'Manual (off payout)',
     };
