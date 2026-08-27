@@ -57,6 +57,7 @@ export interface SessionPlayer {
   paidBy?: string | null; // when paidVia === 'transfer', the id of the player whose balance covered this cost
   comped?: boolean; // player settled directly with the owner — excluded from owner payout
   highlighted: boolean;
+  settledAt?: Timestamp | null; // when paid/comped status was last changed
 }
 
 export interface BirdieUsage {
@@ -81,6 +82,7 @@ export interface BirdieBatch {
   birdsInOpenTube: number;
   purchaserName: string;
   purchaseDate: Date;
+  notes?: string;
   createdAt: Timestamp;
 }
 
@@ -94,6 +96,7 @@ export interface CourtCreditBatch {
   remainingHours: number;
   purchaserName: string;
   purchaseDate: Date;
+  notes?: string;
   createdAt: Timestamp;
 }
 
@@ -131,17 +134,29 @@ export interface OwnerPayout {
   paidByUid: string | null;
   date: Timestamp;            // when the payout was made
   createdAt: Timestamp;
+  voided?: boolean;           // true if this payout was undone — excluded from totalPaid
+  voidedAt?: Timestamp | null;
+  voidedByUid?: string | null;
+  voidedNote?: string | null; // admin-entered reason for the undo
 }
 
 // One row in the payout ledger: money collected from players (a payment or a manual
 // balance adjustment) that is owed to the owner, or a payout that reduces the balance.
+// 'balance' entries (prepaid-wallet draws/refunds tied to a session) are shown for
+// record keeping, like comps, but never count toward the total — that money was
+// already collected from the player whenever they topped up their balance.
 export interface PayoutLedgerEntry {
   id: string;
   date: Date;
-  type: 'payment' | 'adjustment' | 'comp' | 'payout';
+  type: 'payment' | 'adjustment' | 'comp' | 'payout' | 'balance';
   amount: number;
   playerId: string | null;
+  sessionId: string | null;
+  sessionDate: Date | null; // date of the session this entry is settling, if any
   note: string;
+  voided: boolean;            // true if this entry has been undone (shown struck-through, excluded from totals)
+  voidedNote: string | null;  // admin-entered reason for the undo, when voided
+  canUndo: boolean;           // true if the Undo action applies to this row
 }
 
 export interface OwnerPayoutSummary {
@@ -244,6 +259,13 @@ export interface BalanceLedgerEntry {
   reason: string;
   note?: string;
   createdAt?: Timestamp;
+  // true when this entry actually moved the player's prepaid balance (e.g. the
+  // Players-page balance adjustment); false/absent for entries that only affect
+  // the owner payout total (e.g. a custom payout transaction) — those are
+  // excluded from the wallet-only Balance History view.
+  walletAdjustment?: boolean;
+  voided?: boolean;      // true if this entry was undone (kept for audit, shown de-emphasized)
+  voidedNote?: string;   // admin-entered reason for the undo, when voided
 }
 
 // users/{uid} — the signed-in user's global profile (their saved club list + default)

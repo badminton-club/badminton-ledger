@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup, Badge } from 'react-bootstrap';
+import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup, Badge, Modal } from 'react-bootstrap';
+import { format } from 'date-fns';
 import { clearAllData, exportAllData, restoreAllData, CLEARABLE_COLLECTIONS, type ClearSummary, type BackupData } from '../services/firebase/admin';
+import {
+  backupToGoogleDrive,
+  listGoogleDriveBackups,
+  restoreFromGoogleDrive,
+  defaultBackupFileName,
+  DEFAULT_BACKUP_FOLDER_NAME,
+  type DriveBackupResult,
+  type DriveBackupFile,
+} from '../services/firebase/drive';
 import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
@@ -36,6 +46,17 @@ export default function SettingsPage() {
   const [restoring, setRestoring] = useState(false);
   const [restoreResult, setRestoreResult] = useState<ClearSummary | null>(null);
   const [ioError, setIoError] = useState('');
+  const [drivingBackingUp, setDriveBackingUp] = useState(false);
+  const [driveResult, setDriveResult] = useState<DriveBackupResult | null>(null);
+  const [driveError, setDriveError] = useState('');
+  const [showDriveRestore, setShowDriveRestore] = useState(false);
+  const [driveBackups, setDriveBackups] = useState<DriveBackupFile[]>([]);
+  const [loadingDriveBackups, setLoadingDriveBackups] = useState(false);
+  const [restoringDriveFileId, setRestoringDriveFileId] = useState<string | null>(null);
+  const [showDriveBackup, setShowDriveBackup] = useState(false);
+  const [driveBackupFileName, setDriveBackupFileName] = useState('');
+  const [driveBackupFolderName, setDriveBackupFolderName] = useState('');
+  const [driveRestoreFolderName, setDriveRestoreFolderName] = useState('');
 
   const [members, setMembers] = useState<ClubMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
@@ -289,6 +310,60 @@ export default function SettingsPage() {
     }
   };
 
+  const handleOpenDriveBackup = () => {
+    setDriveError('');
+    setDriveBackupFileName('');
+    setDriveBackupFolderName('');
+    setShowDriveBackup(true);
+  };
+
+  const handleDriveBackup = async () => {
+    setDriveError('');
+    setDriveResult(null);
+    setDriveBackingUp(true);
+    try {
+      setDriveResult(await backupToGoogleDrive({
+        fileName: driveBackupFileName,
+        folderName: driveBackupFolderName,
+      }));
+      setShowDriveBackup(false);
+    } catch (err) {
+      setDriveError(err instanceof Error ? err.message : 'Google Drive backup failed.');
+    } finally {
+      setDriveBackingUp(false);
+    }
+  };
+
+  const handleOpenDriveRestore = async (folderName?: string) => {
+    setDriveError('');
+    setShowDriveRestore(true);
+    setLoadingDriveBackups(true);
+    try {
+      setDriveBackups(await listGoogleDriveBackups(folderName));
+    } catch (err) {
+      setDriveError(err instanceof Error ? err.message : 'Failed to load Google Drive backups.');
+    } finally {
+      setLoadingDriveBackups(false);
+    }
+  };
+
+  const handleRestoreDriveFile = async (file: DriveBackupFile) => {
+    if (!window.confirm(
+      `Restore "${file.name}"? This overwrites any document that shares an ID with the backup. Continue?`
+    )) return;
+
+    setDriveError('');
+    setRestoringDriveFileId(file.id);
+    try {
+      setRestoreResult(await restoreFromGoogleDrive(file.id));
+      setShowDriveRestore(false);
+    } catch (err) {
+      setDriveError(err instanceof Error ? err.message : 'Restore from Google Drive failed.');
+    } finally {
+      setRestoringDriveFileId(null);
+    }
+  };
+
   // Distinguish players who share a display name (append email, else a short id).
   const playerLabel = (p: Player) => {
     const name = `${p.firstName} ${p.lastName ?? ''}`.trim();
@@ -465,11 +540,12 @@ export default function SettingsPage() {
         <Card.Header>Backup &amp; restore</Card.Header>
         <Card.Body>
           <Card.Text>
-            Download a JSON snapshot of all data, or restore one from a file. Restore upserts
-            documents by their original ID.
+            Download a JSON snapshot of all data, back it up straight to Google Drive, or restore
+            one from a file or from a previous Drive backup. Restore upserts documents by their
+            original ID.
           </Card.Text>
           <div className="d-flex gap-2 align-items-center flex-wrap">
-            <Button variant="primary" onClick={handleBackup} disabled={backingUp || restoring}>
+            <Button variant="primary" onClick={handleBackup} disabled={backingUp || restoring || drivingBackingUp}>
               {backingUp ? (
                 <>
                   <Spinner as="span" animation="border" size="sm" className="me-2" />
@@ -479,21 +555,54 @@ export default function SettingsPage() {
                 'Download backup'
               )}
             </Button>
+            <Button
+              variant="outline-primary"
+              onClick={handleOpenDriveBackup}
+              disabled={backingUp || restoring || drivingBackingUp}
+            >
+              Backup to Google Drive
+            </Button>
             <Form.Label className="btn btn-outline-secondary mb-0">
               {restoring ? 'Restoring…' : 'Restore from file'}
               <Form.Control
                 type="file"
                 accept="application/json,.json"
                 hidden
-                disabled={backingUp || restoring}
+                disabled={backingUp || restoring || drivingBackingUp}
                 onChange={handleRestoreFile}
               />
             </Form.Label>
+            <Button
+              variant="outline-secondary"
+              onClick={() => { setDriveRestoreFolderName(''); handleOpenDriveRestore(); }}
+              disabled={backingUp || restoring || drivingBackingUp}
+            >
+              Restore from Google Drive
+            </Button>
           </div>
+          <Form.Text className="text-muted d-block mt-2">
+            Drive backups default to a "{DEFAULT_BACKUP_FOLDER_NAME}" folder in your own Google
+            Drive, but you can name the file and choose a different folder when backing up.
+            You'll be asked to grant access the first time — sign in with the same Google account
+            you use for this app.
+          </Form.Text>
 
           {ioError && (
             <Alert variant="danger" className="mt-3">
               {ioError}
+            </Alert>
+          )}
+          {driveError && (
+            <Alert variant="danger" className="mt-3" onClose={() => setDriveError('')} dismissible>
+              {driveError}
+            </Alert>
+          )}
+          {driveResult && (
+            <Alert variant="success" className="mt-3" onClose={() => setDriveResult(null)} dismissible>
+              Saved <strong>{driveResult.fileName}</strong> to Google Drive.{' '}
+              {driveResult.webViewLink && (
+                <a href={driveResult.webViewLink} target="_blank" rel="noreferrer">Open in Drive</a>
+              )}
             </Alert>
           )}
           {restoreResult && (
@@ -510,6 +619,120 @@ export default function SettingsPage() {
           )}
         </Card.Body>
       </Card>
+
+      <Modal show={showDriveRestore} onHide={() => setShowDriveRestore(false)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Restore from Google Drive</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form
+            className="d-flex gap-2 align-items-end mb-3"
+            onSubmit={(e) => { e.preventDefault(); handleOpenDriveRestore(driveRestoreFolderName); }}
+          >
+            <Form.Group className="flex-grow-1">
+              <Form.Label className="small mb-1">Folder</Form.Label>
+              <Form.Control
+                size="sm"
+                placeholder={DEFAULT_BACKUP_FOLDER_NAME}
+                value={driveRestoreFolderName}
+                onChange={(e) => setDriveRestoreFolderName(e.target.value)}
+                disabled={loadingDriveBackups || restoringDriveFileId !== null}
+              />
+            </Form.Group>
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              type="submit"
+              disabled={loadingDriveBackups || restoringDriveFileId !== null}
+            >
+              Load
+            </Button>
+          </Form>
+
+          {loadingDriveBackups ? (
+            <div className="text-center py-3"><Spinner animation="border" size="sm" /></div>
+          ) : driveBackups.length === 0 ? (
+            <p className="text-muted mb-0">
+              No backups found in the "{driveRestoreFolderName.trim() || DEFAULT_BACKUP_FOLDER_NAME}" Drive
+              folder. Use "Backup to Google Drive" to create one first, or check the folder name above.
+            </p>
+          ) : (
+            <ListGroup>
+              {driveBackups.map((file) => (
+                <ListGroup.Item key={file.id} className="d-flex justify-content-between align-items-center">
+                  <div>
+                    <div>{format(new Date(file.createdTime), 'MMM d, yyyy h:mm a')}</div>
+                    <div className="text-muted small">{file.name}</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline-danger"
+                    disabled={restoringDriveFileId !== null}
+                    onClick={() => handleRestoreDriveFile(file)}
+                  >
+                    {restoringDriveFileId === file.id ? (
+                      <Spinner as="span" animation="border" size="sm" />
+                    ) : (
+                      'Restore'
+                    )}
+                  </Button>
+                </ListGroup.Item>
+              ))}
+            </ListGroup>
+          )}
+          {driveError && (
+            <Alert variant="danger" className="mt-3 mb-0">{driveError}</Alert>
+          )}
+        </Modal.Body>
+      </Modal>
+
+      <Modal show={showDriveBackup} onHide={() => setShowDriveBackup(false)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Backup to Google Drive</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={(e) => { e.preventDefault(); handleDriveBackup(); }}>
+          <Modal.Body>
+            <Form.Group className="mb-3">
+              <Form.Label>File name</Form.Label>
+              <Form.Control
+                placeholder={defaultBackupFileName()}
+                value={driveBackupFileName}
+                onChange={(e) => setDriveBackupFileName(e.target.value)}
+                disabled={drivingBackingUp}
+              />
+              <Form.Text className="text-muted">Leave blank to use the default name shown above.</Form.Text>
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label>Folder</Form.Label>
+              <Form.Control
+                placeholder={DEFAULT_BACKUP_FOLDER_NAME}
+                value={driveBackupFolderName}
+                onChange={(e) => setDriveBackupFolderName(e.target.value)}
+                disabled={drivingBackingUp}
+              />
+              <Form.Text className="text-muted">
+                Created in your Drive root if it doesn't already exist.
+              </Form.Text>
+            </Form.Group>
+            {driveError && <Alert variant="danger" className="mb-0">{driveError}</Alert>}
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setShowDriveBackup(false)} disabled={drivingBackingUp}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" disabled={drivingBackingUp}>
+              {drivingBackingUp ? (
+                <>
+                  <Spinner as="span" animation="border" size="sm" className="me-2" />
+                  Backing up…
+                </>
+              ) : (
+                'Backup'
+              )}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
 
       {isSuperAdmin && (
       <>

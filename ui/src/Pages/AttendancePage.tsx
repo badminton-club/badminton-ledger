@@ -16,7 +16,22 @@ const REASON_LABELS: Record<string, string> = {
   'session-deleted': 'Session removed',
   payment: 'Payment',
   comp: 'Comp',
-  manual: 'Adjustment',
+  manual: 'Manual',
+  // Logged when an admin manually switches a player's settlement method after
+  // the session was created (vs. 'session', logged automatically at
+  // session-creation time) — same kind of event from the player's perspective,
+  // so it's shown with the same "Session" label.
+  settlement: 'Session',
+};
+
+const REASON_BADGE: Record<string, string> = {
+  session: 'secondary',
+  'session-edit': 'secondary',
+  'session-deleted': 'dark',
+  payment: 'primary',
+  comp: 'info',
+  manual: 'secondary',
+  settlement: 'secondary',
 };
 
 const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toFixed(2)}`;
@@ -104,7 +119,7 @@ export default function AttendancePage() {
   }
 
   return (
-    <Container className="py-4" style={{ maxWidth: 720 }}>
+    <Container className="py-4" style={{ maxWidth: 840 }}>
       <h3>My attendance</h3>
       {error && <Alert variant="danger">{error}</Alert>}
 
@@ -173,9 +188,13 @@ export default function AttendancePage() {
               {attended.length === 0 ? (
                 <p className="text-muted">No sessions attended yet.</p>
               ) : (
-                <Table hover responsive size="sm">
+                <Table hover striped responsive size="sm" className="align-middle mb-0">
                   <thead>
-                    <tr><th>Date</th><th>Cost</th><th className="text-end">Status</th></tr>
+                    <tr className="table-light">
+                      <th>Date</th>
+                      <th className="text-end">Cost</th>
+                      <th className="text-end">Status</th>
+                    </tr>
                   </thead>
                   <tbody>
                     {attended.map((s) => {
@@ -188,8 +207,8 @@ export default function AttendancePage() {
                           : { label: 'Unpaid', bg: 'danger' };
                       return (
                         <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedSession(s)}>
-                          <td>{d ? format(d, 'MMM d, yyyy') : '—'}</td>
-                          <td>{money(sp?.cost ?? 0)}</td>
+                          <td className="text-nowrap">{d ? format(d, 'MMM d, yyyy') : '—'}</td>
+                          <td className="text-end" style={{ fontVariantNumeric: 'tabular-nums' }}>{money(sp?.cost ?? 0)}</td>
                           <td className="text-end"><Badge bg={status.bg}>{status.label}</Badge></td>
                         </tr>
                       );
@@ -202,10 +221,10 @@ export default function AttendancePage() {
               {ledger.length === 0 ? (
                 <p className="text-muted">No transactions yet.</p>
               ) : (
-                <Table hover responsive size="sm">
+                <Table hover striped responsive size="sm" className="align-middle mb-0">
                   <thead>
-                    <tr>
-                      <th>Date</th>
+                    <tr className="table-light">
+                      <th title="When this entry was recorded (not necessarily the session date)">Recorded</th>
                       <th>Type</th>
                       <th>Note</th>
                       <th className="text-end">Amount</th>
@@ -217,11 +236,20 @@ export default function AttendancePage() {
                       const d = toJSDate(e.createdAt);
                       return (
                         <tr key={e.id}>
-                          <td>{d ? format(d, 'MMM d, yyyy') : '—'}</td>
-                          <td><Badge bg="secondary">{REASON_LABELS[e.reason] ?? e.reason}</Badge></td>
-                          <td>{e.note ?? ''}</td>
-                          <td className={`text-end ${e.delta < 0 ? 'text-danger' : 'text-success'}`}>{money(e.delta)}</td>
-                          <td className="text-end">{money(e.balanceAfter)}</td>
+                          <td className="text-nowrap">{d ? format(d, 'MMM d, yyyy h:mm a') : '—'}</td>
+                          <td><Badge bg={REASON_BADGE[e.reason] ?? 'secondary'}>{REASON_LABELS[e.reason] ?? e.reason}</Badge></td>
+                          <td style={{ maxWidth: 320, whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                            {e.note || <span className="text-muted">—</span>}
+                          </td>
+                          <td
+                            className={`text-end ${e.delta < 0 ? 'text-danger' : 'text-success'}`}
+                            style={{ fontVariantNumeric: 'tabular-nums' }}
+                          >
+                            {money(e.delta)}
+                          </td>
+                          <td className="text-end fw-medium" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {typeof e.balanceAfter === 'number' ? money(e.balanceAfter) : <span className="text-muted">—</span>}
+                          </td>
                         </tr>
                       );
                     })}

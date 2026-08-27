@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import AddCourtCreditModal from 'components/AddCourtCreditModal';
+import { auth } from '../services/firebase/client';
 import {
   fetchCourtCredits,
   addCourtCreditBatch,
@@ -24,6 +25,7 @@ type SortKey = keyof CourtCreditBatch;
 type SortDir = 'asc' | 'desc';
 
 interface EditFormState {
+  name:           string;
   purchaseDate:   Date;
   purchaserName:  string;
   hoursPurchased: number | '';
@@ -40,6 +42,7 @@ interface HistoryItem {
 }
 
 const INIT_EDIT: EditFormState = {
+  name:           '',
   purchaseDate:   new Date(),
   purchaserName:  '',
   hoursPurchased: '',
@@ -50,6 +53,14 @@ const INIT_EDIT: EditFormState = {
 
 const SESSION_ROW_STYLE:    React.CSSProperties = { backgroundColor: '#e9f7ef' };
 const ADJUSTMENT_ROW_STYLE: React.CSSProperties = { backgroundColor: '#feefd8' };
+
+// This app only supports Google sign-in, so displayName/email are reliably
+// populated — used to attribute batch edits to the actual admin instead of a
+// generic "Admin" placeholder.
+function currentUserName(): string {
+  const user = auth.currentUser;
+  return user?.displayName || user?.email || 'Admin';
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -140,12 +151,13 @@ export default function CourtCreditsPage() {
     setEditingId(batch.id);
     setActiveKey(batch.id);
     setEditForm({
+      name:           batch.name ?? '',
       purchaseDate:   batch.purchaseDate instanceof Date ? batch.purchaseDate : new Date(batch.purchaseDate),
       purchaserName:  batch.purchaserName,
       hoursPurchased: batch.hoursPurchased,
       totalCost:      batch.totalCost,
       remainingHours: batch.remainingHours,
-      notes:          (batch as any).notes ?? '',
+      notes:          batch.notes ?? '',
     });
     setEditReason('');
     setFormError('');
@@ -186,10 +198,10 @@ export default function CourtCreditsPage() {
       await updateCourtCreditBatch(
         editingId,
         original,
-        { ...editForm, hoursPurchased: hours, totalCost: cost, remainingHours: remaining },
+        { ...editForm, name: editForm.name.trim(), hoursPurchased: hours, totalCost: cost, remainingHours: remaining },
         editReason,
-        'admin',
-        'Admin',
+        auth.currentUser?.uid ?? 'admin',
+        currentUserName(),
       );
       await loadBatches(editingId);
       setEditingId(null);
@@ -218,9 +230,9 @@ export default function CourtCreditsPage() {
         <Card.Body>
           {/* Column headers */}
           <Row className="fw-bold text-muted py-2 px-4 border-bottom mb-2 d-none d-md-flex">
-            {(['costPerHour', 'remainingHours', 'purchaseDate', 'purchaserName'] as SortKey[]).map(key => (
-              <Col key={key} md={3} onClick={() => requestSort(key)} style={{ cursor: 'pointer' }}>
-                {{ costPerHour: 'Cost/Hr', remainingHours: 'Rem. Hrs', purchaseDate: 'Purchase Date', purchaserName: 'Purchaser' }[key]}
+            {(['name', 'costPerHour', 'remainingHours', 'purchaseDate', 'purchaserName'] as SortKey[]).map(key => (
+              <Col key={key} md={key === 'name' ? 2 : key === 'purchaseDate' ? 3 : key === 'purchaserName' ? 2 : 3} onClick={() => requestSort(key)} style={{ cursor: 'pointer' }}>
+                {{ name: 'Name', costPerHour: 'Cost/Hr', remainingHours: 'Rem. Hrs', purchaseDate: 'Purchase Date', purchaserName: 'Purchaser' }[key]}
                 {sortIndicator(key)}
               </Col>
             ))}
@@ -234,14 +246,19 @@ export default function CourtCreditsPage() {
             activeKey={activeKey ?? undefined}
             onSelect={k => setActiveKey(k === activeKey ? null : (k as string))}
           >
-            {sorted.map(batch => (
-              <Accordion.Item eventKey={batch.id} key={batch.id}>
+            {sorted.map((batch, i) => (
+              <Accordion.Item
+                eventKey={batch.id}
+                key={batch.id}
+                style={i % 2 === 1 ? ({ '--bs-accordion-btn-bg': '#f8f9fa' } as React.CSSProperties) : undefined}
+              >
                 <Accordion.Header>
                   <Row className="w-100 align-items-center gx-2">
+                    <Col md={2} className="text-truncate">{batch.name || '—'}</Col>
                     <Col md={3}>${batch.costPerHour?.toFixed(2) ?? 'N/A'}</Col>
                     <Col md={3}>{batch.remainingHours ?? 0}</Col>
                     <Col md={3}>{batch.purchaseDate ? format(batch.purchaseDate, 'yyyy-MM-dd') : 'N/A'}</Col>
-                    <Col md={3} className="text-muted small d-none d-md-block">{batch.purchaserName}</Col>
+                    <Col md={2} className="text-muted small d-none d-md-block">{batch.purchaserName}</Col>
                   </Row>
                 </Accordion.Header>
                 <Accordion.Body>
@@ -249,6 +266,20 @@ export default function CourtCreditsPage() {
                     // ── Edit form ────────────────────────────────────────────
                     <Form onSubmit={e => { e.preventDefault(); handleSaveEdit(); }}>
                       {formError && <Alert variant="danger" dismissible onClose={() => setFormError('')}>{formError}</Alert>}
+                      <Row>
+                        <Col md={6} className="mb-3">
+                          <Form.Group>
+                            <Form.Label>Batch Name</Form.Label>
+                            <Form.Control name="name" placeholder="Optional label" value={editForm.name} onChange={handleFormChange} />
+                          </Form.Group>
+                        </Col>
+                        <Col md={6} className="mb-3">
+                          <Form.Group>
+                            <Form.Label>Purchaser Name</Form.Label>
+                            <Form.Control name="purchaserName" value={editForm.purchaserName} onChange={handleFormChange} required />
+                          </Form.Group>
+                        </Col>
+                      </Row>
                       <Row>
                         <Col md={6} className="mb-3">
                           <Form.Group>
@@ -260,12 +291,6 @@ export default function CourtCreditsPage() {
                                 dateFormat="yyyy-MM-dd" className="form-control" maxDate={new Date()}
                               />
                             </div>
-                          </Form.Group>
-                        </Col>
-                        <Col md={6} className="mb-3">
-                          <Form.Group>
-                            <Form.Label>Purchaser Name</Form.Label>
-                            <Form.Control name="purchaserName" value={editForm.purchaserName} onChange={handleFormChange} required />
                           </Form.Group>
                         </Col>
                       </Row>
@@ -290,6 +315,10 @@ export default function CourtCreditsPage() {
                         </Col>
                       </Row>
                       <Form.Group className="mb-3">
+                        <Form.Label>Notes</Form.Label>
+                        <Form.Control as="textarea" rows={2} name="notes" value={editForm.notes} onChange={handleFormChange} />
+                      </Form.Group>
+                      <Form.Group className="mb-3">
                         <Form.Label>Reason for Edit <span className="text-danger">*</span></Form.Label>
                         <Form.Control as="textarea" rows={2} value={editReason} onChange={e => setEditReason(e.target.value)} required />
                       </Form.Group>
@@ -303,6 +332,7 @@ export default function CourtCreditsPage() {
                   ) : (
                     // ── Detail view ──────────────────────────────────────────
                     <>
+                      {batch.name && <p><strong>Name:</strong> {batch.name}</p>}
                       <Row className="mb-3">
                         <Col md={6}>
                           <p><strong>Purchase Date:</strong> {format(batch.purchaseDate, 'MMMM d, yyyy')}</p>
@@ -314,6 +344,9 @@ export default function CourtCreditsPage() {
                           <p><strong>Remaining Hours:</strong> <strong>{batch.remainingHours}</strong></p>
                         </Col>
                       </Row>
+                      {batch.notes && (
+                        <p><strong>Notes:</strong> <span style={{ whiteSpace: 'pre-wrap' }}>{batch.notes}</span></p>
+                      )}
                       <Button variant="outline-primary" size="sm" className="mb-3" onClick={() => handleStartEdit(batch)}>
                         Edit Batch Details
                       </Button>
@@ -340,7 +373,7 @@ export default function CourtCreditsPage() {
                               const style = item.type === 'sessionUsage' ? SESSION_ROW_STYLE : ADJUSTMENT_ROW_STYLE;
                               return (
                                 <tr key={`${item.type}-${item.id ?? i}`}>
-                                  <td style={style}>{format(item.eventDate, 'yyyy-MM-dd HH:mm')}</td>
+                                  <td style={style}>{format(item.eventDate, 'yyyy-MM-dd')}</td>
                                   <td style={style}>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
                                   <td style={style}>
                                     {item.type === 'sessionUsage' && `Used: ${item.hoursUsed as number} hrs`}

@@ -89,12 +89,12 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
         {birdiesEnabled && <SummaryRow label="Total Birdie Cost" value={`$${(session.totalBirdieCost ?? 0).toFixed(2)}`} />}
         <SummaryRow label="Total Session Cost"            value={`$${(session.totalSessionCost ?? 0).toFixed(2)}`} bold />
         <SummaryRow label="Players"                       value={String(session.players.length)} />
-        <SummaryRow label="Unpaid players"                value={String(session.players.filter(p => !p.paid).length)} />
+        <SummaryRow label="Unpaid players"                value={String(session.players.filter(p => !p.paid && !p.comped).length)} />
         <SummaryRow label="Total Paid"                    value={`$${paidTotal.toFixed(2)}`} />
-        <SummaryRow label="Total Due"                     value={`$${(session.totalSessionCost - paidTotal).toFixed(2)}`} />
+        <SummaryRow label="Total Comped"                  value={`$${compedTotal.toFixed(2)}`} />
         <SummaryRow
-          label="Total Due (excl. comped players)"
-          value={`$${(session.totalSessionCost - compedTotal).toFixed(2)}`}
+          label="Total Due"
+          value={`$${(session.totalSessionCost - paidTotal - compedTotal).toFixed(2)}`}
         />
       </div>
 
@@ -237,66 +237,73 @@ function PlayerRow({
       <div className="d-flex align-items-center gap-2">
         <span className={player.paid ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
         {isAdmin ? (
-          <ButtonGroup size="sm">
-              {options.map(o => (
-                <React.Fragment key={o.label}>
-                  <Button
-                    variant={currentVia === o.method ? o.activeVariant : 'outline-secondary'}
-                    onClick={() => handleSelect(o.method)}
-                  >
-                    {o.label}
-                  </Button>
-                  {o.method === null && otherPlayers.length > 0 && (
-                    <Dropdown
-                      as={ButtonGroup}
-                      align="end"
-                      onToggle={(isOpen) => { if (!isOpen) setPayerSearch(''); }}
+          <div className="d-flex flex-column align-items-end">
+            <ButtonGroup size="sm">
+                {options.map(o => (
+                  <React.Fragment key={o.label}>
+                    <Button
+                      variant={currentVia === o.method ? o.activeVariant : 'outline-secondary'}
+                      onClick={() => handleSelect(o.method)}
                     >
-                      <Dropdown.Toggle
-                        size="sm"
-                        variant={currentVia === 'transfer' ? 'primary' : 'outline-secondary'}
-                        title="Pay this player's dues from another player's balance"
-                        className="text-truncate"
-                        style={{ maxWidth: 150 }}
+                      {o.label}
+                    </Button>
+                    {o.method === null && otherPlayers.length > 0 && (
+                      <Dropdown
+                        as={ButtonGroup}
+                        align="end"
+                        onToggle={(isOpen) => { if (!isOpen) setPayerSearch(''); }}
                       >
-                        {currentVia === 'transfer' && payerName ? payerName : 'Paid by'}
-                      </Dropdown.Toggle>
-                      <Dropdown.Menu style={{ maxHeight: 360, overflowY: 'auto' }}>
-                        <Dropdown.Header>Pay from another's balance</Dropdown.Header>
-                        <div className="px-2 pb-2">
-                          <Form.Control
-                            size="sm"
-                            autoFocus
-                            placeholder="Search players…"
-                            value={payerSearch}
-                            onChange={(e) => setPayerSearch(e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => e.stopPropagation()}
-                          />
-                        </div>
-                        {filteredPayers.length === 0 ? (
-                          <Dropdown.ItemText className="text-muted small px-3">
-                            No players found.
-                          </Dropdown.ItemText>
-                        ) : (
-                          filteredPayers.map(op => (
-                            <Dropdown.Item
-                              key={op.id}
-                              active={currentVia === 'transfer' && player.paidBy === op.id}
-                              onClick={() => handlePaidBy(op.id)}
-                              className="d-flex justify-content-between align-items-center gap-3"
-                            >
-                              <span>{op.name}</span>
-                              <span className="text-muted small">${op.balance.toFixed(2)}</span>
-                            </Dropdown.Item>
-                          ))
-                        )}
-                      </Dropdown.Menu>
-                    </Dropdown>
-                  )}
-                </React.Fragment>
-              ))}
-            </ButtonGroup>
+                        <Dropdown.Toggle
+                          size="sm"
+                          variant={currentVia === 'transfer' ? 'primary' : 'outline-secondary'}
+                          title="Pay this player's dues from another player's balance"
+                          className="text-truncate"
+                          style={{ maxWidth: 150 }}
+                        >
+                          {currentVia === 'transfer' && payerName ? payerName : 'Paid by'}
+                        </Dropdown.Toggle>
+                        <Dropdown.Menu style={{ maxHeight: 360, overflowY: 'auto' }}>
+                          <Dropdown.Header>Pay from another's balance</Dropdown.Header>
+                          <div className="px-2 pb-2">
+                            <Form.Control
+                              size="sm"
+                              autoFocus
+                              placeholder="Search players…"
+                              value={payerSearch}
+                              onChange={(e) => setPayerSearch(e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              onKeyDown={(e) => e.stopPropagation()}
+                            />
+                          </div>
+                          {filteredPayers.length === 0 ? (
+                            <Dropdown.ItemText className="text-muted small px-3">
+                              No players found.
+                            </Dropdown.ItemText>
+                          ) : (
+                            filteredPayers.map(op => (
+                              <Dropdown.Item
+                                key={op.id}
+                                active={currentVia === 'transfer' && player.paidBy === op.id}
+                                onClick={() => handlePaidBy(op.id)}
+                                className="d-flex justify-content-between align-items-center gap-3"
+                              >
+                                <span>{op.name}</span>
+                                <span className="text-muted small">${op.balance.toFixed(2)}</span>
+                              </Dropdown.Item>
+                            ))
+                          )}
+                        </Dropdown.Menu>
+                      </Dropdown>
+                    )}
+                  </React.Fragment>
+                ))}
+              </ButtonGroup>
+            {player.settledAt && (currentVia === 'comp' || player.paid) && (
+              <div className="text-muted" style={{ fontSize: 10 }}>
+                Updated {format(player.settledAt.toDate(), 'MMM d, yyyy h:mm a')}
+              </div>
+            )}
+          </div>
         ) : (
           <Badge bg={settlement.bg} style={{ fontSize: 10, minWidth: 72 }}>
             {settlement.label}

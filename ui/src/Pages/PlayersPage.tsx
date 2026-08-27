@@ -45,6 +45,9 @@ interface LedgerEntry {
   note:          string;
   createdAt:     { toDate: () => Date } | null;
   sessionId?:    string;
+  walletAdjustment?: boolean;
+  voided?:       boolean;
+  voidedNote?:   string;
 }
 
 const INIT_BALANCE: BalanceAdjustment = { amount: '', reason: '', type: 'credit', includeInPayout: true };
@@ -234,6 +237,7 @@ export default function PlayersPage() {
           // change the club doesn't owe the owner (e.g. correcting an error).
           reason:        balanceAdjustment.includeInPayout ? 'manual' : 'manual-excluded',
           note:          balanceAdjustment.reason.trim(),
+          walletAdjustment: true, // this entry actually moves the player's prepaid balance
           createdAt:     serverTimestamp(),
         });
       });
@@ -311,7 +315,11 @@ export default function PlayersPage() {
       'session-deleted': 'Session removed',
       payment:           'Payment',
       comp:              'Comp',
-      settlement:        'Settlement',
+      // 'settlement' is logged when an admin manually switches a player's
+      // settlement method after the session was created (vs. 'session', logged
+      // automatically at session-creation time) — same kind of event from the
+      // player's perspective, so it's shown with the same "Session" label.
+      settlement:        'Session',
       manual:            'Manual',
       'manual-excluded': 'Manual (off payout)',
     };
@@ -319,8 +327,12 @@ export default function PlayersPage() {
   };
 
   // The Balance History shows prepaid-wallet movements only. e-Transfer/comp
-  // settlements never touch the wallet, so they belong in the payout ledger, not here.
-  const walletLedger = ledger.filter(e => e.reason !== 'payment' && e.reason !== 'comp');
+  // settlements never touch the wallet, so they belong in the payout ledger, not
+  // here — same for a custom payout transaction that's tied to a player only for
+  // record-keeping (walletAdjustment === false), since it never moves their balance.
+  const walletLedger = ledger.filter(e =>
+    e.reason !== 'payment' && e.reason !== 'comp' && e.walletAdjustment !== false
+  );
 
   return (
     <Container fluid className="mt-4 pb-4">
@@ -349,13 +361,15 @@ export default function PlayersPage() {
                 <Alert variant="danger" className="small">{playersError}</Alert>
               )}
               <ListGroup style={{ maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
-                {filteredPlayers.map(player => (
+                {filteredPlayers.map((player, i) => (
                   <ListGroup.Item
                     key={player.id}
                     action
                     active={selectedPlayerId === player.id}
                     onClick={() => setSelectedPlayerId(player.id)}
-                    className="d-flex justify-content-between align-items-center"
+                    className={`d-flex justify-content-between align-items-center ${
+                      selectedPlayerId !== player.id && i % 2 === 1 ? 'bg-light' : ''
+                    }`}
                   >
                     <span>{formatPlayerName(player)}</span>
                     {(player.owed ?? 0) > 0 && (
@@ -520,7 +534,7 @@ export default function PlayersPage() {
               {/* Balance history */}
               <Card className="mb-3">
                 <Card.Header><h5 className="mb-0">Balance History</h5></Card.Header>
-                <Card.Body style={{ maxHeight: 260, overflowY: 'auto' }}>
+                <Card.Body style={{ maxHeight: 400, overflowY: 'auto' }}>
                   {isLoadingLedger && (
                     <div className="text-center"><Spinner animation="border" size="sm" /></div>
                   )}
@@ -532,8 +546,10 @@ export default function PlayersPage() {
                     <Table size="sm" borderless className="mb-0">
                       <thead>
                         <tr className="small text-muted">
-                          <th>Date</th>
-                          <th>Type</th>
+                          <th title="When this entry was recorded (not necessarily the session date)" style={{ whiteSpace: 'nowrap' }}>
+                            Recorded
+                          </th>
+                          <th style={{ whiteSpace: 'nowrap' }}>Type</th>
                           <th>Note</th>
                           <th className="text-end">Change</th>
                           <th className="text-end">Balance</th>
@@ -541,13 +557,13 @@ export default function PlayersPage() {
                       </thead>
                       <tbody>
                         {walletLedger.map(entry => (
-                          <tr key={entry.id} style={{ fontSize: 13 }}>
-                            <td className="text-muted">
+                          <tr key={entry.id} style={{ fontSize: 13, opacity: entry.voided ? 0.5 : 1 }}>
+                            <td className="text-muted text-nowrap">
                               {entry.createdAt?.toDate
-                                ? format(entry.createdAt.toDate(), 'MMM d, yy')
+                                ? format(entry.createdAt.toDate(), 'MMM d, yy h:mm a')
                                 : '—'}
                             </td>
-                            <td>
+                            <td className="text-nowrap">
                               <Badge
                                 bg={entry.reason === 'payment' ? 'success'
                                   : entry.reason === 'session_add' ? 'secondary'
@@ -558,14 +574,24 @@ export default function PlayersPage() {
                               >
                                 {getDeltaLabel(entry.reason)}
                               </Badge>
+                              {entry.voided && (
+                                <Badge
+                                  bg="secondary"
+                                  style={{ fontSize: 9 }}
+                                  className="ms-1"
+                                  title={entry.voidedNote || undefined}
+                                >
+                                  Undone
+                                </Badge>
+                              )}
                             </td>
-                            <td className="text-muted" style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <td className="text-muted" style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
                               {entry.note}
                             </td>
-                            <td className={`text-end ${entry.delta >= 0 ? 'text-success' : 'text-danger'}`}>
+                            <td className={`text-end text-nowrap ${entry.delta >= 0 ? 'text-success' : 'text-danger'}`}>
                               {entry.delta >= 0 ? '+' : ''}{entry.delta.toFixed(2)}
                             </td>
-                            <td className="text-end">
+                            <td className="text-end text-nowrap">
                               ${entry.balanceAfter.toFixed(2)}
                             </td>
                           </tr>
@@ -677,45 +703,55 @@ export default function PlayersPage() {
                                     handleSetPaidBy(s.id, payerId);
                                   };
                                   return (
-                                    <ButtonGroup size="sm" className="mt-1">
-                                      {settleOptions.map(o => (
-                                        <React.Fragment key={o.label}>
-                                          <Button
-                                            variant={via === o.method ? o.activeVariant : 'outline-secondary'}
-                                            style={{ fontSize: 11, padding: '1px 8px' }}
-                                            onClick={() => pick(o.method)}
-                                          >
-                                            {o.label}
-                                          </Button>
-                                          {o.method === null && otherPlayers.length > 0 && (
-                                            <Dropdown as={ButtonGroup} align="end">
-                                              <Dropdown.Toggle
-                                                variant={via === 'transfer' ? 'primary' : 'outline-secondary'}
-                                                style={{ fontSize: 11, padding: '1px 8px', maxWidth: 130 }}
-                                                className="text-truncate"
-                                                title="Pay these dues from another player's balance"
-                                              >
-                                                {via === 'transfer' && payerName ? payerName : 'Paid by'}
-                                              </Dropdown.Toggle>
-                                              <Dropdown.Menu style={{ maxHeight: 320, overflowY: 'auto' }}>
-                                                <Dropdown.Header>Pay from another's balance</Dropdown.Header>
-                                                {otherPlayers.map(op => (
-                                                  <Dropdown.Item
-                                                    key={op.id}
-                                                    active={via === 'transfer' && playerInSession.paidBy === op.id}
-                                                    onClick={() => pickPaidBy(op.id)}
-                                                    className="d-flex justify-content-between align-items-center gap-3"
-                                                  >
-                                                    <span>{op.name}</span>
-                                                    <span className="text-muted small">${op.balance.toFixed(2)}</span>
-                                                  </Dropdown.Item>
-                                                ))}
-                                              </Dropdown.Menu>
-                                            </Dropdown>
-                                          )}
-                                        </React.Fragment>
-                                      ))}
-                                    </ButtonGroup>
+                                    <>
+                                      <ButtonGroup size="sm" className="mt-1">
+                                        {settleOptions.map(o => (
+                                          <React.Fragment key={o.label}>
+                                            <Button
+                                              variant={via === o.method ? o.activeVariant : 'outline-secondary'}
+                                              style={{ fontSize: 11, padding: '1px 8px' }}
+                                              onClick={() => pick(o.method)}
+                                            >
+                                              {o.label}
+                                            </Button>
+                                            {o.method === null && otherPlayers.length > 0 && (
+                                              <Dropdown as={ButtonGroup} align="end">
+                                                <Dropdown.Toggle
+                                                  variant={via === 'transfer' ? 'primary' : 'outline-secondary'}
+                                                  style={{ fontSize: 11, padding: '1px 8px', maxWidth: 130 }}
+                                                  className="text-truncate"
+                                                  title="Pay these dues from another player's balance"
+                                                >
+                                                  {via === 'transfer' && payerName ? payerName : 'Paid by'}
+                                                </Dropdown.Toggle>
+                                                <Dropdown.Menu
+                                                  style={{ maxHeight: '60vh', overflowY: 'auto' }}
+                                                  popperConfig={{ strategy: 'fixed' }}
+                                                >
+                                                  <Dropdown.Header>Pay from another's balance</Dropdown.Header>
+                                                  {otherPlayers.map(op => (
+                                                    <Dropdown.Item
+                                                      key={op.id}
+                                                      active={via === 'transfer' && playerInSession.paidBy === op.id}
+                                                      onClick={() => pickPaidBy(op.id)}
+                                                      className="d-flex justify-content-between align-items-center gap-3"
+                                                    >
+                                                      <span>{op.name}</span>
+                                                      <span className="text-muted small">${op.balance.toFixed(2)}</span>
+                                                    </Dropdown.Item>
+                                                  ))}
+                                                </Dropdown.Menu>
+                                              </Dropdown>
+                                            )}
+                                          </React.Fragment>
+                                        ))}
+                                      </ButtonGroup>
+                                      {playerInSession.settledAt && (via === 'comp' || playerInSession.paid) && (
+                                        <div className="text-muted" style={{ fontSize: 11 }}>
+                                          Updated {format(playerInSession.settledAt.toDate(), 'MMM d, yyyy h:mm a')}
+                                        </div>
+                                      )}
+                                    </>
                                   );
                                 })()}
                               </div>

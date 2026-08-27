@@ -14,7 +14,7 @@ interface Props {
 
 const EMPTY: FormData = {
   name: '', purchaserName: '', purchaseDate: new Date(),
-  costPerTube: 0, tubesPurchased: 0, birdsPerTube: 12,
+  costPerTube: 0, tubesPurchased: 0, birdsPerTube: 12, notes: '',
 };
 
 export default function AddBirdieBatchModal({ show, onHide, onAddBatch }: Props) {
@@ -38,7 +38,12 @@ export default function AddBirdieBatchModal({ show, onHide, onAddBatch }: Props)
 
     setIsSubmitting(true);
     try {
-      await onAddBatch({ ...form, name: form.name.trim(), purchaserName: form.purchaserName.trim() });
+      await onAddBatch({
+        ...form,
+        name:          form.name.trim(),
+        purchaserName: form.purchaserName.trim(),
+        notes:         form.notes.trim(),
+      });
       onHide();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to add batch.');
@@ -87,6 +92,10 @@ export default function AddBirdieBatchModal({ show, onHide, onAddBatch }: Props)
           <Form.Group className="mb-3">
             <Form.Label>Purchaser Name <span className="text-danger">*</span></Form.Label>
             <Form.Control value={form.purchaserName} onChange={e => set('purchaserName', e.target.value)} disabled={isSubmitting} />
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label>Notes</Form.Label>
+            <Form.Control as="textarea" rows={2} placeholder="Optional notes about this batch" value={form.notes} onChange={e => set('notes', e.target.value)} disabled={isSubmitting} />
           </Form.Group>
         </Modal.Body>
         <Modal.Footer>

@@ -1,13 +1,78 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Container, Card, Button, Table, Spinner, Alert, Row, Col, Form, Badge } from 'react-bootstrap';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Container, Card, Button, Table, Spinner, Alert, Row, Col, Form, Badge, Modal } from 'react-bootstrap';
 import { format } from 'date-fns';
-import { fetchOwnerPayoutSummary, payOwner } from '../services/firebase';
+import { fetchOwnerPayoutSummary, payOwner, addCustomPayoutTransaction, undoPayoutAdjustment, voidOwnerPayout } from '../services/firebase';
 import { useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
 import { selectIsClubAdmin } from '../features/club/clubSlice';
-import type { OwnerPayoutSummary } from '../types';
+import type { OwnerPayoutSummary, PayoutLedgerEntry } from '../types';
 
 const money = (n: number) => `$${n.toFixed(2)}`;
+const moneySigned = (n: number) => (n < 0 ? `-${money(Math.abs(n))}` : money(n));
+
+const PAGE_SIZE = 100;
+
+type LedgerColumn = 'dateRecorded' | 'sessionDate' | 'player' | 'type' | 'note' | 'amount' | 'runningTotal';
+
+const LEDGER_COLUMNS: { key: LedgerColumn; label: string; align?: 'end'; searchable?: boolean }[] = [
+  { key: 'dateRecorded', label: 'Date Recorded' },
+  { key: 'sessionDate',  label: 'Session Date' },
+  { key: 'player',       label: 'Player' },
+  { key: 'type',         label: 'Type' },
+  { key: 'note',         label: 'Note' },
+  { key: 'amount',       label: 'Amount', align: 'end' },
+  { key: 'runningTotal', label: 'Running Total', align: 'end', searchable: false },
+];
+
+// 'default' hides comp and balance entries (the common view — just what's owed).
+// The rest narrow the ledger down to exactly one type for auditing.
+type TypeView = 'default' | 'all' | 'payment' | 'balance' | 'comp' | 'adjustment' | 'payout';
+
+const TYPE_VIEW_OPTIONS: { value: TypeView; label: string }[] = [
+  { value: 'default',    label: 'Default (hide comps & balance)' },
+  { value: 'all',        label: 'All types' },
+  { value: 'payment',    label: 'e-Transfer only' },
+  { value: 'balance',    label: 'Balance only' },
+  { value: 'comp',       label: 'Comp only' },
+  { value: 'adjustment', label: 'Manual only' },
+  { value: 'payout',     label: 'Payouts only' },
+];
+
+// "Manual" matches the label already used on the Players page for this same
+// underlying reason ('manual') — keeping the wording consistent across the app.
+const ledgerTypeLabel = (type: PayoutLedgerEntry['type']) =>
+  type === 'payout' ? 'Payout'
+    : type === 'payment' ? 'Payment'
+    : type === 'comp' ? 'Comp'
+    : type === 'balance' ? 'Balance'
+    : 'Manual';
+
+// Entry types that never count toward what's owed to the owner: a comp was paid
+// to the owner directly, and a balance entry is a prepaid-wallet movement that
+// was already collected whenever the player topped up their balance.
+const UNCOUNTED_TYPES = new Set<PayoutLedgerEntry['type']>(['comp', 'balance']);
+
+/**
+ * Running total of what's owed to the owner, evaluated in true chronological order
+ * (oldest → newest) regardless of how the table is currently sorted. Comps and
+ * balance entries don't count (see UNCOUNTED_TYPES) and payouts reduce the
+ * balance. A voided entry (an adjustment or payout that was undone) is skipped
+ * entirely — it's kept in the ledger for the record but no longer contributes,
+ * matching how fetchOwnerPayoutSummary excludes it from the totals.
+ */
+function computeRunningTotals(ledger: PayoutLedgerEntry[]): Map<string, number> {
+  const chronological = [...ledger].sort((a, b) => a.date.getTime() - b.date.getTime());
+  let running = 0;
+  const totals = new Map<string, number>();
+  for (const entry of chronological) {
+    if (!entry.voided) {
+      if (entry.type === 'payout') running -= entry.amount;
+      else if (!UNCOUNTED_TYPES.has(entry.type)) running += entry.amount;
+    }
+    totals.set(`${entry.type}-${entry.id}`, running);
+  }
+  return totals;
+}
 
 export default function PayoutPage() {
   const isAdmin = useAppSelector(selectIsClubAdmin);
@@ -20,12 +85,33 @@ export default function PayoutPage() {
   const [paying, setPaying] = useState(false);
   const [payResult, setPayResult] = useState('');
 
+  const [txType, setTxType] = useState<'add' | 'deduct'>('add');
+  const [txAmount, setTxAmount] = useState('');
+  const [txNote, setTxNote] = useState('');
+  const [txPlayerId, setTxPlayerId] = useState('');
+  const [txSubmitting, setTxSubmitting] = useState(false);
+  const [txError, setTxError] = useState('');
+  const [txResult, setTxResult] = useState('');
+
+  const [sortColumn, setSortColumn] = useState<LedgerColumn>('dateRecorded');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [columnFilters, setColumnFilters] = useState<Record<LedgerColumn, string>>({
+    dateRecorded: '', sessionDate: '', player: '', type: '', note: '', amount: '', runningTotal: '',
+  });
+  const [showFilters, setShowFilters] = useState(false);
+  const [page, setPage] = useState(1);
+  const [typeView, setTypeView] = useState<TypeView>('default');
+  const [undoTarget, setUndoTarget] = useState<PayoutLedgerEntry | null>(null);
+  const [undoReason, setUndoReason] = useState('');
+  const [undoSubmitting, setUndoSubmitting] = useState(false);
+  const [undoError, setUndoError] = useState('');
+
   const players = useAppSelector(selectAllPlayers);
-  const playerName = (id: string | null) => {
+  const playerName = useCallback((id: string | null) => {
     if (!id) return '';
     const p = players.find((pl) => pl.id === id);
     return p ? `${p.firstName} ${p.lastName ?? ''}`.trim() : 'Unknown player';
-  };
+  }, [players]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,6 +126,96 @@ export default function PayoutPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Running totals are computed once from the full ledger in true chronological order,
+  // so they stay stable no matter how the table is currently sorted or filtered.
+  const runningTotals = useMemo(
+    () => computeRunningTotals(summary?.ledger ?? []),
+    [summary]
+  );
+
+  const getColumnText = useCallback((entry: PayoutLedgerEntry, key: LedgerColumn): string => {
+    const runningTotal = runningTotals.get(`${entry.type}-${entry.id}`) ?? 0;
+    switch (key) {
+      case 'dateRecorded': return format(entry.date, 'MMM d, yyyy h:mm a');
+      case 'sessionDate':  return entry.sessionDate ? format(entry.sessionDate, 'MMM d, yyyy') : '';
+      case 'player':       return playerName(entry.playerId);
+      case 'type':         return ledgerTypeLabel(entry.type);
+      case 'note':         return entry.note;
+      case 'amount':       return money(entry.amount);
+      case 'runningTotal': return moneySigned(runningTotal);
+    }
+  }, [runningTotals, playerName]);
+
+  const getSortValue = useCallback((entry: PayoutLedgerEntry, key: LedgerColumn): number | string => {
+    switch (key) {
+      case 'dateRecorded': return entry.date.getTime();
+      case 'sessionDate':  return entry.sessionDate ? entry.sessionDate.getTime() : -Infinity;
+      case 'player':       return playerName(entry.playerId).toLowerCase();
+      case 'type':         return ledgerTypeLabel(entry.type).toLowerCase();
+      case 'note':         return entry.note.toLowerCase();
+      case 'amount':       return entry.amount;
+      case 'runningTotal': return runningTotals.get(`${entry.type}-${entry.id}`) ?? 0;
+    }
+  }, [runningTotals, playerName]);
+
+  const filteredLedger = useMemo(() => {
+    const ledger = summary?.ledger ?? [];
+    return ledger
+      .filter((entry) => {
+        if (typeView === 'default') return entry.type !== 'comp' && entry.type !== 'balance';
+        if (typeView === 'all') return true;
+        return entry.type === typeView;
+      })
+      .filter((entry) =>
+        LEDGER_COLUMNS.every(({ key }) => {
+          const filterValue = columnFilters[key].trim().toLowerCase();
+          if (!filterValue) return true;
+          return getColumnText(entry, key).toLowerCase().includes(filterValue);
+        })
+      );
+  }, [summary, columnFilters, getColumnText, typeView]);
+
+  const sortedLedger = useMemo(() => {
+    const copy = [...filteredLedger];
+    copy.sort((a, b) => {
+      const av = getSortValue(a, sortColumn);
+      const bv = getSortValue(b, sortColumn);
+      const cmp = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv
+        : String(av).localeCompare(String(bv));
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+    return copy;
+  }, [filteredLedger, sortColumn, sortDirection, getSortValue]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedLedger.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedLedger = sortedLedger.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  // Reset to page 1 whenever the underlying data, sort, or filters change.
+  useEffect(() => { setPage(1); }, [summary, sortColumn, sortDirection, columnFilters, typeView]);
+
+  const handleSort = (key: LedgerColumn) => {
+    if (sortColumn === key) {
+      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortColumn(key);
+      setSortDirection(key === 'dateRecorded' ? 'desc' : 'asc');
+    }
+  };
+
+  const handleFilterChange = (key: LedgerColumn, value: string) => {
+    setColumnFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const activeFilterCount = Object.values(columnFilters).filter((v) => v.trim()).length;
+
+  const clearFilters = () => {
+    setColumnFilters({
+      dateRecorded: '', sessionDate: '', player: '', type: '', note: '', amount: '', runningTotal: '',
+    });
+  };
 
   const handlePayOwner = async (custom?: number) => {
     if (!summary || summary.pending <= 0) return;
@@ -68,6 +244,71 @@ export default function PayoutPage() {
       setError(err instanceof Error ? err.message : 'Payout failed.');
     } finally {
       setPaying(false);
+    }
+  };
+
+  const handleAddTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsed = parseFloat(txAmount);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setTxError('Enter an amount greater than zero.');
+      return;
+    }
+    if (!txNote.trim()) {
+      setTxError('A note is required (e.g. what was sold and to whom).');
+      return;
+    }
+
+    setTxSubmitting(true);
+    setTxError('');
+    setTxResult('');
+    try {
+      const delta = txType === 'add' ? parsed : -parsed;
+      await addCustomPayoutTransaction(delta, txNote, txPlayerId || null);
+      setTxResult(
+        txType === 'add'
+          ? `Added ${money(parsed)} to the pending payout.`
+          : `Deducted ${money(parsed)} from the pending payout.`
+      );
+      setTxAmount('');
+      setTxNote('');
+      setTxPlayerId('');
+      await load();
+    } catch (err) {
+      setTxError(err instanceof Error ? err.message : 'Failed to add transaction.');
+    } finally {
+      setTxSubmitting(false);
+    }
+  };
+
+  const openUndo = (entry: PayoutLedgerEntry) => {
+    setUndoTarget(entry);
+    setUndoReason('');
+    setUndoError('');
+  };
+
+  const handleConfirmUndo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!undoTarget) return;
+    if (!undoReason.trim()) {
+      setUndoError('Enter a reason for undoing this.');
+      return;
+    }
+
+    setUndoSubmitting(true);
+    setUndoError('');
+    try {
+      if (undoTarget.type === 'payout') {
+        await voidOwnerPayout(undoTarget.id, undoReason);
+      } else {
+        await undoPayoutAdjustment(undoTarget.id, undoReason);
+      }
+      setUndoTarget(null);
+      await load();
+    } catch (err) {
+      setUndoError(err instanceof Error ? err.message : 'Failed to undo.');
+    } finally {
+      setUndoSubmitting(false);
     }
   };
 
@@ -178,57 +419,307 @@ export default function PayoutPage() {
         </Card.Body>
       </Card>
 
+      <Card className="mb-4">
+        <Card.Body>
+          <Card.Title>Add custom transaction</Card.Title>
+          <Card.Text className="text-muted">
+            Record money the club collected (or paid out) outside of a normal session
+            settlement — e.g. someone buying birdies from the shared stash with cash. This
+            adjusts the pending payout without touching any player's prepaid balance.
+          </Card.Text>
+          <Form onSubmit={handleAddTransaction}>
+            <Row className="g-3">
+              <Col md={3}>
+                <Form.Label>Type</Form.Label>
+                <Form.Select
+                  value={txType}
+                  onChange={(e) => setTxType(e.target.value as 'add' | 'deduct')}
+                  disabled={txSubmitting}
+                >
+                  <option value="add">Add to payout (+)</option>
+                  <option value="deduct">Deduct from payout (-)</option>
+                </Form.Select>
+              </Col>
+              <Col md={3}>
+                <Form.Label>Amount</Form.Label>
+                <Form.Control
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={txAmount}
+                  onChange={(e) => setTxAmount(e.target.value)}
+                  disabled={txSubmitting}
+                />
+              </Col>
+              <Col md={3}>
+                <Form.Label>Player (optional)</Form.Label>
+                <Form.Select
+                  value={txPlayerId}
+                  onChange={(e) => setTxPlayerId(e.target.value)}
+                  disabled={txSubmitting}
+                >
+                  <option value="">— None —</option>
+                  {players.map((p) => (
+                    <option key={p.id} value={p.id}>{`${p.firstName} ${p.lastName ?? ''}`.trim()}</option>
+                  ))}
+                </Form.Select>
+              </Col>
+              <Col md={3} className="d-flex align-items-end">
+                <Button variant="primary" type="submit" disabled={txSubmitting} className="w-100">
+                  {txSubmitting ? <Spinner size="sm" animation="border" /> : 'Add transaction'}
+                </Button>
+              </Col>
+              <Col md={12}>
+                <Form.Label>Note</Form.Label>
+                <Form.Control
+                  type="text"
+                  placeholder="e.g. Manager bought 2 tubes of birdies from the stash (cash)"
+                  value={txNote}
+                  onChange={(e) => setTxNote(e.target.value)}
+                  disabled={txSubmitting}
+                />
+              </Col>
+            </Row>
+          </Form>
+          {txError && (
+            <Alert variant="danger" className="mt-3 mb-0" onClose={() => setTxError('')} dismissible>
+              {txError}
+            </Alert>
+          )}
+          {txResult && (
+            <Alert variant="success" className="mt-3 mb-0" onClose={() => setTxResult('')} dismissible>
+              {txResult}
+            </Alert>
+          )}
+        </Card.Body>
+      </Card>
+
       <Card>
-        <Card.Header>Payout ledger</Card.Header>
+        <Card.Header className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <span>Payout ledger</span>
+          {summary && summary.ledger.length > 0 && (
+            <div className="d-flex align-items-center gap-2">
+              <Button
+                size="sm"
+                variant={showFilters ? 'secondary' : 'outline-secondary'}
+                onClick={() => setShowFilters((v) => !v)}
+              >
+                {showFilters ? 'Hide search' : 'Search'}
+                {activeFilterCount > 0 && (
+                  <Badge bg="light" text="dark" className="ms-2">{activeFilterCount}</Badge>
+                )}
+              </Button>
+              {activeFilterCount > 0 && (
+                <Button size="sm" variant="link" className="text-decoration-none p-0" onClick={clearFilters}>
+                  Clear
+                </Button>
+              )}
+            </div>
+          )}
+        </Card.Header>
         <Card.Body>
           {loading ? (
             <div className="text-center py-3"><Spinner animation="border" /></div>
           ) : !summary || summary.ledger.length === 0 ? (
             <p className="text-muted mb-0">No payments or adjustments yet.</p>
           ) : (
-            <Table hover responsive size="sm" className="mb-0">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Player</th>
-                  <th>Type</th>
-                  <th>Note</th>
-                  <th className="text-end">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.ledger.map((entry) => (
-                  <tr key={`${entry.type}-${entry.id}`}>
-                    <td>{format(entry.date, 'MMM d, yyyy')}</td>
-                    <td>{playerName(entry.playerId)}</td>
-                    <td>
-                      {entry.type === 'payout' ? (
-                        <Badge bg="success">Payout</Badge>
-                      ) : entry.type === 'payment' ? (
-                        <Badge bg="primary">Payment</Badge>
-                      ) : entry.type === 'comp' ? (
-                        <Badge bg="info">Comp</Badge>
-                      ) : (
-                        <Badge bg="secondary">Adjustment</Badge>
-                      )}
-                    </td>
-                    <td>{entry.note}</td>
-                    {entry.type === 'comp' ? (
-                      <td className="text-end text-muted">
-                        {money(entry.amount)} <span className="small">(not counted)</span>
-                      </td>
-                    ) : (
-                      <td className={`text-end ${entry.type === 'payout' ? 'text-success' : entry.amount < 0 ? 'text-danger' : ''}`}>
-                        {entry.type === 'payout' ? `- ${money(entry.amount)}` : money(entry.amount)}
-                      </td>
+            <>
+              <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <Form.Label className="mb-0 small text-muted">Show:</Form.Label>
+                <Form.Select
+                  size="sm"
+                  style={{ width: 'auto' }}
+                  value={typeView}
+                  onChange={(e) => setTypeView(e.target.value as TypeView)}
+                >
+                  {TYPE_VIEW_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </Form.Select>
+              </div>
+              <div className="border rounded" style={{ maxHeight: 600, overflowY: 'auto' }}>
+                <Table hover striped responsive className="mb-0 align-middle">
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                    <tr className="table-light">
+                      {LEDGER_COLUMNS.map((col) => (
+                        <th
+                          key={col.key}
+                          onClick={() => handleSort(col.key)}
+                          role="button"
+                          className={col.align === 'end' ? 'text-end' : ''}
+                          style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                        >
+                          {col.label}
+                          <span className="ms-1 text-muted">
+                            {sortColumn === col.key ? (sortDirection === 'asc' ? '▲' : '▼') : ''}
+                          </span>
+                        </th>
+                      ))}
+                      <th style={{ whiteSpace: 'nowrap' }}>Actions</th>
+                    </tr>
+                    {showFilters && (
+                      <tr className="table-light">
+                        {LEDGER_COLUMNS.map((col) => (
+                          <th key={col.key} className="p-1 pb-2">
+                            {col.searchable === false ? null : (
+                              <Form.Control
+                                size="sm"
+                                placeholder="Search…"
+                                value={columnFilters[col.key]}
+                                onChange={(e) => handleFilterChange(col.key, e.target.value)}
+                              />
+                            )}
+                          </th>
+                        ))}
+                        <th className="p-1 pb-2" />
+                      </tr>
                     )}
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+                  </thead>
+                  <tbody>
+                    {paginatedLedger.length === 0 ? (
+                      <tr>
+                        <td colSpan={LEDGER_COLUMNS.length + 1} className="text-center text-muted py-4">
+                          No entries match your search.
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedLedger.map((entry) => {
+                        const runningTotal = runningTotals.get(`${entry.type}-${entry.id}`) ?? 0;
+                        return (
+                          <tr
+                            key={`${entry.type}-${entry.id}`}
+                            style={entry.voided ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}
+                          >
+                            <td className="text-nowrap">{format(entry.date, 'MMM d, yyyy h:mm a')}</td>
+                            <td className="text-nowrap">{entry.sessionDate ? format(entry.sessionDate, 'MMM d, yyyy') : <span className="text-muted">—</span>}</td>
+                            <td>{playerName(entry.playerId) || <span className="text-muted">—</span>}</td>
+                            <td>
+                              {entry.type === 'payout' ? (
+                                <Badge bg="dark">Payout</Badge>
+                              ) : entry.type === 'payment' ? (
+                                <Badge bg="primary">Payment</Badge>
+                              ) : entry.type === 'comp' ? (
+                                <Badge bg="info">Comp</Badge>
+                              ) : entry.type === 'balance' ? (
+                                <Badge bg="warning" text="dark">Balance</Badge>
+                              ) : (
+                                <Badge bg="secondary">Manual</Badge>
+                              )}
+                              {entry.voided && (
+                                <Badge bg="light" text="dark" className="ms-1" title={entry.voidedNote || undefined}>
+                                  Voided
+                                </Badge>
+                              )}
+                            </td>
+                            <td style={{ maxWidth: 320, whiteSpace: 'normal', wordBreak: 'break-word', textDecoration: 'none' }}>
+                              {entry.note || <span className="text-muted">—</span>}
+                            </td>
+                            {entry.type === 'comp' || entry.type === 'balance' ? (
+                              <td className="text-end text-muted" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                {moneySigned(entry.amount)} <span className="small">(not counted)</span>
+                              </td>
+                            ) : (
+                              <td
+                                className={`text-end fw-medium ${entry.type === 'payout' ? 'text-danger' : entry.amount < 0 ? 'text-danger' : 'text-success'}`}
+                                style={{ fontVariantNumeric: 'tabular-nums' }}
+                              >
+                                {entry.type === 'payout' ? `- ${money(entry.amount)}` : money(entry.amount)}
+                              </td>
+                            )}
+                            <td
+                              className={`text-end fw-semibold ${runningTotal < 0 ? 'text-danger' : ''}`}
+                              style={{ fontVariantNumeric: 'tabular-nums' }}
+                            >
+                              {moneySigned(runningTotal)}
+                            </td>
+                            <td className="text-end" style={{ textDecoration: 'none' }}>
+                              {entry.canUndo && (
+                                <Button
+                                  size="sm"
+                                  variant="outline-danger"
+                                  onClick={() => openUndo(entry)}
+                                >
+                                  Undo
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </Table>
+              </div>
+              <div className="d-flex justify-content-between align-items-center mt-2">
+                <span className="text-muted small">
+                  {sortedLedger.length === 0
+                    ? 'No entries match your search.'
+                    : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, sortedLedger.length)} of ${sortedLedger.length}`}
+                </span>
+                <div className="d-flex align-items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline-secondary"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage((p) => p - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <span className="small text-muted">Page {currentPage} of {totalPages}</span>
+                  <Button
+                    size="sm"
+                    variant="outline-secondary"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </Card.Body>
       </Card>
+
+      <Modal show={!!undoTarget} onHide={() => setUndoTarget(null)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Undo transaction</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleConfirmUndo}>
+          <Modal.Body>
+            {undoTarget && (
+              <p className="text-muted">
+                {undoTarget.type === 'payout'
+                  ? `This payout of ${money(undoTarget.amount)} will be marked voided and added back to the pending balance.`
+                  : `This ${money(undoTarget.amount)} manual entry will be marked voided and removed from the pending balance.`}
+                {' '}The original entry is kept for the record — nothing is deleted.
+              </p>
+            )}
+            <Form.Group className="mb-3">
+              <Form.Label>Reason for undoing this <span className="text-danger">*</span></Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={2}
+                placeholder="e.g. entered by mistake, duplicate transaction"
+                value={undoReason}
+                onChange={(e) => setUndoReason(e.target.value)}
+                disabled={undoSubmitting}
+                autoFocus
+              />
+            </Form.Group>
+            {undoError && <Alert variant="danger" className="mb-0">{undoError}</Alert>}
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setUndoTarget(null)} disabled={undoSubmitting}>
+              Cancel
+            </Button>
+            <Button variant="danger" type="submit" disabled={undoSubmitting}>
+              {undoSubmitting ? <Spinner as="span" animation="border" size="sm" /> : 'Undo'}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
     </Container>
   );
 }
