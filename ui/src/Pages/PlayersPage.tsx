@@ -45,6 +45,9 @@ interface LedgerEntry {
   note:          string;
   createdAt:     { toDate: () => Date } | null;
   sessionId?:    string;
+  walletAdjustment?: boolean;
+  voided?:       boolean;
+  isReversal?:   boolean;
 }
 
 const INIT_BALANCE: BalanceAdjustment = { amount: '', reason: '', type: 'credit', includeInPayout: true };
@@ -234,6 +237,7 @@ export default function PlayersPage() {
           // change the club doesn't owe the owner (e.g. correcting an error).
           reason:        balanceAdjustment.includeInPayout ? 'manual' : 'manual-excluded',
           note:          balanceAdjustment.reason.trim(),
+          walletAdjustment: true, // this entry actually moves the player's prepaid balance
           createdAt:     serverTimestamp(),
         });
       });
@@ -319,8 +323,12 @@ export default function PlayersPage() {
   };
 
   // The Balance History shows prepaid-wallet movements only. e-Transfer/comp
-  // settlements never touch the wallet, so they belong in the payout ledger, not here.
-  const walletLedger = ledger.filter(e => e.reason !== 'payment' && e.reason !== 'comp');
+  // settlements never touch the wallet, so they belong in the payout ledger, not
+  // here — same for a custom payout transaction that's tied to a player only for
+  // record-keeping (walletAdjustment === false), since it never moves their balance.
+  const walletLedger = ledger.filter(e =>
+    e.reason !== 'payment' && e.reason !== 'comp' && e.walletAdjustment !== false
+  );
 
   return (
     <Container fluid className="mt-4 pb-4">
@@ -543,7 +551,7 @@ export default function PlayersPage() {
                       </thead>
                       <tbody>
                         {walletLedger.map(entry => (
-                          <tr key={entry.id} style={{ fontSize: 13 }}>
+                          <tr key={entry.id} style={{ fontSize: 13, opacity: entry.voided ? 0.5 : 1 }}>
                             <td className="text-muted">
                               {entry.createdAt?.toDate
                                 ? format(entry.createdAt.toDate(), 'MMM d, yy')
@@ -560,6 +568,9 @@ export default function PlayersPage() {
                               >
                                 {getDeltaLabel(entry.reason)}
                               </Badge>
+                              {entry.voided && (
+                                <Badge bg="secondary" style={{ fontSize: 9 }} className="ms-1">Undone</Badge>
+                              )}
                             </td>
                             <td className="text-muted" style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {entry.note}

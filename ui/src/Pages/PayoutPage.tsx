@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Container, Card, Button, Table, Spinner, Alert, Row, Col, Form, Badge } from 'react-bootstrap';
 import { format } from 'date-fns';
-import { fetchOwnerPayoutSummary, payOwner, addCustomPayoutTransaction } from '../services/firebase';
+import { fetchOwnerPayoutSummary, payOwner, addCustomPayoutTransaction, undoPayoutAdjustment, voidOwnerPayout } from '../services/firebase';
 import { useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
 import { selectIsClubAdmin } from '../features/club/clubSlice';
@@ -30,15 +30,21 @@ const ledgerTypeLabel = (type: PayoutLedgerEntry['type']) =>
 /**
  * Running total of what's owed to the owner, evaluated in true chronological order
  * (oldest → newest) regardless of how the table is currently sorted. Comps don't
- * count (the player paid the owner directly) and payouts reduce the balance.
+ * count (the player paid the owner directly) and payouts reduce the balance. A
+ * voided adjustment still counts here — its reversal entry (also in the ledger)
+ * cancels it out naturally — but a voided payout has no reversal row, so it's
+ * skipped entirely, matching how fetchOwnerPayoutSummary excludes it from totalPaid.
  */
 function computeRunningTotals(ledger: PayoutLedgerEntry[]): Map<string, number> {
   const chronological = [...ledger].sort((a, b) => a.date.getTime() - b.date.getTime());
   let running = 0;
   const totals = new Map<string, number>();
   for (const entry of chronological) {
-    if (entry.type === 'payout') running -= entry.amount;
-    else if (entry.type !== 'comp') running += entry.amount;
+    if (entry.type === 'payout') {
+      if (!entry.voided) running -= entry.amount;
+    } else if (entry.type !== 'comp') {
+      running += entry.amount;
+    }
     totals.set(`${entry.type}-${entry.id}`, running);
   }
   return totals;
@@ -70,6 +76,7 @@ export default function PayoutPage() {
   });
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
+  const [undoingId, setUndoingId] = useState<string | null>(null);
 
   const players = useAppSelector(selectAllPlayers);
   const playerName = useCallback((id: string | null) => {
@@ -237,6 +244,28 @@ export default function PayoutPage() {
       setTxError(err instanceof Error ? err.message : 'Failed to add transaction.');
     } finally {
       setTxSubmitting(false);
+    }
+  };
+
+  const handleUndo = async (entry: PayoutLedgerEntry) => {
+    const confirmMsg = entry.type === 'payout'
+      ? `Undo this payout of ${money(entry.amount)}? It will be marked voided and added back to the pending balance.`
+      : `Undo this adjustment of ${money(entry.amount)}? A reversal entry will be added.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setUndoingId(entry.id);
+    setError('');
+    try {
+      if (entry.type === 'payout') {
+        await voidOwnerPayout(entry.id);
+      } else {
+        await undoPayoutAdjustment(entry.id);
+      }
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to undo.');
+    } finally {
+      setUndoingId(null);
     }
   };
 
@@ -471,6 +500,7 @@ export default function PayoutPage() {
                           </span>
                         </th>
                       ))}
+                      <th style={{ whiteSpace: 'nowrap' }}>Actions</th>
                     </tr>
                     {showFilters && (
                       <tr className="table-light">
@@ -486,13 +516,14 @@ export default function PayoutPage() {
                             )}
                           </th>
                         ))}
+                        <th className="p-1 pb-2" />
                       </tr>
                     )}
                   </thead>
                   <tbody>
                     {paginatedLedger.length === 0 ? (
                       <tr>
-                        <td colSpan={LEDGER_COLUMNS.length} className="text-center text-muted py-4">
+                        <td colSpan={LEDGER_COLUMNS.length + 1} className="text-center text-muted py-4">
                           No entries match your search.
                         </td>
                       </tr>
@@ -500,7 +531,10 @@ export default function PayoutPage() {
                       paginatedLedger.map((entry) => {
                         const runningTotal = runningTotals.get(`${entry.type}-${entry.id}`) ?? 0;
                         return (
-                          <tr key={`${entry.type}-${entry.id}`}>
+                          <tr
+                            key={`${entry.type}-${entry.id}`}
+                            style={entry.voided ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}
+                          >
                             <td className="text-nowrap">{format(entry.date, 'MMM d, yyyy h:mm a')}</td>
                             <td className="text-nowrap">{entry.sessionDate ? format(entry.sessionDate, 'MMM d, yyyy') : <span className="text-muted">—</span>}</td>
                             <td>{playerName(entry.playerId) || <span className="text-muted">—</span>}</td>
@@ -514,10 +548,13 @@ export default function PayoutPage() {
                               ) : (
                                 <Badge bg="secondary">Adjustment</Badge>
                               )}
+                              {entry.voided && (
+                                <Badge bg="light" text="dark" className="ms-1">Voided</Badge>
+                              )}
                             </td>
                             <td
                               className="text-truncate"
-                              style={{ maxWidth: 220 }}
+                              style={{ maxWidth: 220, textDecoration: 'none' }}
                               title={entry.note || undefined}
                             >
                               {entry.note || <span className="text-muted">—</span>}
@@ -539,6 +576,22 @@ export default function PayoutPage() {
                               style={{ fontVariantNumeric: 'tabular-nums' }}
                             >
                               {moneySigned(runningTotal)}
+                            </td>
+                            <td className="text-end" style={{ textDecoration: 'none' }}>
+                              {entry.canUndo && (
+                                <Button
+                                  size="sm"
+                                  variant="outline-danger"
+                                  disabled={undoingId !== null}
+                                  onClick={() => handleUndo(entry)}
+                                >
+                                  {undoingId === entry.id ? (
+                                    <Spinner as="span" animation="border" size="sm" />
+                                  ) : (
+                                    'Undo'
+                                  )}
+                                </Button>
+                              )}
                             </td>
                           </tr>
                         );

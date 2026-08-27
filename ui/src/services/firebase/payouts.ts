@@ -6,9 +6,11 @@ import {
   query,
   where,
   serverTimestamp,
+  runTransaction,
+  increment,
   Timestamp,
 } from 'firebase/firestore';
-import { auth, refs } from './client';
+import { auth, refs, db } from './client';
 import { serviceCall, toJSDate } from './utils';
 import type {
   OwnerPayout,
@@ -41,6 +43,7 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
       ...(d.data() as {
         delta?: number; reason?: string; playerId?: string; note?: string;
         createdAt?: Timestamp; sessionId?: string | null;
+        voided?: boolean; isReversal?: boolean;
       }),
     }));
 
@@ -70,6 +73,12 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
         sessionId: l.sessionId ?? null,
         sessionDate: l.sessionId ? sessionDateById.get(l.sessionId) ?? null : null,
         note: l.note ?? '',
+        voided: !!l.voided,
+        // Only manual adjustments can be undone here — payments/comps are derived
+        // from a session's settlement state and are reversed by re-toggling it
+        // there, not by editing the ledger directly. A reversal entry can't itself
+        // be undone (that would just recreate the original).
+        canUndo: l.reason === 'manual' && !l.voided && !l.isReversal,
       };
     });
 
@@ -84,14 +93,23 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
         sessionId: null,
         sessionDate: null,
         note: p.note?.trim() ?? '',
+        voided: !!p.voided,
+        canUndo: !p.voided,
       };
     });
 
     // Comps are for record keeping only — they don't count toward what's owed.
+    // Voided entries aren't specially excluded here: an undone adjustment keeps its
+    // original (still-counted) amount, offset by its own reversal row, so the two
+    // net to zero automatically — same pattern the session-settlement toggles use.
     const totalCollected = collected
       .filter((e) => e.type !== 'comp')
       .reduce((sum, e) => sum + e.amount, 0);
-    const totalPaid = payouts.reduce((sum, e) => sum + e.amount, 0);
+    // Voided payouts, on the other hand, are simply excluded — there's no
+    // "reversal payout" concept, so a void just removes it from the total owed.
+    const totalPaid = payouts
+      .filter((e) => !e.voided)
+      .reduce((sum, e) => sum + e.amount, 0);
 
     const ledger = [...collected, ...payouts].sort(
       (a, b) => b.date.getTime() - a.date.getTime()
@@ -128,7 +146,98 @@ export async function addCustomPayoutTransaction(
       delta:     amount,
       reason:    'manual',
       note:      note.trim(),
+      walletAdjustment: false, // record-keeping only — never moves a player's balance
       createdAt: serverTimestamp(),
+    });
+  });
+}
+
+/**
+ * Undoes a manual payout-ledger adjustment (reason 'manual') — e.g. a custom
+ * transaction or a Players-page balance adjustment marked "include in payout".
+ * Rather than deleting the original (financial records are never destroyed here),
+ * this marks it `voided` for display and writes a new equal-and-opposite reversal
+ * entry, mirroring how session-settlement changes elsewhere in the app log a
+ * reversal instead of rewriting history. The original's (now-offset) amount and
+ * the reversal's amount net to zero in the payout total automatically. If the
+ * original actually moved a player's prepaid balance, the reversal moves it back.
+ */
+export async function undoPayoutAdjustment(entryId: string): Promise<void> {
+  return serviceCall('undoPayoutAdjustment', async () => {
+    const entryRef = doc(refs.balanceLedger, entryId);
+
+    await runTransaction(db, async (tx) => {
+      const entrySnap = await tx.get(entryRef);
+      if (!entrySnap.exists()) throw new Error('Transaction not found.');
+      const entry = entrySnap.data() as {
+        reason?: string; delta?: number; playerId?: string | null; note?: string;
+        voided?: boolean; isReversal?: boolean; walletAdjustment?: boolean;
+      };
+
+      if (entry.reason !== 'manual') {
+        throw new Error('Only manual adjustments can be undone here.');
+      }
+      if (entry.voided) throw new Error('This transaction has already been undone.');
+      if (entry.isReversal) throw new Error("A reversal entry can't itself be undone.");
+
+      const delta = entry.delta ?? 0;
+      const reversalRef = doc(refs.balanceLedger);
+      const reversalData: Record<string, unknown> = {
+        playerId:  entry.playerId ?? null,
+        sessionId: null,
+        delta:     -delta,
+        reason:    'manual',
+        note:      `Undo of "${entry.note ?? ''}"`,
+        walletAdjustment: false,
+        isReversal: true,
+        createdAt: serverTimestamp(),
+      };
+
+      // Only reverse the player's prepaid balance if the original entry actually
+      // moved it (a Players-page balance adjustment) — a custom payout
+      // transaction never touched the wallet, so there's nothing to reverse there.
+      if (entry.walletAdjustment && entry.playerId) {
+        const playerRef = doc(refs.players, entry.playerId);
+        const playerSnap = await tx.get(playerRef);
+        if (playerSnap.exists()) {
+          const before = playerSnap.data().balance ?? 0;
+          tx.update(playerRef, { balance: increment(-delta) });
+          reversalData.balanceBefore = before;
+          reversalData.balanceAfter = before - delta;
+          reversalData.walletAdjustment = true;
+        }
+      }
+
+      tx.set(reversalRef, reversalData);
+      tx.update(entryRef, {
+        voided:      true,
+        voidedAt:    serverTimestamp(),
+        voidedByUid: auth.currentUser?.uid ?? null,
+      });
+    });
+  });
+}
+
+/**
+ * Undoes a recorded payout to the owner. Unlike an adjustment, a payout has no
+ * natural "reversal" entry — it's simply marked `voided` (kept for the audit
+ * trail, shown struck-through) and excluded from the total paid, which increases
+ * the pending balance back up by the same amount.
+ */
+export async function voidOwnerPayout(payoutId: string): Promise<void> {
+  return serviceCall('voidOwnerPayout', async () => {
+    const payoutRef = doc(refs.payouts, payoutId);
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(payoutRef);
+      if (!snap.exists()) throw new Error('Payout not found.');
+      const data = snap.data() as OwnerPayout;
+      if (data.voided) throw new Error('This payout has already been undone.');
+
+      tx.update(payoutRef, {
+        voided:      true,
+        voidedAt:    serverTimestamp(),
+        voidedByUid: auth.currentUser?.uid ?? null,
+      });
     });
   });
 }

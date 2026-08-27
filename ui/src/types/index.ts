@@ -134,6 +134,9 @@ export interface OwnerPayout {
   paidByUid: string | null;
   date: Timestamp;            // when the payout was made
   createdAt: Timestamp;
+  voided?: boolean;           // true if this payout was undone — excluded from totalPaid
+  voidedAt?: Timestamp | null;
+  voidedByUid?: string | null;
 }
 
 // One row in the payout ledger: money collected from players (a payment or a manual
@@ -147,6 +150,8 @@ export interface PayoutLedgerEntry {
   sessionId: string | null;
   sessionDate: Date | null; // date of the session this entry is settling, if any
   note: string;
+  voided: boolean;   // true if this entry has been undone (shown struck-through, not double-counted)
+  canUndo: boolean;  // true if the Undo action applies to this row
 }
 
 export interface OwnerPayoutSummary {
@@ -249,6 +254,13 @@ export interface BalanceLedgerEntry {
   reason: string;
   note?: string;
   createdAt?: Timestamp;
+  // true when this entry actually moved the player's prepaid balance (e.g. the
+  // Players-page balance adjustment); false/absent for entries that only affect
+  // the owner payout total (e.g. a custom payout transaction) — those are
+  // excluded from the wallet-only Balance History view.
+  walletAdjustment?: boolean;
+  voided?: boolean;    // true if this entry was undone (kept for audit, excluded from balance history highlighting)
+  isReversal?: boolean; // true if this entry itself is the reversal of another (can't be undone again)
 }
 
 // users/{uid} — the signed-in user's global profile (their saved club list + default)
