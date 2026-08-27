@@ -34,16 +34,18 @@ const TYPE_VIEW_OPTIONS: { value: TypeView; label: string }[] = [
   { value: 'payment',    label: 'e-Transfer only' },
   { value: 'balance',    label: 'Balance only' },
   { value: 'comp',       label: 'Comp only' },
-  { value: 'adjustment', label: 'Adjustments only' },
+  { value: 'adjustment', label: 'Manual only' },
   { value: 'payout',     label: 'Payouts only' },
 ];
 
+// "Manual" matches the label already used on the Players page for this same
+// underlying reason ('manual') — keeping the wording consistent across the app.
 const ledgerTypeLabel = (type: PayoutLedgerEntry['type']) =>
   type === 'payout' ? 'Payout'
     : type === 'payment' ? 'Payment'
     : type === 'comp' ? 'Comp'
     : type === 'balance' ? 'Balance'
-    : 'Adjustment';
+    : 'Manual';
 
 // Entry types that never count toward what's owed to the owner: a comp was paid
 // to the owner directly, and a balance entry is a prepaid-wallet movement that
@@ -602,7 +604,7 @@ export default function PayoutPage() {
                               ) : entry.type === 'balance' ? (
                                 <Badge bg="warning" text="dark">Balance</Badge>
                               ) : (
-                                <Badge bg="secondary">Adjustment</Badge>
+                                <Badge bg="secondary">Manual</Badge>
                               )}
                               {entry.voided && (
                                 <Badge bg="light" text="dark" className="ms-1" title={entry.voidedNote || undefined}>
@@ -690,7 +692,7 @@ export default function PayoutPage() {
               <p className="text-muted">
                 {undoTarget.type === 'payout'
                   ? `This payout of ${money(undoTarget.amount)} will be marked voided and added back to the pending balance.`
-                  : `This ${money(undoTarget.amount)} adjustment will be marked voided and removed from the pending balance.`}
+                  : `This ${money(undoTarget.amount)} manual entry will be marked voided and removed from the pending balance.`}
                 {' '}The original entry is kept for the record — nothing is deleted.
               </p>
             )}
