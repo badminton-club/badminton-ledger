@@ -530,7 +530,7 @@ export default function PlayersPage() {
               {/* Balance history */}
               <Card className="mb-3">
                 <Card.Header><h5 className="mb-0">Balance History</h5></Card.Header>
-                <Card.Body style={{ maxHeight: 260, overflowY: 'auto' }}>
+                <Card.Body style={{ maxHeight: 400, overflowY: 'auto' }}>
                   {isLoadingLedger && (
                     <div className="text-center"><Spinner animation="border" size="sm" /></div>
                   )}
@@ -542,8 +542,10 @@ export default function PlayersPage() {
                     <Table size="sm" borderless className="mb-0">
                       <thead>
                         <tr className="small text-muted">
-                          <th title="When this entry was recorded (not necessarily the session date)">Recorded</th>
-                          <th>Type</th>
+                          <th title="When this entry was recorded (not necessarily the session date)" style={{ whiteSpace: 'nowrap' }}>
+                            Recorded
+                          </th>
+                          <th style={{ whiteSpace: 'nowrap' }}>Type</th>
                           <th>Note</th>
                           <th className="text-end">Change</th>
                           <th className="text-end">Balance</th>
@@ -552,12 +554,12 @@ export default function PlayersPage() {
                       <tbody>
                         {walletLedger.map(entry => (
                           <tr key={entry.id} style={{ fontSize: 13, opacity: entry.voided ? 0.5 : 1 }}>
-                            <td className="text-muted">
+                            <td className="text-muted text-nowrap">
                               {entry.createdAt?.toDate
-                                ? format(entry.createdAt.toDate(), 'MMM d, yy')
+                                ? format(entry.createdAt.toDate(), 'MMM d, yy h:mm a')
                                 : '—'}
                             </td>
-                            <td>
+                            <td className="text-nowrap">
                               <Badge
                                 bg={entry.reason === 'payment' ? 'success'
                                   : entry.reason === 'session_add' ? 'secondary'
@@ -579,13 +581,13 @@ export default function PlayersPage() {
                                 </Badge>
                               )}
                             </td>
-                            <td className="text-muted" style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <td className="text-muted" style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
                               {entry.note}
                             </td>
-                            <td className={`text-end ${entry.delta >= 0 ? 'text-success' : 'text-danger'}`}>
+                            <td className={`text-end text-nowrap ${entry.delta >= 0 ? 'text-success' : 'text-danger'}`}>
                               {entry.delta >= 0 ? '+' : ''}{entry.delta.toFixed(2)}
                             </td>
-                            <td className="text-end">
+                            <td className="text-end text-nowrap">
                               ${entry.balanceAfter.toFixed(2)}
                             </td>
                           </tr>
