@@ -718,7 +718,10 @@ export default function PlayersPage() {
                                                 >
                                                   {via === 'transfer' && payerName ? payerName : 'Paid by'}
                                                 </Dropdown.Toggle>
-                                                <Dropdown.Menu style={{ maxHeight: 320, overflowY: 'auto' }}>
+                                                <Dropdown.Menu
+                                                  style={{ maxHeight: '60vh', overflowY: 'auto' }}
+                                                  popperConfig={{ strategy: 'fixed' }}
+                                                >
                                                   <Dropdown.Header>Pay from another's balance</Dropdown.Header>
                                                   {otherPlayers.map(op => (
                                                     <Dropdown.Item
