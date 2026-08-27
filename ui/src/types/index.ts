@@ -57,6 +57,7 @@ export interface SessionPlayer {
   paidBy?: string | null; // when paidVia === 'transfer', the id of the player whose balance covered this cost
   comped?: boolean; // player settled directly with the owner — excluded from owner payout
   highlighted: boolean;
+  settledAt?: Timestamp | null; // when paid/comped status was last changed
 }
 
 export interface BirdieUsage {
@@ -142,6 +143,8 @@ export interface PayoutLedgerEntry {
   type: 'payment' | 'adjustment' | 'comp' | 'payout';
   amount: number;
   playerId: string | null;
+  sessionId: string | null;
+  sessionDate: Date | null; // date of the session this entry is settling, if any
   note: string;
 }
 

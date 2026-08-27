@@ -677,45 +677,52 @@ export default function PlayersPage() {
                                     handleSetPaidBy(s.id, payerId);
                                   };
                                   return (
-                                    <ButtonGroup size="sm" className="mt-1">
-                                      {settleOptions.map(o => (
-                                        <React.Fragment key={o.label}>
-                                          <Button
-                                            variant={via === o.method ? o.activeVariant : 'outline-secondary'}
-                                            style={{ fontSize: 11, padding: '1px 8px' }}
-                                            onClick={() => pick(o.method)}
-                                          >
-                                            {o.label}
-                                          </Button>
-                                          {o.method === null && otherPlayers.length > 0 && (
-                                            <Dropdown as={ButtonGroup} align="end">
-                                              <Dropdown.Toggle
-                                                variant={via === 'transfer' ? 'primary' : 'outline-secondary'}
-                                                style={{ fontSize: 11, padding: '1px 8px', maxWidth: 130 }}
-                                                className="text-truncate"
-                                                title="Pay these dues from another player's balance"
-                                              >
-                                                {via === 'transfer' && payerName ? payerName : 'Paid by'}
-                                              </Dropdown.Toggle>
-                                              <Dropdown.Menu style={{ maxHeight: 320, overflowY: 'auto' }}>
-                                                <Dropdown.Header>Pay from another's balance</Dropdown.Header>
-                                                {otherPlayers.map(op => (
-                                                  <Dropdown.Item
-                                                    key={op.id}
-                                                    active={via === 'transfer' && playerInSession.paidBy === op.id}
-                                                    onClick={() => pickPaidBy(op.id)}
-                                                    className="d-flex justify-content-between align-items-center gap-3"
-                                                  >
-                                                    <span>{op.name}</span>
-                                                    <span className="text-muted small">${op.balance.toFixed(2)}</span>
-                                                  </Dropdown.Item>
-                                                ))}
-                                              </Dropdown.Menu>
-                                            </Dropdown>
-                                          )}
-                                        </React.Fragment>
-                                      ))}
-                                    </ButtonGroup>
+                                    <>
+                                      <ButtonGroup size="sm" className="mt-1">
+                                        {settleOptions.map(o => (
+                                          <React.Fragment key={o.label}>
+                                            <Button
+                                              variant={via === o.method ? o.activeVariant : 'outline-secondary'}
+                                              style={{ fontSize: 11, padding: '1px 8px' }}
+                                              onClick={() => pick(o.method)}
+                                            >
+                                              {o.label}
+                                            </Button>
+                                            {o.method === null && otherPlayers.length > 0 && (
+                                              <Dropdown as={ButtonGroup} align="end">
+                                                <Dropdown.Toggle
+                                                  variant={via === 'transfer' ? 'primary' : 'outline-secondary'}
+                                                  style={{ fontSize: 11, padding: '1px 8px', maxWidth: 130 }}
+                                                  className="text-truncate"
+                                                  title="Pay these dues from another player's balance"
+                                                >
+                                                  {via === 'transfer' && payerName ? payerName : 'Paid by'}
+                                                </Dropdown.Toggle>
+                                                <Dropdown.Menu style={{ maxHeight: 320, overflowY: 'auto' }}>
+                                                  <Dropdown.Header>Pay from another's balance</Dropdown.Header>
+                                                  {otherPlayers.map(op => (
+                                                    <Dropdown.Item
+                                                      key={op.id}
+                                                      active={via === 'transfer' && playerInSession.paidBy === op.id}
+                                                      onClick={() => pickPaidBy(op.id)}
+                                                      className="d-flex justify-content-between align-items-center gap-3"
+                                                    >
+                                                      <span>{op.name}</span>
+                                                      <span className="text-muted small">${op.balance.toFixed(2)}</span>
+                                                    </Dropdown.Item>
+                                                  ))}
+                                                </Dropdown.Menu>
+                                              </Dropdown>
+                                            )}
+                                          </React.Fragment>
+                                        ))}
+                                      </ButtonGroup>
+                                      {playerInSession.settledAt && (via === 'comp' || playerInSession.paid) && (
+                                        <div className="text-muted" style={{ fontSize: 11 }}>
+                                          Updated {format(playerInSession.settledAt.toDate(), 'MMM d, yyyy h:mm a')}
+                                        </div>
+                                      )}
+                                    </>
                                   );
                                 })()}
                               </div>

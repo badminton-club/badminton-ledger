@@ -189,7 +189,8 @@ export default function PayoutPage() {
             <Table hover responsive size="sm" className="mb-0">
               <thead>
                 <tr>
-                  <th>Date</th>
+                  <th>Date Recorded</th>
+                  <th>Session Date</th>
                   <th>Player</th>
                   <th>Type</th>
                   <th>Note</th>
@@ -200,6 +201,7 @@ export default function PayoutPage() {
                 {summary.ledger.map((entry) => (
                   <tr key={`${entry.type}-${entry.id}`}>
                     <td>{format(entry.date, 'MMM d, yyyy')}</td>
+                    <td>{entry.sessionDate ? format(entry.sessionDate, 'MMM d, yyyy') : '—'}</td>
                     <td>{playerName(entry.playerId)}</td>
                     <td>
                       {entry.type === 'payout' ? (

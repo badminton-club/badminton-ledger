@@ -133,7 +133,7 @@ export async function addSession(data: NewSessionData): Promise<string> {
         const before = (playerDocs[i].data()?.balance as number) ?? 0;
         const coveredByBalance = before > 0 && player.cost > 0 && player.cost <= before;
         return coveredByBalance && !player.paid && !player.comped
-          ? { ...player, paid: true, paidVia: 'balance' as const }
+          ? { ...player, paid: true, paidVia: 'balance' as const, settledAt: Timestamp.now() }
           : player;
       });
 
@@ -308,7 +308,7 @@ export async function editSession(
         const before = (playerMap.get(player.id)?.data()?.balance as number) ?? 0;
         const coveredByBalance = before > 0 && player.cost > 0 && player.cost <= before;
         return coveredByBalance && !player.paid && !player.comped
-          ? { ...player, paid: true, paidVia: 'balance' as const }
+          ? { ...player, paid: true, paidVia: 'balance' as const, settledAt: Timestamp.now() }
           : player;
       });
 
@@ -512,7 +512,7 @@ export async function togglePlayerPaidStatus(
       // Paid and comped are mutually exclusive: marking paid clears any comp.
       const updatedPlayers = players.map(p =>
         p.id === playerId
-          ? { ...p, paid: nowPaid, paidVia: nextVia, comped: nowPaid ? false : (p.comped ?? false) }
+          ? { ...p, paid: nowPaid, paidVia: nextVia, comped: nowPaid ? false : (p.comped ?? false), settledAt: Timestamp.now() }
           : p
       );
       tx.update(sessionRef, { players: updatedPlayers });
@@ -577,7 +577,7 @@ export async function togglePlayerCompStatus(
       const currentVia: PaidVia = target.paidVia ?? (target.comped ? 'comp' : target.paid ? 'etransfer' : null);
       const updatedPlayers = players.map(p =>
         p.id === playerId
-          ? { ...p, comped: nowComped, paid: nowComped ? false : p.paid, paidVia: nowComped ? 'comp' as const : null }
+          ? { ...p, comped: nowComped, paid: nowComped ? false : p.paid, paidVia: nowComped ? 'comp' as const : null, settledAt: Timestamp.now() }
           : p
       );
       tx.update(sessionRef, { players: updatedPlayers });
@@ -686,10 +686,11 @@ export async function setPlayerSettlement(
         p.id === playerId
           ? {
               ...p,
-              paid:    method === 'etransfer' || method === 'balance',
-              comped:  method === 'comp',
-              paidVia: method,
-              paidBy:  null,
+              paid:      method === 'etransfer' || method === 'balance',
+              comped:    method === 'comp',
+              paidVia:   method,
+              paidBy:    null,
+              settledAt: Timestamp.now(),
             }
           : p
       );
@@ -829,7 +830,7 @@ export async function setPlayerPaidBy(
       // ── Mark the payee settled via transfer ─────────────────────────────────────
       const updatedPlayers = players.map(p =>
         p.id === playerId
-          ? { ...p, paid: true, comped: false, paidVia: 'transfer' as const, paidBy: payerId }
+          ? { ...p, paid: true, comped: false, paidVia: 'transfer' as const, paidBy: payerId, settledAt: Timestamp.now() }
           : p
       );
       tx.update(sessionRef, { players: updatedPlayers });

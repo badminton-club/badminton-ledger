@@ -1,5 +1,6 @@
 import {
   doc,
+  getDoc,
   setDoc,
   getDocs,
   query,
@@ -35,17 +36,39 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
       getDocs(refs.payouts),
     ]);
 
-    const collected: PayoutLedgerEntry[] = ledgerSnap.docs.map((d) => {
-      const l = d.data() as {
-        delta?: number; reason?: string; playerId?: string; note?: string; createdAt?: Timestamp;
-      };
+    const rawLedger = ledgerSnap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as {
+        delta?: number; reason?: string; playerId?: string; note?: string;
+        createdAt?: Timestamp; sessionId?: string | null;
+      }),
+    }));
+
+    // Payments/comps are tied to a session — fetch each referenced session once so
+    // the ledger can show which session date the entry is settling.
+    const sessionIds = [...new Set(
+      rawLedger.map((l) => l.sessionId).filter((id): id is string => !!id)
+    )];
+    const sessionDocs = await Promise.all(
+      sessionIds.map((id) => getDoc(doc(refs.sessions, id)))
+    );
+    const sessionDateById = new Map<string, Date>();
+    sessionDocs.forEach((snap, i) => {
+      if (!snap.exists()) return;
+      const sessionDate = toJSDate(snap.data().date);
+      if (sessionDate) sessionDateById.set(sessionIds[i], sessionDate);
+    });
+
+    const collected: PayoutLedgerEntry[] = rawLedger.map((l) => {
       const type = l.reason === 'payment' ? 'payment' : l.reason === 'comp' ? 'comp' : 'adjustment';
       return {
-        id: d.id,
+        id: l.id,
         date: toJSDate(l.createdAt) ?? new Date(0),
         type,
         amount: l.delta ?? 0,
         playerId: l.playerId ?? null,
+        sessionId: l.sessionId ?? null,
+        sessionDate: l.sessionId ? sessionDateById.get(l.sessionId) ?? null : null,
         note: l.note ?? '',
       };
     });
@@ -58,6 +81,8 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
         type: 'payout' as const,
         amount: p.amount ?? 0,
         playerId: null,
+        sessionId: null,
+        sessionDate: null,
         note: p.note?.trim() ?? '',
       };
     });

@@ -145,6 +145,7 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
         paidBy:      existing?.paidBy ?? null,
         comped:      existing?.comped ?? false,
         highlighted: existing?.highlighted ?? false,
+        settledAt:   existing?.settledAt ?? null,
       };
     });
   }, [confirmedPlayers, totalSessionCost, session]);
