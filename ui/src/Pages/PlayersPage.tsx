@@ -542,7 +542,7 @@ export default function PlayersPage() {
                     <Table size="sm" borderless className="mb-0">
                       <thead>
                         <tr className="small text-muted">
-                          <th>Date</th>
+                          <th title="When this entry was recorded (not necessarily the session date)">Recorded</th>
                           <th>Type</th>
                           <th>Note</th>
                           <th className="text-end">Change</th>

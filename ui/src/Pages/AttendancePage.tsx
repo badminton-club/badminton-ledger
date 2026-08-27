@@ -218,7 +218,7 @@ export default function AttendancePage() {
                 <Table hover striped responsive size="sm" className="align-middle mb-0">
                   <thead>
                     <tr className="table-light">
-                      <th>Date</th>
+                      <th title="When this entry was recorded (not necessarily the session date)">Recorded</th>
                       <th>Type</th>
                       <th>Note</th>
                       <th className="text-end">Amount</th>

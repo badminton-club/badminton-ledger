@@ -643,6 +643,11 @@ export async function setPlayerSettlement(
         target.paidVia ?? (target.comped ? 'comp' : target.paid ? 'etransfer' : null);
       if (currentVia === method) return; // no change
 
+      // Included in the wallet-movement notes below so they read the same way as
+      // the "Session on {date}" note logged when a session is first created —
+      // both represent a balance draw/refund for the same session.
+      const sessionDate = toJSDate(sessionSnap.data().date)?.toLocaleDateString();
+
       // Leaving a 'transfer' refunds the *payer* (not the payee), so read them too.
       const oldPayerId = currentVia === 'transfer' ? (target.paidBy ?? null) : null;
       const [playerSnap, oldPayerSnap] = await Promise.all([
@@ -676,8 +681,12 @@ export async function setPlayerSettlement(
       else if (method === 'comp')  logPayout(cost, 'comp', 'Comped — player paid owner directly');
 
       // The prepaid wallet only moves for the 'balance' method.
-      if (currentVia === 'balance') logWallet(cost, 'settlement', 'Refunded prepaid balance');
-      if (method === 'balance')     logWallet(-cost, 'settlement', 'Settled from prepaid balance');
+      if (currentVia === 'balance') {
+        logWallet(cost, 'settlement', `Refunded prepaid balance — session on ${sessionDate}`);
+      }
+      if (method === 'balance') {
+        logWallet(-cost, 'settlement', `Settled from prepaid balance — session on ${sessionDate}`);
+      }
 
       // Session debt is owed only while unsettled (paidVia === null).
       const owedDelta = (method === null ? cost : 0) - (currentVia === null ? cost : 0);
@@ -713,7 +722,7 @@ export async function setPlayerSettlement(
           balanceBefore: payerBefore,
           balanceAfter:  payerBefore + cost,
           reason:        'settlement',
-          note:          'Refunded — no longer covering another player',
+          note:          `Refunded — no longer covering another player — session on ${sessionDate}`,
           createdAt:     serverTimestamp(),
         });
       }
@@ -754,6 +763,10 @@ export async function setPlayerPaidBy(
       const oldPayerId = currentVia === 'transfer' ? (target.paidBy ?? null) : null;
       if (currentVia === 'transfer' && oldPayerId === payerId) return; // no change
 
+      // Included in the wallet-movement notes below so they read the same way as
+      // the "Session on {date}" note logged when a session is first created.
+      const sessionDate = toJSDate(sessionSnap.data().date)?.toLocaleDateString();
+
       const oldPayerRef = oldPayerId && oldPayerId !== payerId ? doc(refs.players, oldPayerId) : null;
       const [payeeSnap, payerSnap, oldPayerSnap] = await Promise.all([
         tx.get(payeeRef),
@@ -787,7 +800,7 @@ export async function setPlayerPaidBy(
           balanceBefore: payeeBefore,
           balanceAfter:  payeeBefore + cost,
           reason:        'settlement',
-          note:          'Refunded prepaid balance',
+          note:          `Refunded prepaid balance — session on ${sessionDate}`,
           createdAt:     serverTimestamp(),
         });
       }
@@ -803,7 +816,7 @@ export async function setPlayerPaidBy(
           balanceBefore: p,
           balanceAfter:  p + cost,
           reason:        'settlement',
-          note:          'Refunded — no longer covering another player',
+          note:          `Refunded — no longer covering another player — session on ${sessionDate}`,
           createdAt:     serverTimestamp(),
         });
       }
@@ -823,7 +836,7 @@ export async function setPlayerPaidBy(
         balanceBefore: payerBefore,
         balanceAfter:  payerBefore - cost,
         reason:        'session',
-        note:          `Covered ${payeeName}'s dues`,
+        note:          `Covered ${payeeName}'s dues — session on ${sessionDate}`,
         createdAt:     serverTimestamp(),
       });
 
