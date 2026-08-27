@@ -3,6 +3,10 @@ import { Container, Card, Button, Alert, ListGroup, Badge, Form, InputGroup, Spi
 import type { User } from 'firebase/auth';
 import {
   signInWithGoogle,
+  signUpWithEmail,
+  signInWithEmail,
+  sendPasswordReset,
+  resendVerificationEmail,
   signOutUser,
   onAuthStateChangedListener,
   fetchUserClubs,
@@ -17,6 +21,29 @@ import {
   setClubs,
   setCurrentClub,
 } from '../features/club/clubSlice';
+
+// Maps common Firebase Auth error codes to messages a user can actually act on.
+function mapAuthError(err: unknown): string {
+  const code = (err as { code?: string })?.code;
+  switch (code) {
+    case 'auth/email-already-in-use':
+      return 'That email already has an account — try signing in instead.';
+    case 'auth/invalid-email':
+      return 'Enter a valid email address.';
+    case 'auth/weak-password':
+      return 'Password should be at least 6 characters.';
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'Incorrect email or password.';
+    case 'auth/too-many-requests':
+      return 'Too many attempts — please wait a bit and try again.';
+    case 'auth/operation-not-allowed':
+      return 'Email/password sign-in isn\'t enabled for this project yet — ask an admin to enable it in the Firebase console.';
+    default:
+      return err instanceof Error ? err.message : 'Something went wrong.';
+  }
+}
 
 // Accepts a full club link (…?club=abc), a query fragment, or a raw club id.
 function parseClubId(input: string): string | null {
@@ -52,6 +79,19 @@ export default function AuthPage() {
   const [setupError, setSetupError] = useState('');
   const [setupDone, setSetupDone] = useState('');
 
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [emailInput, setEmailInput] = useState('');
+  const [usernameInput, setUsernameInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [emailAuthBusy, setEmailAuthBusy] = useState(false);
+  const [emailAuthError, setEmailAuthError] = useState('');
+  const [resetSent, setResetSent] = useState('');
+
+  const [resendBusy, setResendBusy] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
+  const [resendError, setResendError] = useState('');
+
   useEffect(() => {
     const unsubscribe = onAuthStateChangedListener(setUser);
     return () => unsubscribe();
@@ -70,12 +110,92 @@ export default function AuthPage() {
     }
   };
 
+  const resetEmailAuthForm = () => {
+    setEmailAuthError('');
+    setResetSent('');
+    setPasswordInput('');
+    setConfirmPasswordInput('');
+  };
+
+  const handleEmailSignUp = async () => {
+    setEmailAuthError('');
+    setResetSent('');
+    const email = emailInput.trim();
+    const username = usernameInput.trim();
+    if (!email) { setEmailAuthError('Enter your email.'); return; }
+    if (!username) { setEmailAuthError('Enter a username.'); return; }
+    if (passwordInput.length < 6) { setEmailAuthError('Password should be at least 6 characters.'); return; }
+    if (passwordInput !== confirmPasswordInput) { setEmailAuthError('Passwords do not match.'); return; }
+
+    setEmailAuthBusy(true);
+    try {
+      await signUpWithEmail(email, username, passwordInput);
+    } catch (err) {
+      setEmailAuthError(mapAuthError(err));
+    } finally {
+      setEmailAuthBusy(false);
+    }
+  };
+
+  const handleEmailSignIn = async () => {
+    setEmailAuthError('');
+    setResetSent('');
+    const email = emailInput.trim();
+    if (!email) { setEmailAuthError('Enter your email.'); return; }
+    if (!passwordInput) { setEmailAuthError('Enter your password.'); return; }
+
+    setEmailAuthBusy(true);
+    try {
+      await signInWithEmail(email, passwordInput);
+    } catch (err) {
+      setEmailAuthError(mapAuthError(err));
+    } finally {
+      setEmailAuthBusy(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setEmailAuthError('');
+    setResetSent('');
+    const email = emailInput.trim();
+    if (!email) { setEmailAuthError('Enter your email above first, then click "Forgot password?" again.'); return; }
+
+    setEmailAuthBusy(true);
+    try {
+      await sendPasswordReset(email);
+    } catch (err) {
+      // Doesn't matter whether the address is registered — always show the same
+      // message, so this can't be used to test which emails have accounts.
+      const code = (err as { code?: string })?.code;
+      if (code !== 'auth/user-not-found' && code !== 'auth/invalid-email') {
+        setEmailAuthError(mapAuthError(err));
+        setEmailAuthBusy(false);
+        return;
+      }
+    }
+    setResetSent(`If an account exists for ${email}, a password reset link has been sent.`);
+    setEmailAuthBusy(false);
+  };
+
   const handleSignOut = async () => {
     setError('');
     try {
       await signOutUser();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign-out failed.');
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setResendError('');
+    setResendBusy(true);
+    try {
+      await resendVerificationEmail();
+      setResendSent(true);
+    } catch (err) {
+      setResendError(err instanceof Error ? err.message : 'Failed to resend verification email.');
+    } finally {
+      setResendBusy(false);
     }
   };
 
@@ -154,13 +274,116 @@ export default function AuthPage() {
               <Button variant="outline-secondary" onClick={handleSignOut}>
                 Sign out
               </Button>
+              {user.providerData?.some((p) => p.providerId === 'password') && !user.emailVerified && (
+                <Alert variant="warning" className="mt-3 mb-0 text-start py-2">
+                  Please verify your email address ({user.email}) — check your inbox for the link we sent.
+                  <div className="mt-2">
+                    <Button
+                      variant="outline-secondary"
+                      size="sm"
+                      onClick={handleResendVerification}
+                      disabled={resendBusy}
+                    >
+                      {resendBusy ? <Spinner size="sm" animation="border" /> : 'Resend verification email'}
+                    </Button>
+                    {resendSent && <span className="text-success small ms-2">Sent!</span>}
+                  </div>
+                  {resendError && <div className="text-danger small mt-1">{resendError}</div>}
+                </Alert>
+              )}
             </>
           ) : (
             <>
               <p className="mb-3">You are not signed in.</p>
-              <Button variant="primary" onClick={handleSignIn}>
+              <Button variant="primary" onClick={handleSignIn} className="w-100">
                 Sign in with Google
               </Button>
+
+              <div className="d-flex align-items-center my-3">
+                <hr className="flex-grow-1" />
+                <span className="text-muted small mx-2">or</span>
+                <hr className="flex-grow-1" />
+              </div>
+
+              <Form
+                className="text-start"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (authMode === 'signup') handleEmailSignUp(); else handleEmailSignIn();
+                }}
+              >
+                {authMode === 'signup' && (
+                  <Form.Group className="mb-2" controlId="auth-email-username">
+                    <Form.Label>Username</Form.Label>
+                    <Form.Control
+                      value={usernameInput}
+                      onChange={(e) => setUsernameInput(e.target.value)}
+                      disabled={emailAuthBusy}
+                    />
+                  </Form.Group>
+                )}
+                <Form.Group className="mb-2" controlId="auth-email-email">
+                  <Form.Label>Email</Form.Label>
+                  <Form.Control
+                    type="email"
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    disabled={emailAuthBusy}
+                  />
+                </Form.Group>
+                <Form.Group className="mb-2" controlId="auth-email-password">
+                  <Form.Label>Password</Form.Label>
+                  <Form.Control
+                    type="password"
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    disabled={emailAuthBusy}
+                  />
+                </Form.Group>
+                {authMode === 'signup' && (
+                  <Form.Group className="mb-2" controlId="auth-email-confirm-password">
+                    <Form.Label>Confirm password</Form.Label>
+                    <Form.Control
+                      type="password"
+                      value={confirmPasswordInput}
+                      onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                      disabled={emailAuthBusy}
+                    />
+                  </Form.Group>
+                )}
+                <Button variant="outline-primary" type="submit" className="w-100" disabled={emailAuthBusy}>
+                  {emailAuthBusy
+                    ? <Spinner size="sm" animation="border" />
+                    : (authMode === 'signup' ? 'Create account' : 'Sign in')}
+                </Button>
+                <div className="d-flex justify-content-between align-items-center mt-2">
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="p-0"
+                    disabled={emailAuthBusy}
+                    onClick={() => {
+                      setAuthMode(authMode === 'signup' ? 'signin' : 'signup');
+                      resetEmailAuthForm();
+                    }}
+                  >
+                    {authMode === 'signup' ? 'Already have an account? Sign in' : 'Need an account? Sign up'}
+                  </Button>
+                  {authMode === 'signin' && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="p-0"
+                      onClick={handleForgotPassword}
+                      disabled={emailAuthBusy}
+                    >
+                      Forgot password?
+                    </Button>
+                  )}
+                </div>
+                {emailAuthError && <Alert variant="danger" className="mt-2 mb-0 py-2">{emailAuthError}</Alert>}
+                {resetSent && <Alert variant="success" className="mt-2 mb-0 py-2">{resetSent}</Alert>}
+              </Form>
             </>
           )}
           {error && (

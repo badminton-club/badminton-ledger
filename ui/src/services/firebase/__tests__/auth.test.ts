@@ -1,7 +1,22 @@
 import * as firestore from 'firebase/firestore';
 import { auth } from '../client';
-import { signInWithGoogle, signOutUser, onAuthStateChangedListener, checkIfAdmin } from '../auth';
+import {
+  signInWithGoogle,
+  signOutUser,
+  onAuthStateChangedListener,
+  checkIfAdmin,
+  signUpWithEmail,
+  signInWithEmail,
+  resendVerificationEmail,
+  sendPasswordReset,
+} from '../auth';
 import { resetFirebaseTestState, seedMemberDoc, setCurrentUser, TEST_CLUB_ID } from '../../../test-utils/firebaseTestHelpers';
+import {
+  __getVerificationEmailsSent,
+  __getPasswordResetsSent,
+  __registerAccount,
+  __markEmailVerified,
+} from '../../../test-utils/fakeAuth';
 
 const adminUser = { uid: 'admin-1', displayName: 'Admin One', email: 'admin@example.com' };
 const memberUser = { uid: 'member-1', displayName: 'Member One', email: 'member@example.com' };
@@ -92,5 +107,96 @@ describe('checkIfAdmin', () => {
 
     await expect(checkIfAdmin(TEST_CLUB_ID)).resolves.toBe(false);
     expect(consoleSpy).toHaveBeenCalledWith('[checkIfAdmin]', error);
+  });
+});
+
+describe('signUpWithEmail', () => {
+  it('creates an account, sets the display name to the given username, and sends a verification email', async () => {
+    const user = await signUpWithEmail('jamie@example.com', 'JamieL', 'hunter22');
+
+    expect(user.email).toBe('jamie@example.com');
+    expect(user.displayName).toBe('JamieL');
+    expect(user.emailVerified).toBe(false);
+    expect(auth.currentUser?.uid).toBe(user.uid); // signed in immediately
+    expect(__getVerificationEmailsSent()).toEqual(['jamie@example.com']);
+  });
+
+  it('rejects a duplicate email with auth/email-already-in-use', async () => {
+    await signUpWithEmail('jamie@example.com', 'JamieL', 'hunter22');
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(signUpWithEmail('jamie@example.com', 'Someone', 'hunter22'))
+      .rejects.toMatchObject({ code: 'auth/email-already-in-use' });
+    consoleSpy.mockRestore();
+  });
+
+  it('rejects a too-short password with auth/weak-password', async () => {
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(signUpWithEmail('jamie@example.com', 'JamieL', '123'))
+      .rejects.toMatchObject({ code: 'auth/weak-password' });
+    consoleSpy.mockRestore();
+  });
+});
+
+describe('signInWithEmail', () => {
+  it('signs in a registered account with the correct password', async () => {
+    __registerAccount('jamie@example.com', 'hunter22', 'JamieL');
+
+    const user = await signInWithEmail('jamie@example.com', 'hunter22');
+
+    expect(user.email).toBe('jamie@example.com');
+    expect(auth.currentUser?.uid).toBe(user.uid);
+  });
+
+  it('rejects an unregistered email or wrong password with auth/invalid-credential', async () => {
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(signInWithEmail('nobody@example.com', 'whatever'))
+      .rejects.toMatchObject({ code: 'auth/invalid-credential' });
+
+    __registerAccount('jamie@example.com', 'hunter22');
+    await expect(signInWithEmail('jamie@example.com', 'wrong-password'))
+      .rejects.toMatchObject({ code: 'auth/invalid-credential' });
+    consoleSpy.mockRestore();
+  });
+});
+
+describe('resendVerificationEmail', () => {
+  it('sends another verification email to the signed-in user', async () => {
+    await signUpWithEmail('jamie@example.com', 'JamieL', 'hunter22');
+
+    await resendVerificationEmail();
+
+    expect(__getVerificationEmailsSent()).toEqual(['jamie@example.com', 'jamie@example.com']);
+  });
+
+  it('throws when no one is signed in', async () => {
+    await expect(resendVerificationEmail()).rejects.toThrow('You must be signed in.');
+  });
+});
+
+describe('sendPasswordReset', () => {
+  it('sends a reset email for a registered address', async () => {
+    __registerAccount('jamie@example.com', 'hunter22');
+
+    await sendPasswordReset('jamie@example.com');
+
+    expect(__getPasswordResetsSent()).toEqual(['jamie@example.com']);
+  });
+
+  it('throws auth/user-not-found for an unregistered address', async () => {
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(sendPasswordReset('nobody@example.com')).rejects.toMatchObject({ code: 'auth/user-not-found' });
+    consoleSpy.mockRestore();
+  });
+});
+
+describe('__markEmailVerified (test helper sanity check)', () => {
+  it('flips emailVerified on the account and, if currently signed in, on auth.currentUser too', async () => {
+    const user = await signUpWithEmail('jamie@example.com', 'JamieL', 'hunter22');
+    expect(user.emailVerified).toBe(false);
+
+    __markEmailVerified('jamie@example.com');
+
+    expect(auth.currentUser?.emailVerified).toBe(true);
   });
 });

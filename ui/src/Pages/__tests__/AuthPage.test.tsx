@@ -10,6 +10,7 @@ import {
   setCurrentUser,
 } from '../../test-utils/firebaseTestHelpers';
 import { __getDocData } from '../../test-utils/fakeFirestore';
+import { __registerAccount, __getVerificationEmailsSent, __getPasswordResetsSent } from '../../test-utils/fakeAuth';
 import { signInWithGoogle } from '../../services/firebase';
 
 jest.mock('../../services/firebase', () => ({
@@ -144,5 +145,98 @@ describe('AuthPage', () => {
 
     expect(await screen.findByText('Enter a club name.')).toBeInTheDocument();
     expect(__getDocData('clubs/')).toBeUndefined();
+  });
+
+  it('signs up with email/username/password, showing the emailVerified reminder banner afterward', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: 'Need an account? Sign up' }));
+    await user.type(screen.getByLabelText('Username'), 'JamieL');
+    await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
+    await user.type(screen.getByLabelText('Password'), 'hunter22');
+    await user.type(screen.getByLabelText('Confirm password'), 'hunter22');
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+
+    expect(await screen.findByText(/Signed in as/)).toHaveTextContent('JamieL');
+    expect(__getVerificationEmailsSent()).toEqual(['jamie@example.com']);
+    expect(await screen.findByText(/Please verify your email address/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Resend verification email' }));
+    expect(await screen.findByText('Sent!')).toBeInTheDocument();
+    expect(__getVerificationEmailsSent()).toHaveLength(2);
+  });
+
+  it('shows a validation error when sign-up passwords do not match', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: 'Need an account? Sign up' }));
+    await user.type(screen.getByLabelText('Username'), 'JamieL');
+    await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
+    await user.type(screen.getByLabelText('Password'), 'hunter22');
+    await user.type(screen.getByLabelText('Confirm password'), 'different');
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+
+    expect(await screen.findByText('Passwords do not match.')).toBeInTheDocument();
+  });
+
+  it('rejects signing up with an email that already has an account', async () => {
+    const user = userEvent.setup();
+    __registerAccount('jamie@example.com', 'hunter22');
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: 'Need an account? Sign up' }));
+    await user.type(screen.getByLabelText('Username'), 'JamieL');
+    await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
+    await user.type(screen.getByLabelText('Password'), 'hunter22');
+    await user.type(screen.getByLabelText('Confirm password'), 'hunter22');
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+
+    expect(await screen.findByText(/already has an account/)).toBeInTheDocument();
+  });
+
+  it('signs in with an existing email/password account', async () => {
+    const user = userEvent.setup();
+    __registerAccount('jamie@example.com', 'hunter22', 'JamieL');
+    renderPage();
+
+    await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
+    await user.type(screen.getByLabelText('Password'), 'hunter22');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(await screen.findByText(/Signed in as/)).toHaveTextContent('JamieL');
+  });
+
+  it('shows an error for an incorrect email/password combination', async () => {
+    const user = userEvent.setup();
+    __registerAccount('jamie@example.com', 'hunter22');
+    renderPage();
+
+    await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
+    await user.type(screen.getByLabelText('Password'), 'wrong-password');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(await screen.findByText('Incorrect email or password.')).toBeInTheDocument();
+  });
+
+  it('sends a password-reset email via "Forgot password?", with an enumeration-safe message either way', async () => {
+    const user = userEvent.setup();
+    __registerAccount('jamie@example.com', 'hunter22');
+    renderPage();
+
+    await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
+    await user.click(screen.getByRole('button', { name: 'Forgot password?' }));
+
+    expect(await screen.findByText(/password reset link has been sent/)).toBeInTheDocument();
+    expect(__getPasswordResetsSent()).toEqual(['jamie@example.com']);
+
+    // An unregistered email shows the exact same message — doesn't reveal whether the account exists.
+    await user.clear(screen.getByLabelText('Email'));
+    await user.type(screen.getByLabelText('Email'), 'nobody@example.com');
+    await user.click(screen.getByRole('button', { name: 'Forgot password?' }));
+
+    expect(await screen.findByText(/password reset link has been sent/)).toBeInTheDocument();
+    expect(__getPasswordResetsSent()).toEqual(['jamie@example.com']); // unchanged — nothing actually sent
   });
 });
