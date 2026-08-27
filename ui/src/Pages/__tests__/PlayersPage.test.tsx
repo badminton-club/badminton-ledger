@@ -11,7 +11,7 @@ import {
   TEST_CLUB_ID,
   ts,
 } from '../../test-utils/firebaseTestHelpers';
-import { Timestamp } from '../../test-utils/fakeFirestore';
+import { __seedDoc, __getDocData, Timestamp } from '../../test-utils/fakeFirestore';
 import {
   makeClubState,
   makePlayersState,
@@ -429,6 +429,21 @@ describe('PlayersPage', () => {
     expect(await screen.findAllByText('Grace Hopper')).toHaveLength(2);
     expect(await screen.findByText('No balance history yet.')).toBeInTheDocument();
     expect(screen.getByText('Regular guest')).toBeInTheDocument();
+  });
+
+  it('removes a player and unlinks any member who was linked to them', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', firstName: 'Jamie', lastName: 'Lee' })];
+    __seedDoc(`clubs/${TEST_CLUB_ID}/members/member-1`, { role: 'member', playerId: 'p1' });
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    await user.click(screen.getByRole('button', { name: 'Remove Player' }));
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => expect(getClubDocData('players', 'p1')).toBeUndefined());
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}/members/member-1`)).toMatchObject({ role: 'member', playerId: null });
   });
 
   it('does not itself gate balance-adjustment controls by role (protection lives one level up)', async () => {

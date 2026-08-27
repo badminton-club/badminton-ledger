@@ -6,8 +6,9 @@ import {
   query,
   where,
   serverTimestamp,
+  writeBatch,
 } from 'firebase/firestore';
-import { refs } from './client';
+import { db, refs, getCurrentClubId, membersRef, profileEditRequestsRef } from './client';
 import { serviceCall } from './utils';
 import type { Player, NewPlayerInput } from 'types';
 
@@ -95,5 +96,32 @@ export async function updatePlayerProfile(
       lastNameLower:  input.lastName ? input.lastName.toLowerCase() : null,
       email:          input.email ?? null,
     });
+  });
+}
+
+/**
+ * Deletes a player and cleans up everything that might otherwise dangle:
+ *  - any member(s) linked to this player are unlinked (playerId -> null),
+ *    so a member never ends up pointing at a deleted player (which would
+ *    make later actions like approving a pending profile-edit request fail
+ *    with a raw "No document to update" error)
+ *  - any pending profile-edit request for this player is removed, since
+ *    there's nothing left to apply it to
+ */
+export async function deletePlayer(playerId: string): Promise<void> {
+  return serviceCall('deletePlayer', async () => {
+    const clubId = getCurrentClubId();
+    if (!clubId) throw new Error('No club selected — set a current club before deleting a player.');
+
+    const [memberSnap, editRequestSnap] = await Promise.all([
+      getDocs(query(membersRef(clubId), where('playerId', '==', playerId))),
+      getDocs(query(profileEditRequestsRef(clubId), where('playerId', '==', playerId))),
+    ]);
+
+    const batch = writeBatch(db);
+    memberSnap.docs.forEach((d) => batch.update(d.ref, { playerId: null }));
+    editRequestSnap.docs.forEach((d) => batch.delete(d.ref));
+    batch.delete(doc(refs.players, playerId));
+    await batch.commit();
   });
 }

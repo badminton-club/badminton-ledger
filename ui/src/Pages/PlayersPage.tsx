@@ -15,10 +15,10 @@ import { getMonthYear } from '../utils/dateUtils';
 import AddPlayerModal from '../components/AddPlayerModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { db, refs, setPlayerSettlement, setPlayerPaidBy } from '../services/firebase';
-import { addPlayer, updatePlayerProfile } from '../services/firebase/players';
+import { addPlayer, updatePlayerProfile, deletePlayer } from '../services/firebase/players';
 import {
   query, where, getDocs, orderBy,
-  doc, runTransaction, increment, serverTimestamp, deleteDoc,
+  doc, runTransaction, increment, serverTimestamp,
 } from 'firebase/firestore';
 import { useAppSelector } from '../hooks';
 import {
@@ -256,7 +256,7 @@ export default function PlayersPage() {
     setIsDeletingPlayer(true);
     setDeleteError('');
     try {
-      await deleteDoc(doc(refs.players, selectedPlayer.id));
+      await deletePlayer(selectedPlayer.id);
       setSelectedPlayerId(null);
       setShowDeleteConfirm(false);
     } catch (err: unknown) {

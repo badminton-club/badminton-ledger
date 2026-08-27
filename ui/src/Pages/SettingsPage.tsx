@@ -255,6 +255,16 @@ export default function SettingsPage() {
     setEditRequestsError('');
     setProcessingEditReq(req.uid);
     try {
+      // The linked player may have since been deleted (e.g. by an admin
+      // cleaning up test/duplicate data) — updatePlayerProfile would otherwise
+      // throw a raw "No document to update" Firestore error. Detect it up
+      // front and just clear the now-unfulfillable request instead.
+      if (!players.some((p) => p.id === req.playerId)) {
+        await deleteProfileEditRequest(clubId, req.uid);
+        await loadEditRequests();
+        setEditRequestsError('That player no longer exists, so this request was dismissed automatically.');
+        return;
+      }
       await updatePlayerProfile(req.playerId, { firstName: req.firstName, lastName: req.lastName, email: req.email });
       await deleteProfileEditRequest(clubId, req.uid);
       await loadEditRequests();

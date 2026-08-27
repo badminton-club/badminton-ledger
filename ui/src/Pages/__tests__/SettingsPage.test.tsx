@@ -281,6 +281,29 @@ describe('SettingsPage', () => {
     });
   });
 
+  it('auto-dismisses an edit request whose player was already deleted, with a friendly message instead of a raw Firestore error', async () => {
+    const user = userEvent.setup();
+    // No matching player in the `players` list — simulates one deleted after the request was submitted.
+    __seedDoc(`clubs/${TEST_CLUB_ID}/profileEditRequests/requester-5`, {
+      uid: 'requester-5',
+      playerId: 'deleted-player',
+      firstName: 'Ghost',
+      lastName: null,
+      email: null,
+      createdAt: ts('2026-05-03T00:00:00.000Z'),
+    });
+
+    renderPage({ role: 'admin', players: [] });
+
+    const requestRow = (await screen.findByText('Ghost', { selector: 'strong' })).closest('.list-group-item') as HTMLElement;
+    await user.click(within(requestRow).getByRole('button', { name: 'Approve' }));
+
+    expect(await screen.findByText(/no longer exists/)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(__getDocData(`clubs/${TEST_CLUB_ID}/profileEditRequests/requester-5`)).toBeUndefined();
+    });
+  });
+
   it('dismisses a pending profile-edit request without changing the player', async () => {
     const user = userEvent.setup();
     const players = [makePlayer({ id: 'p1', firstName: 'Jamie', lastName: 'Lee', email: 'jamie@example.com' })];

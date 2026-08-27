@@ -1,5 +1,6 @@
 import {
   addPlayer,
+  deletePlayer,
   findPlayersByName,
   formatPlayerName,
   updatePlayerProfile,
@@ -10,7 +11,7 @@ import {
   seedClubDoc,
   TEST_CLUB_ID,
 } from '../../../test-utils/firebaseTestHelpers';
-import { __getAllPaths, Timestamp } from '../../../test-utils/fakeFirestore';
+import { __getAllPaths, __getDocData, __seedDoc, Timestamp } from '../../../test-utils/fakeFirestore';
 
 beforeEach(() => {
   resetFirebaseTestState();
@@ -260,5 +261,41 @@ describe('updatePlayerProfile', () => {
       description: '',
       sessionCount: 1,
     });
+  });
+});
+
+describe('deletePlayer', () => {
+  it('deletes the player and unlinks any members pointing at them', async () => {
+    seedClubDoc('players', 'p1', { firstName: 'Jamie' });
+    __seedDoc(`clubs/${TEST_CLUB_ID}/members/member-1`, { role: 'member', playerId: 'p1' });
+    __seedDoc(`clubs/${TEST_CLUB_ID}/members/member-2`, { role: 'member', playerId: 'p2' }); // unrelated — must survive untouched
+
+    await deletePlayer('p1');
+
+    expect(getClubDocData('players', 'p1')).toBeUndefined();
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}/members/member-1`)).toMatchObject({ role: 'member', playerId: null });
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}/members/member-2`)).toMatchObject({ role: 'member', playerId: 'p2' });
+  });
+
+  it('removes any pending profile-edit request for the deleted player', async () => {
+    seedClubDoc('players', 'p1', { firstName: 'Jamie' });
+    __seedDoc(`clubs/${TEST_CLUB_ID}/profileEditRequests/member-1`, {
+      uid: 'member-1', playerId: 'p1', firstName: 'Jamie Lee',
+    });
+    __seedDoc(`clubs/${TEST_CLUB_ID}/profileEditRequests/member-2`, {
+      uid: 'member-2', playerId: 'p2', firstName: 'Someone Else', // unrelated — must survive
+    });
+
+    await deletePlayer('p1');
+
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}/profileEditRequests/member-1`)).toBeUndefined();
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}/profileEditRequests/member-2`)).toBeDefined();
+  });
+
+  it('throws a clear error when no club is selected', async () => {
+    const { setCurrentClubId } = await import('../client');
+    setCurrentClubId(null);
+    await expect(deletePlayer('p1')).rejects.toThrow('No club selected');
+    setCurrentClubId(TEST_CLUB_ID); // restore for any tests that run after this file
   });
 });
