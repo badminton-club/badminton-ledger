@@ -75,6 +75,8 @@ export default function PayoutPage() {
   });
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
+  const [hideComps, setHideComps] = useState(true);
+  const [compsOnly, setCompsOnly] = useState(false);
   const [undoTarget, setUndoTarget] = useState<PayoutLedgerEntry | null>(null);
   const [undoReason, setUndoReason] = useState('');
   const [undoSubmitting, setUndoSubmitting] = useState(false);
@@ -135,14 +137,16 @@ export default function PayoutPage() {
 
   const filteredLedger = useMemo(() => {
     const ledger = summary?.ledger ?? [];
-    return ledger.filter((entry) =>
-      LEDGER_COLUMNS.every(({ key }) => {
-        const filterValue = columnFilters[key].trim().toLowerCase();
-        if (!filterValue) return true;
-        return getColumnText(entry, key).toLowerCase().includes(filterValue);
-      })
-    );
-  }, [summary, columnFilters, getColumnText]);
+    return ledger
+      .filter((entry) => (compsOnly ? entry.type === 'comp' : hideComps ? entry.type !== 'comp' : true))
+      .filter((entry) =>
+        LEDGER_COLUMNS.every(({ key }) => {
+          const filterValue = columnFilters[key].trim().toLowerCase();
+          if (!filterValue) return true;
+          return getColumnText(entry, key).toLowerCase().includes(filterValue);
+        })
+      );
+  }, [summary, columnFilters, getColumnText, hideComps, compsOnly]);
 
   const sortedLedger = useMemo(() => {
     const copy = [...filteredLedger];
@@ -162,7 +166,7 @@ export default function PayoutPage() {
   const paginatedLedger = sortedLedger.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   // Reset to page 1 whenever the underlying data, sort, or filters change.
-  useEffect(() => { setPage(1); }, [summary, sortColumn, sortDirection, columnFilters]);
+  useEffect(() => { setPage(1); }, [summary, sortColumn, sortDirection, columnFilters, hideComps, compsOnly]);
 
   const handleSort = (key: LedgerColumn) => {
     if (sortColumn === key) {
@@ -493,6 +497,23 @@ export default function PayoutPage() {
             <p className="text-muted mb-0">No payments or adjustments yet.</p>
           ) : (
             <>
+              <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
+                <Form.Check
+                  type="checkbox"
+                  id="hide-comps"
+                  label="Hide comp transactions"
+                  checked={hideComps}
+                  disabled={compsOnly}
+                  onChange={(e) => setHideComps(e.target.checked)}
+                />
+                <Form.Check
+                  type="checkbox"
+                  id="comps-only"
+                  label="Show comp transactions only"
+                  checked={compsOnly}
+                  onChange={(e) => setCompsOnly(e.target.checked)}
+                />
+              </div>
               <div className="border rounded" style={{ maxHeight: 600, overflowY: 'auto' }}>
                 <Table hover striped responsive className="mb-0 align-middle">
                   <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
