@@ -530,10 +530,11 @@ export default function PayoutPage() {
                     ) : (
                       paginatedLedger.map((entry) => {
                         const runningTotal = runningTotals.get(`${entry.type}-${entry.id}`) ?? 0;
+                        const struckThrough = entry.voided || entry.isReversal;
                         return (
                           <tr
                             key={`${entry.type}-${entry.id}`}
-                            style={entry.voided ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}
+                            style={struckThrough ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}
                           >
                             <td className="text-nowrap">{format(entry.date, 'MMM d, yyyy h:mm a')}</td>
                             <td className="text-nowrap">{entry.sessionDate ? format(entry.sessionDate, 'MMM d, yyyy') : <span className="text-muted">—</span>}</td>
@@ -551,12 +552,11 @@ export default function PayoutPage() {
                               {entry.voided && (
                                 <Badge bg="light" text="dark" className="ms-1">Voided</Badge>
                               )}
+                              {entry.isReversal && (
+                                <Badge bg="light" text="dark" className="ms-1">Reversed</Badge>
+                              )}
                             </td>
-                            <td
-                              className="text-truncate"
-                              style={{ maxWidth: 220, textDecoration: 'none' }}
-                              title={entry.note || undefined}
-                            >
+                            <td style={{ maxWidth: 320, whiteSpace: 'normal', wordBreak: 'break-word', textDecoration: 'none' }}>
                               {entry.note || <span className="text-muted">—</span>}
                             </td>
                             {entry.type === 'comp' ? (

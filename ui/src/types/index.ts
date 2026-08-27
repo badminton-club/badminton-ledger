@@ -150,8 +150,10 @@ export interface PayoutLedgerEntry {
   sessionId: string | null;
   sessionDate: Date | null; // date of the session this entry is settling, if any
   note: string;
-  voided: boolean;   // true if this entry has been undone (shown struck-through, not double-counted)
-  canUndo: boolean;  // true if the Undo action applies to this row
+  voided: boolean;     // true if this entry has been undone (shown struck-through, not double-counted)
+  canUndo: boolean;    // true if the Undo action applies to this row
+  isReversal: boolean; // true if this entry itself reverses an earlier settlement/adjustment
+                        // (e.g. re-toggling paid/comp) — shown struck-through, same as voided
 }
 
 export interface OwnerPayoutSummary {

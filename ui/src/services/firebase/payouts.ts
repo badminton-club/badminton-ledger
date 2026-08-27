@@ -79,6 +79,7 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
         // there, not by editing the ledger directly. A reversal entry can't itself
         // be undone (that would just recreate the original).
         canUndo: l.reason === 'manual' && !l.voided && !l.isReversal,
+        isReversal: !!l.isReversal,
       };
     });
 
@@ -95,6 +96,7 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
         note: p.note?.trim() ?? '',
         voided: !!p.voided,
         canUndo: !p.voided,
+        isReversal: false,
       };
     });
 
@@ -172,6 +174,7 @@ export async function undoPayoutAdjustment(entryId: string): Promise<void> {
       const entry = entrySnap.data() as {
         reason?: string; delta?: number; playerId?: string | null; note?: string;
         voided?: boolean; isReversal?: boolean; walletAdjustment?: boolean;
+        createdAt?: Timestamp;
       };
 
       if (entry.reason !== 'manual') {
@@ -180,14 +183,32 @@ export async function undoPayoutAdjustment(entryId: string): Promise<void> {
       if (entry.voided) throw new Error('This transaction has already been undone.');
       if (entry.isReversal) throw new Error("A reversal entry can't itself be undone.");
 
+      // Read the player (if any) before any writes — Firestore transactions require
+      // all reads to happen first. Used both to enrich the reversal note with the
+      // player's name and, if the original moved their balance, to reverse it.
+      const playerRef = entry.playerId ? doc(refs.players, entry.playerId) : null;
+      const playerSnap = playerRef ? await tx.get(playerRef) : null;
+      const playerName = playerSnap?.exists()
+        ? [playerSnap.data().firstName, playerSnap.data().lastName].filter(Boolean).join(' ')
+        : null;
+
       const delta = entry.delta ?? 0;
+      const originalDate = toJSDate(entry.createdAt);
+      const dateStr = originalDate
+        ? originalDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        : null;
+      const subject = playerName ? ` for ${playerName}` : '';
+      const originalNote = entry.note?.trim();
+      const summary = `Undo of $${Math.abs(delta).toFixed(2)} adjustment${subject}${dateStr ? ` from ${dateStr}` : ''}`;
+      const reversalNote = originalNote ? `${summary}: "${originalNote}"` : summary;
+
       const reversalRef = doc(refs.balanceLedger);
       const reversalData: Record<string, unknown> = {
         playerId:  entry.playerId ?? null,
         sessionId: null,
         delta:     -delta,
         reason:    'manual',
-        note:      `Undo of "${entry.note ?? ''}"`,
+        note:      reversalNote,
         walletAdjustment: false,
         isReversal: true,
         createdAt: serverTimestamp(),
@@ -196,16 +217,12 @@ export async function undoPayoutAdjustment(entryId: string): Promise<void> {
       // Only reverse the player's prepaid balance if the original entry actually
       // moved it (a Players-page balance adjustment) — a custom payout
       // transaction never touched the wallet, so there's nothing to reverse there.
-      if (entry.walletAdjustment && entry.playerId) {
-        const playerRef = doc(refs.players, entry.playerId);
-        const playerSnap = await tx.get(playerRef);
-        if (playerSnap.exists()) {
-          const before = playerSnap.data().balance ?? 0;
-          tx.update(playerRef, { balance: increment(-delta) });
-          reversalData.balanceBefore = before;
-          reversalData.balanceAfter = before - delta;
-          reversalData.walletAdjustment = true;
-        }
+      if (entry.walletAdjustment && playerRef && playerSnap?.exists()) {
+        const before = playerSnap.data().balance ?? 0;
+        tx.update(playerRef, { balance: increment(-delta) });
+        reversalData.balanceBefore = before;
+        reversalData.balanceAfter = before - delta;
+        reversalData.walletAdjustment = true;
       }
 
       tx.set(reversalRef, reversalData);
