@@ -16,7 +16,7 @@ const REASON_LABELS: Record<string, string> = {
   'session-deleted': 'Session removed',
   payment: 'Payment',
   comp: 'Comp',
-  manual: 'Adjustment',
+  manual: 'Manual',
   // Logged when an admin manually switches a player's settlement method after
   // the session was created (vs. 'session', logged automatically at
   // session-creation time) — same kind of event from the player's perspective,
