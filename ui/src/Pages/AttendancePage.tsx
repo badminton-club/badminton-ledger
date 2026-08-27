@@ -19,6 +19,15 @@ const REASON_LABELS: Record<string, string> = {
   manual: 'Adjustment',
 };
 
+const REASON_BADGE: Record<string, string> = {
+  session: 'secondary',
+  'session-edit': 'secondary',
+  'session-deleted': 'dark',
+  payment: 'primary',
+  comp: 'info',
+  manual: 'secondary',
+};
+
 const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toFixed(2)}`;
 
 export default function AttendancePage() {
@@ -173,9 +182,13 @@ export default function AttendancePage() {
               {attended.length === 0 ? (
                 <p className="text-muted">No sessions attended yet.</p>
               ) : (
-                <Table hover responsive size="sm">
+                <Table hover striped responsive size="sm" className="align-middle mb-0">
                   <thead>
-                    <tr><th>Date</th><th>Cost</th><th className="text-end">Status</th></tr>
+                    <tr className="table-light">
+                      <th>Date</th>
+                      <th className="text-end">Cost</th>
+                      <th className="text-end">Status</th>
+                    </tr>
                   </thead>
                   <tbody>
                     {attended.map((s) => {
@@ -188,8 +201,8 @@ export default function AttendancePage() {
                           : { label: 'Unpaid', bg: 'danger' };
                       return (
                         <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedSession(s)}>
-                          <td>{d ? format(d, 'MMM d, yyyy') : '—'}</td>
-                          <td>{money(sp?.cost ?? 0)}</td>
+                          <td className="text-nowrap">{d ? format(d, 'MMM d, yyyy') : '—'}</td>
+                          <td className="text-end" style={{ fontVariantNumeric: 'tabular-nums' }}>{money(sp?.cost ?? 0)}</td>
                           <td className="text-end"><Badge bg={status.bg}>{status.label}</Badge></td>
                         </tr>
                       );
@@ -202,9 +215,9 @@ export default function AttendancePage() {
               {ledger.length === 0 ? (
                 <p className="text-muted">No transactions yet.</p>
               ) : (
-                <Table hover responsive size="sm">
+                <Table hover striped responsive size="sm" className="align-middle mb-0">
                   <thead>
-                    <tr>
+                    <tr className="table-light">
                       <th>Date</th>
                       <th>Type</th>
                       <th>Note</th>
@@ -217,11 +230,18 @@ export default function AttendancePage() {
                       const d = toJSDate(e.createdAt);
                       return (
                         <tr key={e.id}>
-                          <td>{d ? format(d, 'MMM d, yyyy') : '—'}</td>
-                          <td><Badge bg="secondary">{REASON_LABELS[e.reason] ?? e.reason}</Badge></td>
-                          <td>{e.note ?? ''}</td>
-                          <td className={`text-end ${e.delta < 0 ? 'text-danger' : 'text-success'}`}>{money(e.delta)}</td>
-                          <td className="text-end">{money(e.balanceAfter)}</td>
+                          <td className="text-nowrap">{d ? format(d, 'MMM d, yyyy h:mm a') : '—'}</td>
+                          <td><Badge bg={REASON_BADGE[e.reason] ?? 'secondary'}>{REASON_LABELS[e.reason] ?? e.reason}</Badge></td>
+                          <td className="text-truncate" style={{ maxWidth: 220 }} title={e.note || undefined}>
+                            {e.note || <span className="text-muted">—</span>}
+                          </td>
+                          <td
+                            className={`text-end ${e.delta < 0 ? 'text-danger' : 'text-success'}`}
+                            style={{ fontVariantNumeric: 'tabular-nums' }}
+                          >
+                            {money(e.delta)}
+                          </td>
+                          <td className="text-end fw-medium" style={{ fontVariantNumeric: 'tabular-nums' }}>{money(e.balanceAfter)}</td>
                         </tr>
                       );
                     })}

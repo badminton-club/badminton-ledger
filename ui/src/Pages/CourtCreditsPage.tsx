@@ -237,8 +237,12 @@ export default function CourtCreditsPage() {
             activeKey={activeKey ?? undefined}
             onSelect={k => setActiveKey(k === activeKey ? null : (k as string))}
           >
-            {sorted.map(batch => (
-              <Accordion.Item eventKey={batch.id} key={batch.id}>
+            {sorted.map((batch, i) => (
+              <Accordion.Item
+                eventKey={batch.id}
+                key={batch.id}
+                style={i % 2 === 1 ? ({ '--bs-accordion-btn-bg': '#f8f9fa' } as React.CSSProperties) : undefined}
+              >
                 <Accordion.Header>
                   <Row className="w-100 align-items-center gx-2">
                     <Col md={2} className="text-truncate">{batch.name || '—'}</Col>

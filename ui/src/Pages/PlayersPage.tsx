@@ -349,13 +349,15 @@ export default function PlayersPage() {
                 <Alert variant="danger" className="small">{playersError}</Alert>
               )}
               <ListGroup style={{ maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
-                {filteredPlayers.map(player => (
+                {filteredPlayers.map((player, i) => (
                   <ListGroup.Item
                     key={player.id}
                     action
                     active={selectedPlayerId === player.id}
                     onClick={() => setSelectedPlayerId(player.id)}
-                    className="d-flex justify-content-between align-items-center"
+                    className={`d-flex justify-content-between align-items-center ${
+                      selectedPlayerId !== player.id && i % 2 === 1 ? 'bg-light' : ''
+                    }`}
                   >
                     <span>{formatPlayerName(player)}</span>
                     {(player.owed ?? 0) > 0 && (
