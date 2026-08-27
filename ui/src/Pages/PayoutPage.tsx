@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Container, Card, Button, Table, Spinner, Alert, Row, Col, Form, Badge } from 'react-bootstrap';
+import { Container, Card, Button, Table, Spinner, Alert, Row, Col, Form, Badge, Modal } from 'react-bootstrap';
 import { format } from 'date-fns';
 import { fetchOwnerPayoutSummary, payOwner, addCustomPayoutTransaction, undoPayoutAdjustment, voidOwnerPayout } from '../services/firebase';
 import { useAppSelector } from '../hooks';
@@ -31,19 +31,18 @@ const ledgerTypeLabel = (type: PayoutLedgerEntry['type']) =>
  * Running total of what's owed to the owner, evaluated in true chronological order
  * (oldest → newest) regardless of how the table is currently sorted. Comps don't
  * count (the player paid the owner directly) and payouts reduce the balance. A
- * voided adjustment still counts here — its reversal entry (also in the ledger)
- * cancels it out naturally — but a voided payout has no reversal row, so it's
- * skipped entirely, matching how fetchOwnerPayoutSummary excludes it from totalPaid.
+ * voided entry (an adjustment or payout that was undone) is skipped entirely —
+ * it's kept in the ledger for the record but no longer contributes, matching how
+ * fetchOwnerPayoutSummary excludes it from the totals.
  */
 function computeRunningTotals(ledger: PayoutLedgerEntry[]): Map<string, number> {
   const chronological = [...ledger].sort((a, b) => a.date.getTime() - b.date.getTime());
   let running = 0;
   const totals = new Map<string, number>();
   for (const entry of chronological) {
-    if (entry.type === 'payout') {
-      if (!entry.voided) running -= entry.amount;
-    } else if (entry.type !== 'comp') {
-      running += entry.amount;
+    if (!entry.voided) {
+      if (entry.type === 'payout') running -= entry.amount;
+      else if (entry.type !== 'comp') running += entry.amount;
     }
     totals.set(`${entry.type}-${entry.id}`, running);
   }
@@ -76,7 +75,10 @@ export default function PayoutPage() {
   });
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
-  const [undoingId, setUndoingId] = useState<string | null>(null);
+  const [undoTarget, setUndoTarget] = useState<PayoutLedgerEntry | null>(null);
+  const [undoReason, setUndoReason] = useState('');
+  const [undoSubmitting, setUndoSubmitting] = useState(false);
+  const [undoError, setUndoError] = useState('');
 
   const players = useAppSelector(selectAllPlayers);
   const playerName = useCallback((id: string | null) => {
@@ -247,25 +249,34 @@ export default function PayoutPage() {
     }
   };
 
-  const handleUndo = async (entry: PayoutLedgerEntry) => {
-    const confirmMsg = entry.type === 'payout'
-      ? `Undo this payout of ${money(entry.amount)}? It will be marked voided and added back to the pending balance.`
-      : `Undo this adjustment of ${money(entry.amount)}? A reversal entry will be added.`;
-    if (!window.confirm(confirmMsg)) return;
+  const openUndo = (entry: PayoutLedgerEntry) => {
+    setUndoTarget(entry);
+    setUndoReason('');
+    setUndoError('');
+  };
 
-    setUndoingId(entry.id);
-    setError('');
+  const handleConfirmUndo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!undoTarget) return;
+    if (!undoReason.trim()) {
+      setUndoError('Enter a reason for undoing this.');
+      return;
+    }
+
+    setUndoSubmitting(true);
+    setUndoError('');
     try {
-      if (entry.type === 'payout') {
-        await voidOwnerPayout(entry.id);
+      if (undoTarget.type === 'payout') {
+        await voidOwnerPayout(undoTarget.id, undoReason);
       } else {
-        await undoPayoutAdjustment(entry.id);
+        await undoPayoutAdjustment(undoTarget.id, undoReason);
       }
+      setUndoTarget(null);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to undo.');
+      setUndoError(err instanceof Error ? err.message : 'Failed to undo.');
     } finally {
-      setUndoingId(null);
+      setUndoSubmitting(false);
     }
   };
 
@@ -530,11 +541,10 @@ export default function PayoutPage() {
                     ) : (
                       paginatedLedger.map((entry) => {
                         const runningTotal = runningTotals.get(`${entry.type}-${entry.id}`) ?? 0;
-                        const struckThrough = entry.voided || entry.isReversal;
                         return (
                           <tr
                             key={`${entry.type}-${entry.id}`}
-                            style={struckThrough ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}
+                            style={entry.voided ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}
                           >
                             <td className="text-nowrap">{format(entry.date, 'MMM d, yyyy h:mm a')}</td>
                             <td className="text-nowrap">{entry.sessionDate ? format(entry.sessionDate, 'MMM d, yyyy') : <span className="text-muted">—</span>}</td>
@@ -550,10 +560,9 @@ export default function PayoutPage() {
                                 <Badge bg="secondary">Adjustment</Badge>
                               )}
                               {entry.voided && (
-                                <Badge bg="light" text="dark" className="ms-1">Voided</Badge>
-                              )}
-                              {entry.isReversal && (
-                                <Badge bg="light" text="dark" className="ms-1">Reversed</Badge>
+                                <Badge bg="light" text="dark" className="ms-1" title={entry.voidedNote || undefined}>
+                                  Voided
+                                </Badge>
                               )}
                             </td>
                             <td style={{ maxWidth: 320, whiteSpace: 'normal', wordBreak: 'break-word', textDecoration: 'none' }}>
@@ -582,14 +591,9 @@ export default function PayoutPage() {
                                 <Button
                                   size="sm"
                                   variant="outline-danger"
-                                  disabled={undoingId !== null}
-                                  onClick={() => handleUndo(entry)}
+                                  onClick={() => openUndo(entry)}
                                 >
-                                  {undoingId === entry.id ? (
-                                    <Spinner as="span" animation="border" size="sm" />
-                                  ) : (
-                                    'Undo'
-                                  )}
+                                  Undo
                                 </Button>
                               )}
                             </td>
@@ -630,6 +634,45 @@ export default function PayoutPage() {
           )}
         </Card.Body>
       </Card>
+
+      <Modal show={!!undoTarget} onHide={() => setUndoTarget(null)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Undo transaction</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleConfirmUndo}>
+          <Modal.Body>
+            {undoTarget && (
+              <p className="text-muted">
+                {undoTarget.type === 'payout'
+                  ? `This payout of ${money(undoTarget.amount)} will be marked voided and added back to the pending balance.`
+                  : `This ${money(undoTarget.amount)} adjustment will be marked voided and removed from the pending balance.`}
+                {' '}The original entry is kept for the record — nothing is deleted.
+              </p>
+            )}
+            <Form.Group className="mb-3">
+              <Form.Label>Reason for undoing this <span className="text-danger">*</span></Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={2}
+                placeholder="e.g. entered by mistake, duplicate transaction"
+                value={undoReason}
+                onChange={(e) => setUndoReason(e.target.value)}
+                disabled={undoSubmitting}
+                autoFocus
+              />
+            </Form.Group>
+            {undoError && <Alert variant="danger" className="mb-0">{undoError}</Alert>}
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setUndoTarget(null)} disabled={undoSubmitting}>
+              Cancel
+            </Button>
+            <Button variant="danger" type="submit" disabled={undoSubmitting}>
+              {undoSubmitting ? <Spinner as="span" animation="border" size="sm" /> : 'Undo'}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
     </Container>
   );
 }

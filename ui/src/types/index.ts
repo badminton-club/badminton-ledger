@@ -137,6 +137,7 @@ export interface OwnerPayout {
   voided?: boolean;           // true if this payout was undone — excluded from totalPaid
   voidedAt?: Timestamp | null;
   voidedByUid?: string | null;
+  voidedNote?: string | null; // admin-entered reason for the undo
 }
 
 // One row in the payout ledger: money collected from players (a payment or a manual
@@ -150,10 +151,9 @@ export interface PayoutLedgerEntry {
   sessionId: string | null;
   sessionDate: Date | null; // date of the session this entry is settling, if any
   note: string;
-  voided: boolean;     // true if this entry has been undone (shown struck-through, not double-counted)
-  canUndo: boolean;    // true if the Undo action applies to this row
-  isReversal: boolean; // true if this entry itself reverses an earlier settlement/adjustment
-                        // (e.g. re-toggling paid/comp) — shown struck-through, same as voided
+  voided: boolean;            // true if this entry has been undone (shown struck-through, excluded from totals)
+  voidedNote: string | null;  // admin-entered reason for the undo, when voided
+  canUndo: boolean;           // true if the Undo action applies to this row
 }
 
 export interface OwnerPayoutSummary {
@@ -261,8 +261,8 @@ export interface BalanceLedgerEntry {
   // the owner payout total (e.g. a custom payout transaction) — those are
   // excluded from the wallet-only Balance History view.
   walletAdjustment?: boolean;
-  voided?: boolean;    // true if this entry was undone (kept for audit, excluded from balance history highlighting)
-  isReversal?: boolean; // true if this entry itself is the reversal of another (can't be undone again)
+  voided?: boolean;      // true if this entry was undone (kept for audit, shown de-emphasized)
+  voidedNote?: string;   // admin-entered reason for the undo, when voided
 }
 
 // users/{uid} — the signed-in user's global profile (their saved club list + default)

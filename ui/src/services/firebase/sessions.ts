@@ -519,23 +519,23 @@ export async function togglePlayerPaidStatus(
 
       let before = (playerSnap.data()?.balance as number) ?? 0;
       const initial = before;
-      const log = (delta: number, reason: string, note: string, isReversal = false) => {
+      const log = (delta: number, reason: string, note: string) => {
         tx.set(doc(refs.balanceLedger), {
           playerId, sessionId, delta,
           balanceBefore: before, balanceAfter: before + delta,
-          reason, note, isReversal, createdAt: serverTimestamp(),
+          reason, note, createdAt: serverTimestamp(),
         });
         before += delta;
       };
 
       if (nowPaid) {
         // Reverse a prior comp settlement so the player isn't double-credited.
-        if (target.comped) log(-cost, 'comp', 'Reversed — marked paid to club', true);
+        if (target.comped) log(-cost, 'comp', 'Reversed — marked paid to club');
         log(cost, 'payment', 'Marked paid');
       } else if (currentVia === 'etransfer') {
         // Only reverse a real e-Transfer payment. A 'balance' settlement was drawn from
         // the player's prepaid balance (no payment entry), so there's nothing to reverse.
-        log(-cost, 'payment', 'Marked unpaid', true);
+        log(-cost, 'payment', 'Marked unpaid');
       }
 
       const netDelta = before - initial;
@@ -584,11 +584,11 @@ export async function togglePlayerCompStatus(
 
       let before = (playerSnap.data()?.balance as number) ?? 0;
       const initial = before;
-      const log = (delta: number, reason: string, note: string, isReversal = false) => {
+      const log = (delta: number, reason: string, note: string) => {
         tx.set(doc(refs.balanceLedger), {
           playerId, sessionId, delta,
           balanceBefore: before, balanceAfter: before + delta,
-          reason, note, isReversal, createdAt: serverTimestamp(),
+          reason, note, createdAt: serverTimestamp(),
         });
         before += delta;
       };
@@ -597,10 +597,10 @@ export async function togglePlayerCompStatus(
         // If they'd paid the club by e-Transfer, reverse that payment so it leaves the
         // owner payout. A 'balance' settlement has no payment entry — the comp credit
         // below restores the balance that was drawn at session time.
-        if (currentVia === 'etransfer') log(-cost, 'payment', 'Reversed — paid owner directly (comp)', true);
+        if (currentVia === 'etransfer') log(-cost, 'payment', 'Reversed — paid owner directly (comp)');
         log(cost, 'comp', 'Comped — player paid owner directly');
       } else {
-        log(-cost, 'comp', 'Comp removed', true);
+        log(-cost, 'comp', 'Comp removed');
       }
 
       const netDelta = before - initial;
@@ -661,17 +661,17 @@ export async function setPlayerSettlement(
         });
         before += delta;
       };
-      const logPayout = (delta: number, reason: string, note: string, isReversal = false) => {
+      const logPayout = (delta: number, reason: string, note: string) => {
         tx.set(doc(refs.balanceLedger), {
           playerId, sessionId, delta,
           balanceBefore: before, balanceAfter: before,
-          reason, note, isReversal, createdAt: serverTimestamp(),
+          reason, note, createdAt: serverTimestamp(),
         });
       };
 
       // Reverse the old payout signal, then record the new one (wallet-neutral).
-      if (currentVia === 'etransfer') logPayout(-cost, 'payment', 'Reversed e-Transfer payment', true);
-      else if (currentVia === 'comp')  logPayout(-cost, 'comp', 'Reversed comp', true);
+      if (currentVia === 'etransfer') logPayout(-cost, 'payment', 'Reversed e-Transfer payment');
+      else if (currentVia === 'comp')  logPayout(-cost, 'comp', 'Reversed comp');
       if (method === 'etransfer') logPayout(cost, 'payment', 'Paid by e-Transfer');
       else if (method === 'comp')  logPayout(cost, 'comp', 'Comped — player paid owner directly');
 
@@ -773,7 +773,6 @@ export async function setPlayerPaidBy(
           balanceAfter:  0,
           reason:        currentVia === 'etransfer' ? 'payment' : 'comp',
           note:          currentVia === 'etransfer' ? 'Reversed e-Transfer payment' : 'Reversed comp',
-          isReversal:    true,
           createdAt:     serverTimestamp(),
         });
       }
@@ -930,7 +929,6 @@ export async function deleteSession(sessionId: string): Promise<void> {
             balanceAfter:  before,
             reason:        via === 'etransfer' ? 'payment' : 'comp',
             note:          'Reversed — session deleted',
-            isReversal:    true,
             createdAt:     serverTimestamp(),
           });
         }

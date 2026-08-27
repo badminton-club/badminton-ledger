@@ -47,7 +47,7 @@ interface LedgerEntry {
   sessionId?:    string;
   walletAdjustment?: boolean;
   voided?:       boolean;
-  isReversal?:   boolean;
+  voidedNote?:   string;
 }
 
 const INIT_BALANCE: BalanceAdjustment = { amount: '', reason: '', type: 'credit', includeInPayout: true };
@@ -569,7 +569,14 @@ export default function PlayersPage() {
                                 {getDeltaLabel(entry.reason)}
                               </Badge>
                               {entry.voided && (
-                                <Badge bg="secondary" style={{ fontSize: 9 }} className="ms-1">Undone</Badge>
+                                <Badge
+                                  bg="secondary"
+                                  style={{ fontSize: 9 }}
+                                  className="ms-1"
+                                  title={entry.voidedNote || undefined}
+                                >
+                                  Undone
+                                </Badge>
                               )}
                             </td>
                             <td className="text-muted" style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

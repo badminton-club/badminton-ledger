@@ -43,7 +43,7 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
       ...(d.data() as {
         delta?: number; reason?: string; playerId?: string; note?: string;
         createdAt?: Timestamp; sessionId?: string | null;
-        voided?: boolean; isReversal?: boolean;
+        voided?: boolean; voidedNote?: string;
       }),
     }));
 
@@ -74,12 +74,11 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
         sessionDate: l.sessionId ? sessionDateById.get(l.sessionId) ?? null : null,
         note: l.note ?? '',
         voided: !!l.voided,
+        voidedNote: l.voidedNote ?? null,
         // Only manual adjustments can be undone here — payments/comps are derived
         // from a session's settlement state and are reversed by re-toggling it
-        // there, not by editing the ledger directly. A reversal entry can't itself
-        // be undone (that would just recreate the original).
-        canUndo: l.reason === 'manual' && !l.voided && !l.isReversal,
-        isReversal: !!l.isReversal,
+        // there, not by editing the ledger directly.
+        canUndo: l.reason === 'manual' && !l.voided,
       };
     });
 
@@ -95,20 +94,19 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
         sessionDate: null,
         note: p.note?.trim() ?? '',
         voided: !!p.voided,
+        voidedNote: p.voidedNote ?? null,
         canUndo: !p.voided,
-        isReversal: false,
       };
     });
 
     // Comps are for record keeping only — they don't count toward what's owed.
-    // Voided entries aren't specially excluded here: an undone adjustment keeps its
-    // original (still-counted) amount, offset by its own reversal row, so the two
-    // net to zero automatically — same pattern the session-settlement toggles use.
+    // A voided adjustment (undone from the ledger) is likewise excluded — it's
+    // shown struck-through for the record, but no longer contributes to the total.
     const totalCollected = collected
-      .filter((e) => e.type !== 'comp')
+      .filter((e) => e.type !== 'comp' && !e.voided)
       .reduce((sum, e) => sum + e.amount, 0);
-    // Voided payouts, on the other hand, are simply excluded — there's no
-    // "reversal payout" concept, so a void just removes it from the total owed.
+    // Same for a voided payout: kept in the ledger for the audit trail, but
+    // excluded from what's already been paid out.
     const totalPaid = payouts
       .filter((e) => !e.voided)
       .reduce((sum, e) => sum + e.amount, 0);
@@ -157,92 +155,80 @@ export async function addCustomPayoutTransaction(
 /**
  * Undoes a manual payout-ledger adjustment (reason 'manual') — e.g. a custom
  * transaction or a Players-page balance adjustment marked "include in payout".
- * Rather than deleting the original (financial records are never destroyed here),
- * this marks it `voided` for display and writes a new equal-and-opposite reversal
- * entry, mirroring how session-settlement changes elsewhere in the app log a
- * reversal instead of rewriting history. The original's (now-offset) amount and
- * the reversal's amount net to zero in the payout total automatically. If the
- * original actually moved a player's prepaid balance, the reversal moves it back.
+ * The original is never deleted: it's marked `voided` (shown struck-through in
+ * the ledger, with the given reason attached) and excluded from the payout
+ * total. If it had actually moved a player's prepaid balance, that's reversed
+ * too, logged as a separate wallet-only entry (reason 'manual-excluded') so it
+ * shows accurately in the player's own Balance History without adding a second,
+ * confusing row to the payout ledger itself.
  */
-export async function undoPayoutAdjustment(entryId: string): Promise<void> {
+export async function undoPayoutAdjustment(entryId: string, reason: string): Promise<void> {
   return serviceCall('undoPayoutAdjustment', async () => {
+    if (!reason.trim()) throw new Error('A reason for undoing this is required.');
+
     const entryRef = doc(refs.balanceLedger, entryId);
 
     await runTransaction(db, async (tx) => {
       const entrySnap = await tx.get(entryRef);
       if (!entrySnap.exists()) throw new Error('Transaction not found.');
       const entry = entrySnap.data() as {
-        reason?: string; delta?: number; playerId?: string | null; note?: string;
-        voided?: boolean; isReversal?: boolean; walletAdjustment?: boolean;
-        createdAt?: Timestamp;
+        reason?: string; delta?: number; playerId?: string | null;
+        voided?: boolean; walletAdjustment?: boolean;
       };
 
       if (entry.reason !== 'manual') {
         throw new Error('Only manual adjustments can be undone here.');
       }
       if (entry.voided) throw new Error('This transaction has already been undone.');
-      if (entry.isReversal) throw new Error("A reversal entry can't itself be undone.");
 
       // Read the player (if any) before any writes — Firestore transactions require
-      // all reads to happen first. Used both to enrich the reversal note with the
-      // player's name and, if the original moved their balance, to reverse it.
-      const playerRef = entry.playerId ? doc(refs.players, entry.playerId) : null;
-      const playerSnap = playerRef ? await tx.get(playerRef) : null;
-      const playerName = playerSnap?.exists()
-        ? [playerSnap.data().firstName, playerSnap.data().lastName].filter(Boolean).join(' ')
-        : null;
-
+      // all reads to happen first. Only needed when the original entry actually
+      // moved the player's prepaid balance (a Players-page balance adjustment); a
+      // custom payout transaction never touched the wallet, so there's nothing to
+      // reverse there.
       const delta = entry.delta ?? 0;
-      const originalDate = toJSDate(entry.createdAt);
-      const dateStr = originalDate
-        ? originalDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      const playerRef = entry.walletAdjustment && entry.playerId
+        ? doc(refs.players, entry.playerId)
         : null;
-      const subject = playerName ? ` for ${playerName}` : '';
-      const originalNote = entry.note?.trim();
-      const summary = `Undo of $${Math.abs(delta).toFixed(2)} adjustment${subject}${dateStr ? ` from ${dateStr}` : ''}`;
-      const reversalNote = originalNote ? `${summary}: "${originalNote}"` : summary;
+      const playerSnap = playerRef ? await tx.get(playerRef) : null;
 
-      const reversalRef = doc(refs.balanceLedger);
-      const reversalData: Record<string, unknown> = {
-        playerId:  entry.playerId ?? null,
-        sessionId: null,
-        delta:     -delta,
-        reason:    'manual',
-        note:      reversalNote,
-        walletAdjustment: false,
-        isReversal: true,
-        createdAt: serverTimestamp(),
-      };
-
-      // Only reverse the player's prepaid balance if the original entry actually
-      // moved it (a Players-page balance adjustment) — a custom payout
-      // transaction never touched the wallet, so there's nothing to reverse there.
-      if (entry.walletAdjustment && playerRef && playerSnap?.exists()) {
-        const before = playerSnap.data().balance ?? 0;
-        tx.update(playerRef, { balance: increment(-delta) });
-        reversalData.balanceBefore = before;
-        reversalData.balanceAfter = before - delta;
-        reversalData.walletAdjustment = true;
-      }
-
-      tx.set(reversalRef, reversalData);
       tx.update(entryRef, {
         voided:      true,
         voidedAt:    serverTimestamp(),
         voidedByUid: auth.currentUser?.uid ?? null,
+        voidedNote:  reason.trim(),
       });
+
+      if (playerRef && playerSnap?.exists()) {
+        const before = playerSnap.data().balance ?? 0;
+        tx.update(playerRef, { balance: increment(-delta) });
+        tx.set(doc(refs.balanceLedger), {
+          playerId:      entry.playerId,
+          sessionId:     null,
+          delta:         -delta,
+          balanceBefore: before,
+          balanceAfter:  before - delta,
+          reason:        'manual-excluded',
+          note:          `Reversed — undoing adjustment: ${reason.trim()}`,
+          walletAdjustment: true,
+          createdAt:     serverTimestamp(),
+        });
+      }
     });
   });
 }
 
 /**
  * Undoes a recorded payout to the owner. Unlike an adjustment, a payout has no
- * natural "reversal" entry — it's simply marked `voided` (kept for the audit
- * trail, shown struck-through) and excluded from the total paid, which increases
- * the pending balance back up by the same amount.
+ * wallet or session tied to it — it's simply marked `voided` with the given
+ * reason attached (kept for the audit trail, shown struck-through in the
+ * ledger) and excluded from the total paid, which increases the pending
+ * balance back up by the same amount.
  */
-export async function voidOwnerPayout(payoutId: string): Promise<void> {
+export async function voidOwnerPayout(payoutId: string, reason: string): Promise<void> {
   return serviceCall('voidOwnerPayout', async () => {
+    if (!reason.trim()) throw new Error('A reason for undoing this is required.');
+
     const payoutRef = doc(refs.payouts, payoutId);
     await runTransaction(db, async (tx) => {
       const snap = await tx.get(payoutRef);
@@ -254,6 +240,7 @@ export async function voidOwnerPayout(payoutId: string): Promise<void> {
         voided:      true,
         voidedAt:    serverTimestamp(),
         voidedByUid: auth.currentUser?.uid ?? null,
+        voidedNote:  reason.trim(),
       });
     });
   });
