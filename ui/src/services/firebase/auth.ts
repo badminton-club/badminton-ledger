@@ -3,6 +3,11 @@ import {
   signInWithPopup,
   signOut,
   onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  updateProfile,
+  sendEmailVerification,
+  sendPasswordResetEmail,
   type User,
 } from 'firebase/auth';
 import { getDoc } from 'firebase/firestore';
@@ -15,6 +20,55 @@ export async function signInWithGoogle(): Promise<User> {
     const provider = new GoogleAuthProvider();
     const result = await signInWithPopup(auth, provider);
     return result.user;
+  });
+}
+
+/**
+ * Creates a new email/password account. `username` is optional — if given, it
+ * sets the display name shown across the app (the same role Google's
+ * displayName plays); if left blank, the app falls back to showing the
+ * user's email everywhere displayName would normally appear. Also sends a
+ * verification email but doesn't block on it — the account is usable
+ * immediately; see `EmailVerificationBanner` for the non-blocking reminder
+ * shown until the user confirms their address.
+ */
+export async function signUpWithEmail(email: string, username: string, password: string): Promise<User> {
+  return serviceCall('signUpWithEmail', async () => {
+    const credential = await createUserWithEmailAndPassword(auth, email, password);
+    if (username.trim()) {
+      await updateProfile(credential.user, { displayName: username.trim() });
+    }
+    try {
+      await sendEmailVerification(credential.user);
+    } catch (err) {
+      // Don't fail the whole sign-up over a verification-email hiccup — the
+      // "resend" action in the verification banner covers this case.
+      console.error('[signUpWithEmail] sendEmailVerification failed', err);
+    }
+    return credential.user;
+  });
+}
+
+/** Signs in an existing email/password account. */
+export async function signInWithEmail(email: string, password: string): Promise<User> {
+  return serviceCall('signInWithEmail', async () => {
+    const credential = await signInWithEmailAndPassword(auth, email, password);
+    return credential.user;
+  });
+}
+
+/** Re-sends the verification email to the currently signed-in user. */
+export async function resendVerificationEmail(): Promise<void> {
+  return serviceCall('resendVerificationEmail', async () => {
+    if (!auth.currentUser) throw new Error('You must be signed in.');
+    await sendEmailVerification(auth.currentUser);
+  });
+}
+
+/** Sends a password-reset email for the given address. */
+export async function sendPasswordReset(email: string): Promise<void> {
+  return serviceCall('sendPasswordReset', async () => {
+    await sendPasswordResetEmail(auth, email);
   });
 }
 

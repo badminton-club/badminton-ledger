@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Container, Card, Table, Spinner, Alert, Badge, Tabs, Tab, Form, Button, Row, Col, Modal, ListGroup } from 'react-bootstrap';
 import { format } from 'date-fns';
-import { fetchMemberPlayerId, fetchPlayerLedger, fetchMyLinkRequest, submitLinkRequest, fetchSessions } from '../services/firebase';
+import { fetchMemberPlayerId, fetchPlayerLedger, fetchMyLinkRequest, submitLinkRequest, fetchSessions, fetchMyProfileEditRequest, submitProfileEditRequest } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { toJSDate } from '../services/firebase/utils';
 import { useAppSelector } from '../hooks';
 import { selectCurrentClubId } from '../features/club/clubSlice';
 import { selectPlayerById } from '../features/players/playersSlice';
-import type { BalanceLedgerEntry, Session, LinkRequest } from '../types';
+import type { BalanceLedgerEntry, Session, LinkRequest, ProfileEditRequest } from '../types';
 import type { RootState } from '../store';
 
 const REASON_LABELS: Record<string, string> = {
@@ -52,6 +52,14 @@ export default function AttendancePage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
+  const [myProfileEditRequest, setMyProfileEditRequest] = useState<ProfileEditRequest | null>(null);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [edFirst, setEdFirst] = useState('');
+  const [edLast, setEdLast] = useState('');
+  const [edEmail, setEdEmail] = useState('');
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+  const [editError, setEditError] = useState('');
+
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
 
   const player = useAppSelector((s: RootState) =>
@@ -69,10 +77,13 @@ export default function AttendancePage() {
         if (cancelled) return;
         setPlayerId(pid);
         if (pid) {
-          const [entries, sessions] = await Promise.all([fetchPlayerLedger(pid), fetchSessions({})]);
+          const [entries, sessions, editReq] = await Promise.all([
+            fetchPlayerLedger(pid), fetchSessions({}), fetchMyProfileEditRequest(clubId, uid),
+          ]);
           if (cancelled) return;
           setLedger(entries);
           setAttended(sessions.filter((s) => (s.players ?? []).some((p) => p.id === pid)));
+          setMyProfileEditRequest(editReq);
         } else {
           const req = await fetchMyLinkRequest(clubId, uid);
           if (cancelled) return;
@@ -110,6 +121,33 @@ export default function AttendancePage() {
     }
   };
 
+  const startEditingProfile = () => {
+    setEdFirst(player?.firstName ?? '');
+    setEdLast(player?.lastName ?? '');
+    setEdEmail(player?.email ?? '');
+    setEditError('');
+    setIsEditingProfile(true);
+  };
+
+  const handleSubmitProfileEdit = async () => {
+    if (!clubId || !uid || !playerId) return;
+    const first = edFirst.trim();
+    if (!first) { setEditError('Enter your first name.'); return; }
+    setEditError('');
+    setSubmittingEdit(true);
+    try {
+      const last = edLast.trim() || null;
+      const email = edEmail.trim() || null;
+      await submitProfileEditRequest(clubId, uid, playerId, first, last, email);
+      setMyProfileEditRequest({ uid, playerId, firstName: first, lastName: last, email });
+      setIsEditingProfile(false);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Failed to send request.');
+    } finally {
+      setSubmittingEdit(false);
+    }
+  };
+
   if (loading) {
     return (
       <Container className="py-4 text-center">
@@ -138,19 +176,19 @@ export default function AttendancePage() {
               </Card.Text>
               <Row>
                 <Col sm={6}>
-                  <Form.Group className="mb-2">
+                  <Form.Group className="mb-2" controlId="attendance-link-request-first-name">
                     <Form.Label>First name</Form.Label>
                     <Form.Control value={reqFirst} onChange={(e) => setReqFirst(e.target.value)} disabled={submitting} />
                   </Form.Group>
                 </Col>
                 <Col sm={6}>
-                  <Form.Group className="mb-2">
+                  <Form.Group className="mb-2" controlId="attendance-link-request-last-name">
                     <Form.Label>Last name</Form.Label>
                     <Form.Control value={reqLast} onChange={(e) => setReqLast(e.target.value)} disabled={submitting} />
                   </Form.Group>
                 </Col>
               </Row>
-              <Form.Group className="mb-3">
+              <Form.Group className="mb-3" controlId="attendance-link-request-email">
                 <Form.Label>Email</Form.Label>
                 <Form.Control type="email" value={reqEmail} onChange={(e) => setReqEmail(e.target.value)} disabled={submitting} />
               </Form.Group>
@@ -164,21 +202,71 @@ export default function AttendancePage() {
       ) : (
         <>
           <Card className="mb-3">
-            <Card.Body className="d-flex justify-content-between align-items-center">
-              <span>{player ? `${player.firstName} ${player.lastName ?? ''}`.trim() : 'Your player'}</span>
-              {player && (
-                <span>
-                  Balance:{' '}
-                  <strong className={player.balance < 0 ? 'text-danger' : 'text-success'}>
-                    {money(player.balance)}
-                  </strong>
-                  {(player.owed ?? 0) > 0 && (
-                    <>
-                      {' · '}Owed:{' '}
-                      <strong className="text-danger">{money(player.owed ?? 0)}</strong>
-                    </>
+            <Card.Body>
+              <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>{player ? `${player.firstName} ${player.lastName ?? ''}`.trim() : 'Your player'}</span>
+                <div className="d-flex align-items-center gap-3">
+                  {player && (
+                    <span>
+                      Balance:{' '}
+                      <strong className={player.balance < 0 ? 'text-danger' : 'text-success'}>
+                        {money(player.balance)}
+                      </strong>
+                      {(player.owed ?? 0) > 0 && (
+                        <>
+                          {' · '}Owed:{' '}
+                          <strong className="text-danger">{money(player.owed ?? 0)}</strong>
+                        </>
+                      )}
+                    </span>
                   )}
-                </span>
+                  {!isEditingProfile && (
+                    <Button variant="outline-secondary" size="sm" onClick={startEditingProfile}>
+                      Edit details
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {myProfileEditRequest && !isEditingProfile && (
+                <Alert variant="info" className="mt-3 mb-0 py-2">
+                  Your request to update your details is awaiting admin approval.
+                </Alert>
+              )}
+
+              {isEditingProfile && (
+                <div className="mt-3 p-3 border rounded">
+                  {editError && <Alert variant="danger" className="py-1 small">{editError}</Alert>}
+                  <Row>
+                    <Col sm={6}>
+                      <Form.Group className="mb-2" controlId="attendance-edit-first-name">
+                        <Form.Label>First name</Form.Label>
+                        <Form.Control value={edFirst} onChange={(e) => setEdFirst(e.target.value)} disabled={submittingEdit} />
+                      </Form.Group>
+                    </Col>
+                    <Col sm={6}>
+                      <Form.Group className="mb-2" controlId="attendance-edit-last-name">
+                        <Form.Label>Last name</Form.Label>
+                        <Form.Control value={edLast} onChange={(e) => setEdLast(e.target.value)} disabled={submittingEdit} />
+                      </Form.Group>
+                    </Col>
+                  </Row>
+                  <Form.Group className="mb-2" controlId="attendance-edit-email">
+                    <Form.Label>Email</Form.Label>
+                    <Form.Control type="email" value={edEmail} onChange={(e) => setEdEmail(e.target.value)} disabled={submittingEdit} />
+                  </Form.Group>
+                  <div className="d-flex gap-2">
+                    <Button size="sm" variant="primary" onClick={handleSubmitProfileEdit} disabled={submittingEdit || !edFirst.trim()}>
+                      {submittingEdit ? <Spinner size="sm" animation="border" /> : 'Submit for approval'}
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setIsEditingProfile(false)} disabled={submittingEdit}>
+                      Cancel
+                    </Button>
+                  </div>
+                  <Form.Text muted className="d-block mt-2">
+                    Changes are reviewed by an admin before they take effect.
+                  </Form.Text>
+                </div>
               )}
             </Card.Body>
           </Card>

@@ -58,14 +58,15 @@ export default function AddBirdieBatchModal({ show, onHide, onAddBatch }: Props)
       <Form onSubmit={handleSubmit}>
         <Modal.Body>
           {error && <Alert variant="danger">{error}</Alert>}
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="add-birdie-name">
             <Form.Label>Birdie Name/Type <span className="text-danger">*</span></Form.Label>
             <Form.Control placeholder="e.g. Yonex AS-50" value={form.name} onChange={e => set('name', e.target.value)} disabled={isSubmitting} />
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="add-birdie-purchase-date">
             <Form.Label>Purchase Date <span className="text-danger">*</span></Form.Label>
             <div>
               <DatePicker
+                id="add-birdie-purchase-date"
                 selected={form.purchaseDate}
                 onChange={(d: Date) => set('purchaseDate', d)}
                 dateFormat="yyyy-MM-dd"
@@ -76,24 +77,24 @@ export default function AddBirdieBatchModal({ show, onHide, onAddBatch }: Props)
             </div>
           </Form.Group>
           <Row className="mb-3">
-            <Form.Group as={Col}>
+            <Form.Group as={Col} controlId="add-birdie-cost-per-tube">
               <Form.Label>Cost/Tube ($) <span className="text-danger">*</span></Form.Label>
               <Form.Control type="number" min="0.01" step="0.01" value={form.costPerTube || ''} onChange={e => set('costPerTube', parseFloat(e.target.value) || 0)} disabled={isSubmitting} />
             </Form.Group>
-            <Form.Group as={Col}>
+            <Form.Group as={Col} controlId="add-birdie-tubes-purchased">
               <Form.Label>Tubes Purchased <span className="text-danger">*</span></Form.Label>
               <Form.Control type="number" min="1" step="1" value={form.tubesPurchased || ''} onChange={e => set('tubesPurchased', parseInt(e.target.value) || 0)} disabled={isSubmitting} />
             </Form.Group>
-            <Form.Group as={Col}>
+            <Form.Group as={Col} controlId="add-birdie-birds-per-tube">
               <Form.Label>Birds/Tube <span className="text-danger">*</span></Form.Label>
               <Form.Control type="number" min="1" step="1" value={form.birdsPerTube || ''} onChange={e => set('birdsPerTube', parseInt(e.target.value) || 0)} disabled={isSubmitting} />
             </Form.Group>
           </Row>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="add-birdie-purchaser-name">
             <Form.Label>Purchaser Name <span className="text-danger">*</span></Form.Label>
             <Form.Control value={form.purchaserName} onChange={e => set('purchaserName', e.target.value)} disabled={isSubmitting} />
           </Form.Group>
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="add-birdie-notes">
             <Form.Label>Notes</Form.Label>
             <Form.Control as="textarea" rows={2} placeholder="Optional notes about this batch" value={form.notes} onChange={e => set('notes', e.target.value)} disabled={isSubmitting} />
           </Form.Group>

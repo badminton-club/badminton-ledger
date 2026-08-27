@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup, Badge, Modal } from 'react-bootstrap';
 import { format } from 'date-fns';
 import { clearAllData, exportAllData, restoreAllData, CLEARABLE_COLLECTIONS, type ClearSummary, type BackupData } from '../services/firebase/admin';
@@ -11,7 +11,7 @@ import {
   type DriveBackupResult,
   type DriveBackupFile,
 } from '../services/firebase/drive';
-import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer } from '../services/firebase';
+import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, updatePlayerProfile } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
@@ -25,7 +25,7 @@ import {
   setCurrentClub,
 } from '../features/club/clubSlice';
 import { TOGGLEABLE_TABS } from '../features/club/tabs';
-import type { ClubMember, ClubRole, LinkRequest, Player } from '../types';
+import type { ClubMember, ClubRole, LinkRequest, ProfileEditRequest, Player } from '../types';
 
 const CONFIRM_PHRASE = 'CLEAR ALL DATA';
 
@@ -73,6 +73,11 @@ export default function SettingsPage() {
   const [requestsError, setRequestsError] = useState('');
   const [reqSel, setReqSel] = useState<Record<string, string>>({});
   const [processingReq, setProcessingReq] = useState<string | null>(null);
+
+  const [editRequests, setEditRequests] = useState<ProfileEditRequest[]>([]);
+  const [editRequestsLoading, setEditRequestsLoading] = useState(false);
+  const [editRequestsError, setEditRequestsError] = useState('');
+  const [processingEditReq, setProcessingEditReq] = useState<string | null>(null);
 
   const [deleteClubText, setDeleteClubText] = useState('');
   const [deletingClub, setDeletingClub] = useState(false);
@@ -139,6 +144,14 @@ export default function SettingsPage() {
     }
   };
 
+  // Existing members already linked to a player — used to flag a pending request
+  // whose suggested/selected match is already claimed by a different member, so
+  // an admin doesn't accidentally approve a duplicate link without noticing.
+  const linkedPlayerIds = useMemo(
+    () => new Set(members.filter((m) => m.playerId).map((m) => m.playerId as string)),
+    [members]
+  );
+
   const loadRequests = useCallback(async () => {
     if (!clubId) { setRequests([]); return; }
     setRequestsLoading(true);
@@ -171,6 +184,15 @@ export default function SettingsPage() {
     if (!clubId) return;
     const pid = reqSel[req.uid];
     if (!pid) { setRequestsError('Pick a player to link, or create a new one.'); return; }
+    if (linkedPlayerIds.has(pid)) {
+      const existing = players.find((p) => p.id === pid);
+      const name = existing ? playerLabel(existing) : 'This player';
+      const ok = window.confirm(
+        `${name} is already linked to another member. Linking ${req.firstName} too means both ` +
+        'accounts will share that one player record. Continue?'
+      );
+      if (!ok) return;
+    }
     setRequestsError('');
     setProcessingReq(req.uid);
     try {
@@ -210,6 +232,59 @@ export default function SettingsPage() {
       setRequestsError(err instanceof Error ? err.message : 'Failed to dismiss request.');
     } finally {
       setProcessingReq(null);
+    }
+  };
+
+  const loadEditRequests = useCallback(async () => {
+    if (!clubId) { setEditRequests([]); return; }
+    setEditRequestsLoading(true);
+    setEditRequestsError('');
+    try {
+      setEditRequests(await fetchProfileEditRequests(clubId));
+    } catch (err) {
+      setEditRequestsError(err instanceof Error ? err.message : 'Failed to load requests.');
+    } finally {
+      setEditRequestsLoading(false);
+    }
+  }, [clubId]);
+
+  useEffect(() => { if (isAdmin && clubId) loadEditRequests(); }, [isAdmin, clubId, loadEditRequests]);
+
+  const handleApproveEditRequest = async (req: ProfileEditRequest) => {
+    if (!clubId) return;
+    setEditRequestsError('');
+    setProcessingEditReq(req.uid);
+    try {
+      // The linked player may have since been deleted (e.g. by an admin
+      // cleaning up test/duplicate data) — updatePlayerProfile would otherwise
+      // throw a raw "No document to update" Firestore error. Detect it up
+      // front and just clear the now-unfulfillable request instead.
+      if (!players.some((p) => p.id === req.playerId)) {
+        await deleteProfileEditRequest(clubId, req.uid);
+        await loadEditRequests();
+        setEditRequestsError('That player no longer exists, so this request was dismissed automatically.');
+        return;
+      }
+      await updatePlayerProfile(req.playerId, { firstName: req.firstName, lastName: req.lastName, email: req.email });
+      await deleteProfileEditRequest(clubId, req.uid);
+      await loadEditRequests();
+    } catch (err) {
+      setEditRequestsError(err instanceof Error ? err.message : 'Failed to approve request.');
+    } finally {
+      setProcessingEditReq(null);
+    }
+  };
+
+  const handleDismissEditRequest = async (req: ProfileEditRequest) => {
+    if (!clubId) return;
+    setProcessingEditReq(req.uid);
+    try {
+      await deleteProfileEditRequest(clubId, req.uid);
+      await loadEditRequests();
+    } catch (err) {
+      setEditRequestsError(err instanceof Error ? err.message : 'Failed to dismiss request.');
+    } finally {
+      setProcessingEditReq(null);
     }
   };
 
@@ -418,7 +493,17 @@ export default function SettingsPage() {
       </Card>
 
       <Card className="mt-3">
-        <Card.Header>Link requests</Card.Header>
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span>Link requests</span>
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            onClick={loadRequests}
+            disabled={requestsLoading}
+          >
+            {requestsLoading ? <Spinner size="sm" animation="border" /> : 'Refresh'}
+          </Button>
+        </Card.Header>
         <Card.Body>
           <Card.Text className="text-muted">
             People who asked to be linked to a player. Match each to an existing player, or create a
@@ -431,37 +516,109 @@ export default function SettingsPage() {
             <p className="text-muted mb-0">No pending requests.</p>
           ) : (
             <ListGroup variant="flush">
-              {requests.map((r) => (
-                <ListGroup.Item key={r.uid} className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                  <span>
-                    <strong>{`${r.firstName} ${r.lastName ?? ''}`.trim() || '(no name)'}</strong>
-                    {r.email && <span className="text-muted small ms-2">{r.email}</span>}
-                  </span>
-                  <span className="d-flex align-items-center gap-2 flex-wrap">
-                    <Form.Select
-                      size="sm"
-                      value={reqSel[r.uid] ?? ''}
-                      onChange={(e) => setReqSel((prev) => ({ ...prev, [r.uid]: e.target.value }))}
-                      disabled={processingReq === r.uid}
-                      style={{ minWidth: 160 }}
-                    >
-                      <option value="">— match a player —</option>
-                      {players.map((p) => (
-                        <option key={p.id} value={p.id}>{playerLabel(p)}</option>
-                      ))}
-                    </Form.Select>
-                    <Button size="sm" variant="success" disabled={processingReq === r.uid || !reqSel[r.uid]} onClick={() => handleApproveRequest(r)}>
-                      {processingReq === r.uid ? <Spinner size="sm" animation="border" /> : 'Approve'}
-                    </Button>
-                    <Button size="sm" variant="outline-primary" disabled={processingReq === r.uid} onClick={() => handleCreateAndLink(r)}>
-                      Create player
-                    </Button>
-                    <Button size="sm" variant="outline-secondary" disabled={processingReq === r.uid} onClick={() => handleDismissRequest(r)}>
-                      Dismiss
-                    </Button>
-                  </span>
-                </ListGroup.Item>
-              ))}
+              {requests.map((r) => {
+                const selectedPlayerId = reqSel[r.uid];
+                const alreadyLinked = !!selectedPlayerId && linkedPlayerIds.has(selectedPlayerId);
+                return (
+                  <ListGroup.Item key={r.uid} className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                    <span>
+                      <strong>{`${r.firstName} ${r.lastName ?? ''}`.trim() || '(no name)'}</strong>
+                      {r.email && <span className="text-muted small ms-2">{r.email}</span>}
+                      {alreadyLinked && (
+                        <Badge bg="warning" text="dark" className="ms-2">
+                          Already linked to another member
+                        </Badge>
+                      )}
+                    </span>
+                    <span className="d-flex align-items-center gap-2 flex-wrap">
+                      <Form.Select
+                        size="sm"
+                        value={reqSel[r.uid] ?? ''}
+                        onChange={(e) => setReqSel((prev) => ({ ...prev, [r.uid]: e.target.value }))}
+                        disabled={processingReq === r.uid}
+                        style={{ minWidth: 160 }}
+                      >
+                        <option value="">— match a player —</option>
+                        {players.map((p) => (
+                          <option key={p.id} value={p.id}>{playerLabel(p)}</option>
+                        ))}
+                      </Form.Select>
+                      <Button size="sm" variant="success" disabled={processingReq === r.uid || !reqSel[r.uid]} onClick={() => handleApproveRequest(r)}>
+                        {processingReq === r.uid ? <Spinner size="sm" animation="border" /> : 'Approve'}
+                      </Button>
+                      <Button size="sm" variant="outline-primary" disabled={processingReq === r.uid} onClick={() => handleCreateAndLink(r)}>
+                        Create player
+                      </Button>
+                      <Button size="sm" variant="outline-secondary" disabled={processingReq === r.uid} onClick={() => handleDismissRequest(r)}>
+                        Dismiss
+                      </Button>
+                    </span>
+                  </ListGroup.Item>
+                );
+              })}
+            </ListGroup>
+          )}
+        </Card.Body>
+      </Card>
+
+      <Card className="mt-3">
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span>Profile edit requests</span>
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            onClick={loadEditRequests}
+            disabled={editRequestsLoading}
+          >
+            {editRequestsLoading ? <Spinner size="sm" animation="border" /> : 'Refresh'}
+          </Button>
+        </Card.Header>
+        <Card.Body>
+          <Card.Text className="text-muted">
+            Already-linked members can't edit their own player record directly — proposed name/email
+            changes land here for you to approve or dismiss.
+          </Card.Text>
+          {editRequestsError && <Alert variant="danger" className="py-2">{editRequestsError}</Alert>}
+          {editRequestsLoading ? (
+            <Spinner animation="border" size="sm" />
+          ) : editRequests.length === 0 ? (
+            <p className="text-muted mb-0">No pending requests.</p>
+          ) : (
+            <ListGroup variant="flush">
+              {editRequests.map((r) => {
+                const currentPlayer = players.find((p) => p.id === r.playerId);
+                const currentName = currentPlayer
+                  ? `${currentPlayer.firstName} ${currentPlayer.lastName ?? ''}`.trim()
+                  : '(unknown player)';
+                const proposedName = `${r.firstName} ${r.lastName ?? ''}`.trim();
+                return (
+                  <ListGroup.Item key={r.uid} className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                    <span>
+                      <span className="text-muted small">{currentName} →</span>{' '}
+                      <strong>{proposedName || '(no name)'}</strong>
+                      {r.email && <span className="text-muted small ms-2">{r.email}</span>}
+                    </span>
+                    <span className="d-flex align-items-center gap-2 flex-wrap">
+                      <Button
+                        size="sm"
+                        variant="success"
+                        disabled={processingEditReq === r.uid}
+                        onClick={() => handleApproveEditRequest(r)}
+                      >
+                        {processingEditReq === r.uid ? <Spinner size="sm" animation="border" /> : 'Approve'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline-secondary"
+                        disabled={processingEditReq === r.uid}
+                        onClick={() => handleDismissEditRequest(r)}
+                      >
+                        Dismiss
+                      </Button>
+                    </span>
+                  </ListGroup.Item>
+                );
+              })}
             </ListGroup>
           )}
         </Card.Body>
@@ -629,7 +786,7 @@ export default function SettingsPage() {
             className="d-flex gap-2 align-items-end mb-3"
             onSubmit={(e) => { e.preventDefault(); handleOpenDriveRestore(driveRestoreFolderName); }}
           >
-            <Form.Group className="flex-grow-1">
+            <Form.Group className="flex-grow-1" controlId="drive-restore-folder">
               <Form.Label className="small mb-1">Folder</Form.Label>
               <Form.Control
                 size="sm"
@@ -692,7 +849,7 @@ export default function SettingsPage() {
         </Modal.Header>
         <Form onSubmit={(e) => { e.preventDefault(); handleDriveBackup(); }}>
           <Modal.Body>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="drive-backup-file-name">
               <Form.Label>File name</Form.Label>
               <Form.Control
                 placeholder={defaultBackupFileName()}
@@ -702,7 +859,7 @@ export default function SettingsPage() {
               />
               <Form.Text className="text-muted">Leave blank to use the default name shown above.</Form.Text>
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="drive-backup-folder-name">
               <Form.Label>Folder</Form.Label>
               <Form.Control
                 placeholder={DEFAULT_BACKUP_FOLDER_NAME}
@@ -750,7 +907,7 @@ export default function SettingsPage() {
             ))}
           </ListGroup>
 
-          <Form.Group className="mb-3">
+          <Form.Group className="mb-3" controlId="settings-clear-all-confirm">
             <Form.Label>
               Type <strong>{CONFIRM_PHRASE}</strong> to enable the button.
             </Form.Label>

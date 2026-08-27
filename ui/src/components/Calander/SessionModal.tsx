@@ -9,11 +9,9 @@ import {
     setFormError,
     clearErrors,
     selectModalMode,
-    selectResolutionItems,
 } from "../../features/SessionModal/sessionModalSlice";
 import { findPlayersByName } from "../../services/firebase/players";
 import type { Session, NameResolutionItem, ConfirmedPlayer } from "../../types";
-import { formatPlayerName } from "../../services/firebase/players";
 
 import PasteNamesStep from "./steps/PasteNamesStep";
 import ResolveNamesStep from "./steps/ResolveNamesStep";
@@ -64,8 +62,13 @@ export default function SessionModal({
             const waitlistIndex = linesByNewline.findIndex((l) => waitlistMarker.test(l));
             const cleanedInput = waitlistIndex === -1 ? rawInput : linesByNewline.slice(0, waitlistIndex).join("\n");
 
-            // Parse numbered list: "1. Name"
-            const lines = cleanedInput
+            // If this is a numbered list, discard headers before its first "1." entry.
+            // Otherwise, treat every non-empty line/comma-separated value as a name.
+            const numberedListStart = /^\s*1\s*\.\s*\S/;
+            const inputLines = cleanedInput.split("\n");
+            const firstNumberedLine = inputLines.findIndex((line) => numberedListStart.test(line));
+            const playerInput = firstNumberedLine === -1 ? cleanedInput : inputLines.slice(firstNumberedLine).join("\n");
+            const lines = playerInput
                 .trim()
                 .split(/[\n,]+/)
                 .map((l) => l.trim())
@@ -74,7 +77,7 @@ export default function SessionModal({
             const names = lines
                 .map((l) => {
                     const m = l.match(nameRegex);
-                    return m ? m[1].trim() : null;
+                    return m ? m[1].trim() : l;
                 })
                 .filter(Boolean);
 

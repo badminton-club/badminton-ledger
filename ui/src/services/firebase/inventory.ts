@@ -8,7 +8,6 @@ import {
   where,
   writeBatch,
   serverTimestamp,
-  Timestamp,
 } from 'firebase/firestore';
 import { refs } from './client';
 import { serviceCall, toJSDate, toTimestamp } from './utils';
@@ -183,6 +182,7 @@ export async function updateCourtCreditBatch(
       userName,
       resourceType:   'courtCreditBatch',
       batchId,
+      batchNameSnapshot: original.name ?? '',
       reason,
       changes,
     });

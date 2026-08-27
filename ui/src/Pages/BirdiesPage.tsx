@@ -20,7 +20,7 @@ import {
   fetchBirdieUsageForBatch,
   fetchSessions,
 } from '../services/firebase';
-import type { BirdieBatch, InventoryAdjustment } from '../types';
+import type { BirdieBatch } from '../types';
 
 // ─── Local types ──────────────────────────────────────────────────────────────
 
@@ -131,19 +131,20 @@ export default function BirdiesPage() {
     try {
       const data = await fetchBirdieInventory();
       setBatches(data);
-      if (selectAfterFetch) {
-        setSelectedBatch(data.find(b => b.id === selectAfterFetch) ?? null);
-      } else if (selectedBatch) {
-        setSelectedBatch(data.find(b => b.id === selectedBatch.id) ?? null);
-      }
+      // Functional updater reads the latest selection without needing it in the
+      // dependency array below — keeps this callback's identity stable.
+      setSelectedBatch(prev => {
+        const targetId = selectAfterFetch ?? prev?.id;
+        return targetId ? data.find(b => b.id === targetId) ?? null : prev;
+      });
     } catch {
       setError('Failed to load birdie inventory.');
     } finally {
       setIsLoading(false);
     }
-  }, [selectedBatch?.id]);
+  }, []);
 
-  useEffect(() => { loadInventory(); }, []);
+  useEffect(() => { loadInventory(); }, [loadInventory]);
 
   // ── Birds-used-per-session trend ────────────────────────────────────
   useEffect(() => {
@@ -340,53 +341,54 @@ export default function BirdiesPage() {
               {pageError && <Alert variant="danger">{pageError}</Alert>}
               <Row>
                 <Col md={6}>
-                  <Form.Group className="mb-3">
+                  <Form.Group className="mb-3" controlId="birdie-edit-name">
                     <Form.Label>Name/Type</Form.Label>
                     <Form.Control name="name" value={editForm.name} onChange={handleFormChange} required />
                   </Form.Group>
-                  <Form.Group className="mb-3">
+                  <Form.Group className="mb-3" controlId="birdie-edit-purchase-date">
                     <Form.Label>Purchase Date</Form.Label>
                     <div>
                       <DatePicker
+                        id="birdie-edit-purchase-date"
                         selected={editForm.purchaseDate}
                         onChange={(d: Date) => setEditForm(p => p && ({ ...p, purchaseDate: d }))}
                         dateFormat="yyyy-MM-dd" className="form-control" maxDate={new Date()}
                       />
                     </div>
                   </Form.Group>
-                  <Form.Group className="mb-3">
+                  <Form.Group className="mb-3" controlId="birdie-edit-purchaser">
                     <Form.Label>Purchaser</Form.Label>
                     <Form.Control name="purchaserName" value={editForm.purchaserName} onChange={handleFormChange} required />
                   </Form.Group>
-                  <Form.Group className="mb-3">
+                  <Form.Group className="mb-3" controlId="birdie-edit-cost-per-tube">
                     <Form.Label>Cost Per Tube ($)</Form.Label>
                     <Form.Control type="number" name="costPerTube" min="0" step="0.01" value={editForm.costPerTube} onChange={handleFormChange} required />
                   </Form.Group>
                 </Col>
                 <Col md={6}>
-                  <Form.Group className="mb-3">
+                  <Form.Group className="mb-3" controlId="birdie-edit-tubes-purchased">
                     <Form.Label>Initial Tubes Purchased</Form.Label>
                     <Form.Control type="number" name="tubesPurchased" min="1" step="1" value={editForm.tubesPurchased} onChange={handleFormChange} required />
                   </Form.Group>
-                  <Form.Group className="mb-3">
+                  <Form.Group className="mb-3" controlId="birdie-edit-birds-per-tube">
                     <Form.Label>Birds Per Tube</Form.Label>
                     <Form.Control type="number" name="birdsPerTube" min="1" step="1" value={editForm.birdsPerTube} onChange={handleFormChange} required />
                   </Form.Group>
-                  <Form.Group className="mb-3">
+                  <Form.Group className="mb-3" controlId="birdie-edit-unopened-tubes">
                     <Form.Label>Unopened Tubes Remaining</Form.Label>
                     <Form.Control type="number" name="unopenedTubesRemaining" min="0" step="1" value={editForm.unopenedTubesRemaining} onChange={handleFormChange} required />
                   </Form.Group>
-                  <Form.Group className="mb-3">
+                  <Form.Group className="mb-3" controlId="birdie-edit-birds-in-open-tube">
                     <Form.Label>Birds in Open Tube</Form.Label>
                     <Form.Control type="number" name="birdsInOpenTube" min="0" max={Number(editForm.birdsPerTube) || 12} step="1" value={editForm.birdsInOpenTube} onChange={handleFormChange} required />
                   </Form.Group>
                 </Col>
               </Row>
-              <Form.Group className="mb-3">
+              <Form.Group className="mb-3" controlId="birdie-edit-notes">
                 <Form.Label>Notes</Form.Label>
                 <Form.Control as="textarea" rows={2} name="notes" value={editForm.notes} onChange={handleFormChange} />
               </Form.Group>
-              <Form.Group className="mb-3">
+              <Form.Group className="mb-3" controlId="birdie-edit-reason">
                 <Form.Label>Reason for Edit <span className="text-danger">*</span></Form.Label>
                 <Form.Control as="textarea" rows={2} value={editReason} onChange={e => setEditReason(e.target.value)} placeholder="e.g., Stock count correction" required />
               </Form.Group>

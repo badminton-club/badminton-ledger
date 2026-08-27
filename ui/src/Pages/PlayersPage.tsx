@@ -15,10 +15,10 @@ import { getMonthYear } from '../utils/dateUtils';
 import AddPlayerModal from '../components/AddPlayerModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { db, refs, setPlayerSettlement, setPlayerPaidBy } from '../services/firebase';
-import { addPlayer, updatePlayerProfile } from '../services/firebase/players';
+import { addPlayer, updatePlayerProfile, deletePlayer } from '../services/firebase/players';
 import {
-  collection, query, where, getDocs, orderBy,
-  doc, runTransaction, increment, serverTimestamp, updateDoc, deleteDoc,
+  query, where, getDocs, orderBy,
+  doc, runTransaction, increment, serverTimestamp,
 } from 'firebase/firestore';
 import { useAppSelector } from '../hooks';
 import {
@@ -256,7 +256,7 @@ export default function PlayersPage() {
     setIsDeletingPlayer(true);
     setDeleteError('');
     try {
-      await deleteDoc(doc(refs.players, selectedPlayer.id));
+      await deletePlayer(selectedPlayer.id);
       setSelectedPlayerId(null);
       setShowDeleteConfirm(false);
     } catch (err: unknown) {
@@ -424,19 +424,19 @@ export default function PlayersPage() {
                       {detailsError && <Alert variant="danger" className="small py-1">{detailsError}</Alert>}
                       <Row>
                         <Col md={6}>
-                          <Form.Group className="mb-2">
+                          <Form.Group className="mb-2" controlId="players-edit-first-name">
                             <Form.Label>First name</Form.Label>
                             <Form.Control value={edFirst} onChange={(e) => setEdFirst(e.target.value)} disabled={savingDetails} />
                           </Form.Group>
                         </Col>
                         <Col md={6}>
-                          <Form.Group className="mb-2">
+                          <Form.Group className="mb-2" controlId="players-edit-last-name">
                             <Form.Label>Last name</Form.Label>
                             <Form.Control value={edLast} onChange={(e) => setEdLast(e.target.value)} disabled={savingDetails} />
                           </Form.Group>
                         </Col>
                       </Row>
-                      <Form.Group className="mb-2">
+                      <Form.Group className="mb-2" controlId="players-edit-email">
                         <Form.Label>Email</Form.Label>
                         <Form.Control type="email" value={edEmail} onChange={(e) => setEdEmail(e.target.value)} disabled={savingDetails} />
                       </Form.Group>

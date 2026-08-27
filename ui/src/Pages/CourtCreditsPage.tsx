@@ -95,7 +95,7 @@ export default function CourtCreditsPage() {
     }
   }, []);
 
-  useEffect(() => { loadBatches(); }, []);
+  useEffect(() => { loadBatches(); }, [loadBatches]);
 
   // ── Load history when accordion opens ────────────────────────────────────────
   useEffect(() => {
@@ -268,13 +268,13 @@ export default function CourtCreditsPage() {
                       {formError && <Alert variant="danger" dismissible onClose={() => setFormError('')}>{formError}</Alert>}
                       <Row>
                         <Col md={6} className="mb-3">
-                          <Form.Group>
+                          <Form.Group controlId="court-credit-edit-name">
                             <Form.Label>Batch Name</Form.Label>
                             <Form.Control name="name" placeholder="Optional label" value={editForm.name} onChange={handleFormChange} />
                           </Form.Group>
                         </Col>
                         <Col md={6} className="mb-3">
-                          <Form.Group>
+                          <Form.Group controlId="court-credit-edit-purchaser-name">
                             <Form.Label>Purchaser Name</Form.Label>
                             <Form.Control name="purchaserName" value={editForm.purchaserName} onChange={handleFormChange} required />
                           </Form.Group>
@@ -282,10 +282,11 @@ export default function CourtCreditsPage() {
                       </Row>
                       <Row>
                         <Col md={6} className="mb-3">
-                          <Form.Group>
+                          <Form.Group controlId="court-credit-edit-purchase-date">
                             <Form.Label>Purchase Date</Form.Label>
                             <div>
                               <DatePicker
+                                id="court-credit-edit-purchase-date"
                                 selected={editForm.purchaseDate}
                                 onChange={(d: Date) => setEditForm(p => ({ ...p, purchaseDate: d }))}
                                 dateFormat="yyyy-MM-dd" className="form-control" maxDate={new Date()}
@@ -296,29 +297,29 @@ export default function CourtCreditsPage() {
                       </Row>
                       <Row>
                         <Col md={4} className="mb-3">
-                          <Form.Group>
+                          <Form.Group controlId="court-credit-edit-hours-purchased">
                             <Form.Label>Hours Purchased</Form.Label>
                             <Form.Control type="number" name="hoursPurchased" min="0.25" step="0.25" value={editForm.hoursPurchased} onChange={handleFormChange} required />
                           </Form.Group>
                         </Col>
                         <Col md={4} className="mb-3">
-                          <Form.Group>
+                          <Form.Group controlId="court-credit-edit-total-cost">
                             <Form.Label>Total Cost ($)</Form.Label>
                             <Form.Control type="number" name="totalCost" min="0" step="0.01" value={editForm.totalCost} onChange={handleFormChange} required />
                           </Form.Group>
                         </Col>
                         <Col md={4} className="mb-3">
-                          <Form.Group>
+                          <Form.Group controlId="court-credit-edit-remaining-hours">
                             <Form.Label>Remaining Hours</Form.Label>
                             <Form.Control type="number" name="remainingHours" min="0" step="0.25" value={editForm.remainingHours} onChange={handleFormChange} required />
                           </Form.Group>
                         </Col>
                       </Row>
-                      <Form.Group className="mb-3">
+                      <Form.Group className="mb-3" controlId="court-credit-edit-notes">
                         <Form.Label>Notes</Form.Label>
                         <Form.Control as="textarea" rows={2} name="notes" value={editForm.notes} onChange={handleFormChange} />
                       </Form.Group>
-                      <Form.Group className="mb-3">
+                      <Form.Group className="mb-3" controlId="court-credit-edit-reason">
                         <Form.Label>Reason for Edit <span className="text-danger">*</span></Form.Label>
                         <Form.Control as="textarea" rows={2} value={editReason} onChange={e => setEditReason(e.target.value)} required />
                       </Form.Group>

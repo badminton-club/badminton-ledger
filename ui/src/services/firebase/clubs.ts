@@ -17,11 +17,13 @@ import {
   membersRef,
   linkRequestsRef,
   linkRequestDoc,
+  profileEditRequestsRef,
+  profileEditRequestDoc,
   clubCollection,
   CLUB_DATA_COLLECTIONS,
 } from './client';
 import { serviceCall } from './utils';
-import type { UserProfile, Club, ClubRole, ClubMember, LinkRequest, UserClub } from 'types';
+import type { UserProfile, Club, ClubRole, ClubMember, LinkRequest, ProfileEditRequest, UserClub } from 'types';
 
 const EMPTY_PROFILE: UserProfile = { clubs: [], lastVisitedClub: null };
 
@@ -226,6 +228,73 @@ export async function fetchMyLinkRequest(clubId: string, uid: string): Promise<L
   });
 }
 
+// ─── Profile edit requests ──────────────────────────────────────────────────
+// A linked member can't write to their player doc directly — they submit a
+// proposed name/email change here for an admin to review and apply (via
+// updatePlayerProfile), keeping every profile change auditable and admin-gated.
+
+/** A linked member proposes a change to their own player's name/email. One pending request per user. */
+export async function submitProfileEditRequest(
+  clubId: string,
+  uid: string,
+  playerId: string,
+  firstName: string,
+  lastName: string | null,
+  email: string | null
+): Promise<void> {
+  return serviceCall('submitProfileEditRequest', async () => {
+    await setDoc(profileEditRequestDoc(clubId, uid), {
+      uid, playerId, firstName, lastName: lastName || null, email: email || null, createdAt: serverTimestamp(),
+    });
+  });
+}
+
+/** Lists pending profile-edit requests for a club (admin-only). */
+export async function fetchProfileEditRequests(clubId: string): Promise<ProfileEditRequest[]> {
+  return serviceCall('fetchProfileEditRequests', async () => {
+    const snap = await getDocs(profileEditRequestsRef(clubId));
+    return snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        uid: d.id,
+        playerId: data.playerId as string,
+        firstName: (data.firstName as string) ?? '',
+        lastName: (data.lastName as string | null) ?? null,
+        email: (data.email as string | null) ?? null,
+        createdAt: data.createdAt,
+      };
+    });
+  });
+}
+
+/** Returns the caller's own pending profile-edit request, if any. */
+export async function fetchMyProfileEditRequest(clubId: string, uid: string): Promise<ProfileEditRequest | null> {
+  return serviceCall('fetchMyProfileEditRequest', async () => {
+    try {
+      const snap = await getDoc(profileEditRequestDoc(clubId, uid));
+      if (!snap.exists()) return null;
+      const data = snap.data();
+      return {
+        uid,
+        playerId: data.playerId as string,
+        firstName: (data.firstName as string) ?? '',
+        lastName: (data.lastName as string | null) ?? null,
+        email: (data.email as string | null) ?? null,
+        createdAt: data.createdAt,
+      };
+    } catch {
+      return null;
+    }
+  });
+}
+
+/** Removes a profile-edit request (after approval, or to dismiss it). */
+export async function deleteProfileEditRequest(clubId: string, uid: string): Promise<void> {
+  return serviceCall('deleteProfileEditRequest', async () => {
+    await deleteDoc(profileEditRequestDoc(clubId, uid));
+  });
+}
+
 /** Shows or hides a navbar tab for a club (admin-only, enforced by rules). */
 export async function setClubTabEnabled(clubId: string, tabKey: string, enabled: boolean): Promise<void> {
   return serviceCall('setClubTabEnabled', async () => {
@@ -251,9 +320,15 @@ export async function deleteClub(clubId: string, uid: string): Promise<void> {
       }
     }
 
-    const members = await getDocs(membersRef(clubId));
+    const [members, linkRequests, profileEditRequests] = await Promise.all([
+      getDocs(membersRef(clubId)),
+      getDocs(linkRequestsRef(clubId)),
+      getDocs(profileEditRequestsRef(clubId)),
+    ]);
     const batch = writeBatch(db);
     members.docs.forEach((d) => batch.delete(d.ref));
+    linkRequests.docs.forEach((d) => batch.delete(d.ref));
+    profileEditRequests.docs.forEach((d) => batch.delete(d.ref));
     batch.delete(clubDoc(clubId));
     await batch.commit();
 

@@ -60,17 +60,22 @@ service cloud.firestore {
         allow delete:         if isClubAdmin(clubId) || request.auth.uid == uid;
       }
 
+      // Profile edit requests: a linked member proposes a name/email change here
+      // for an admin to review and apply — same shape as linkRequests above.
+      match /profileEditRequests/{uid} {
+        allow read:           if isSignedIn() && (request.auth.uid == uid || isClubAdmin(clubId));
+        allow create, update: if isSignedIn() && request.auth.uid == uid;
+        allow delete:         if isClubAdmin(clubId) || request.auth.uid == uid;
+      }
+
       // Calendar data: any member may read; only admins may write.
       match /sessions/{doc} { allow read: if isMember(clubId); allow write: if isClubAdmin(clubId); }
       match /players/{doc} {
-        allow read:           if isMember(clubId);
+        allow read:   if isMember(clubId);
         allow create, delete: if isClubAdmin(clubId);
-        // Admins edit any player; a member may edit only their own linked player's
-        // name/email (never balance, sessionCount, etc.).
-        allow update: if isClubAdmin(clubId)
-          || (isMember(clubId) && doc == memberPlayerId(clubId)
-              && request.resource.data.diff(resource.data).affectedKeys()
-                   .hasOnly(['firstName', 'firstNameLower', 'lastName', 'lastNameLower', 'email']));
+        // Only admins edit players — a member proposes name/email changes via
+        // profileEditRequests above instead of writing directly.
+        allow update: if isClubAdmin(clubId);
       }
 
       // Financial / inventory data: admins only.

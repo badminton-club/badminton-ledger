@@ -249,8 +249,14 @@ function StatusContent({
     }
 
     if (item.status === "conflict") {
+        const nameCounts = item.candidates.reduce<Record<string, number>>((counts, player) => {
+            const name = formatPlayerName(player).toLocaleLowerCase();
+            counts[name] = (counts[name] ?? 0) + 1;
+            return counts;
+        }, {});
+
         return (
-            <Form.Group>
+            <Form.Group controlId={`resolve-name-conflict-${item.id}`}>
                 <Form.Label className="text-warning small mb-1">Multiple matches — please select:</Form.Label>
                 <Form.Select
                     size="sm"
@@ -267,11 +273,15 @@ function StatusContent({
                     <option value="__new__" style={{ color: "green" }}>
                         + Add new player
                     </option>
-                    {item.candidates.map((p) => (
-                        <option key={p.id} value={p.id}>
-                            {formatPlayerName(p)}
-                        </option>
-                    ))}
+                    {item.candidates.map((p) => {
+                        const name = formatPlayerName(p);
+                        const label = nameCounts[name.toLocaleLowerCase()] > 1 ? `${name} (${p.email ?? "no email"})` : name;
+                        return (
+                            <option key={p.id} value={p.id}>
+                                {label}
+                            </option>
+                        );
+                    })}
                 </Form.Select>
             </Form.Group>
         );
