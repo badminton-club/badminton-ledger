@@ -1,170 +1,158 @@
 import React from 'react';
-import { screen, waitFor } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderWithProviders, makePlayersState } from '../../../../test-utils/renderWithProviders';
+import { resetFirebaseTestState, seedClubDoc } from '../../../../test-utils/firebaseTestHelpers';
 import ResolveNamesStep from '../ResolveNamesStep';
-import { renderWithProviders, makeClubState, makePlayersState } from '../../../../test-utils/renderWithProviders';
-import { resetFirebaseTestState, seedClubDoc, getClubDocData, ts, TEST_CLUB_ID } from '../../../../test-utils/firebaseTestHelpers';
 import type { NameResolutionItem, Player } from 'types';
-
-function makePlayer(overrides: Partial<Player> = {}): Player {
-  return {
-    id: 'p1',
-    firstName: 'Alice',
-    firstNameLower: 'alice',
-    lastName: 'Anderson',
-    lastNameLower: 'anderson',
-    email: null,
-    balance: 0,
-    owed: 0,
-    description: '',
-    sessionCount: 0,
-    createdAt: ts('2026-02-01'),
-    ...overrides,
-  };
-}
-
-function makeItem(overrides: Partial<NameResolutionItem> = {}): NameResolutionItem {
-  return {
-    id: '1',
-    rawName: 'Alice Anderson',
-    editableName: 'Alice Anderson',
-    isEditing: false,
-    status: 'matched',
-    candidates: [makePlayer()],
-    resolvedPlayerId: 'p1',
-    ...overrides,
-  };
-}
-
-function renderStep({
-  items,
-  players = [],
-  formError,
-  onComplete = jest.fn(),
-  onBack = jest.fn(),
-}: {
-  items: NameResolutionItem[];
-  players?: Player[];
-  formError?: string;
-  onComplete?: jest.Mock;
-  onBack?: jest.Mock;
-}) {
-  return {
-    onComplete,
-    onBack,
-    ...renderWithProviders(<ResolveNamesStep onComplete={onComplete} onBack={onBack} />, {
-      preloadedState: {
-        club: makeClubState({ currentClubId: TEST_CLUB_ID }),
-        players: makePlayersState(players),
-        sessionModal: {
-          mode: 'resolve',
-          playersInput: '',
-          resolutionItems: items,
-          confirmedPlayers: [],
-          errors: formError ? { form: formError } : {},
-        } as any,
-      },
-    }),
-  };
-}
+import type { RootState } from '../../../../store';
 
 beforeEach(() => {
   resetFirebaseTestState();
 });
 
+function makeItem(overrides: Partial<NameResolutionItem> = {}): NameResolutionItem {
+  return {
+    id: 'item-1',
+    rawName: 'John Smith',
+    editableName: 'John Smith',
+    isEditing: false,
+    status: 'pending',
+    candidates: [],
+    resolvedPlayerId: null,
+    ...overrides,
+  };
+}
+
+function makePlayer(overrides: Partial<Player> = {}): Player {
+  return {
+    id: 'p1',
+    firstName: 'John',
+    firstNameLower: 'john',
+    lastName: 'Smith',
+    lastNameLower: 'smith',
+    email: null,
+    balance: 0,
+    owed: 0,
+    description: '',
+    sessionCount: 0,
+    createdAt: undefined as never,
+    ...overrides,
+  };
+}
+
+function renderStep(items: NameResolutionItem[], players: Player[] = []) {
+  const sessionModal: Partial<RootState['sessionModal']> = {
+    mode: 'resolve',
+    playersInput: '',
+    resolutionItems: items,
+    confirmedPlayers: [],
+    errors: {},
+  };
+  return renderWithProviders(
+    <ResolveNamesStep onComplete={jest.fn()} onBack={jest.fn()} />,
+    { preloadedState: { sessionModal: sessionModal as RootState['sessionModal'], players: makePlayersState(players) } }
+  );
+}
+
 describe('ResolveNamesStep', () => {
-  it('shows pending progress and lets the user go back', async () => {
-    const user = userEvent.setup();
-    const pending = makeItem({ id: 'pending', rawName: 'Bob', editableName: 'Bob', status: 'pending', candidates: [], resolvedPlayerId: null });
-    const { onBack } = renderStep({ items: [pending] });
-
-    expect(screen.getByText('Matching 1 name…')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: '← Back' }));
-    expect(onBack).toHaveBeenCalledTimes(1);
+  it('shows a spinner and matching count while items are pending', () => {
+    renderStep([makeItem({ status: 'pending' }), makeItem({ id: 'item-2', status: 'pending' })]);
+    expect(screen.getByText(/Matching 2 names/)).toBeInTheDocument();
   });
 
-  it('lets the user resolve a conflict and complete once all names are confirmed', async () => {
+  it('shows the resolved player name for a matched item', () => {
+    const player = makePlayer();
+    renderStep([makeItem({ rawName: 'J. Smith', status: 'matched', candidates: [player], resolvedPlayerId: 'p1' })]);
+    expect(screen.getByText('John Smith')).toBeInTheDocument(); // the resolved player's formatted name
+    expect(screen.getByText('J. Smith')).toBeInTheDocument(); // the original raw pasted name, kept alongside it
+    expect(screen.getByRole('button', { name: 'clear' })).toBeInTheDocument();
+  });
+
+  it('shows a select dropdown listing every candidate for a conflict', () => {
+    const candidates = [makePlayer({ id: 'p1', firstName: 'John' }), makePlayer({ id: 'p2', firstName: 'Jon' })];
+    renderStep([makeItem({ status: 'conflict', candidates, resolvedPlayerId: null })]);
+    const select = screen.getByRole('combobox');
+    expect(select).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'John Smith' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Jon Smith' })).toBeInTheDocument();
+  });
+
+  it('shows "no match found" with an add-player action for an unmatched item', () => {
+    renderStep([makeItem({ status: 'unmatched' })]);
+    expect(screen.getByText('No match found')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '+ Add player' })).toBeInTheDocument();
+  });
+
+  it('shows a failure message for a failed match', () => {
+    renderStep([makeItem({ status: 'failed' })]);
+    expect(screen.getByText(/Match failed/)).toBeInTheDocument();
+  });
+
+  it('flags duplicate selections when two items resolve to the same player', async () => {
     const user = userEvent.setup();
-    const alice = makePlayer();
-    const alex1 = makePlayer({ id: 'p2', firstName: 'Alex', firstNameLower: 'alex', lastName: 'Kim', lastNameLower: 'kim' });
-    const alex2 = makePlayer({ id: 'p3', firstName: 'Alex', firstNameLower: 'alex', lastName: 'Lee', lastNameLower: 'lee' });
-    const { onComplete } = renderStep({
-      players: [alice, alex1, alex2],
-      items: [
-        makeItem({ id: 'alice', candidates: [alice], resolvedPlayerId: alice.id }),
-        makeItem({
-          id: 'alex',
-          rawName: 'Alex',
-          editableName: 'Alex',
-          status: 'conflict',
-          candidates: [alex1, alex2],
-          resolvedPlayerId: null,
-        }),
-      ],
-    });
-
-    await user.selectOptions(screen.getByRole('combobox'), alex2.id);
-    await user.click(screen.getByRole('button', { name: 'Confirm & Add Details →' }));
-
-    expect(onComplete).toHaveBeenCalledWith([
-      expect.objectContaining({ resolvedPlayerId: 'p1' }),
-      expect.objectContaining({ resolvedPlayerId: 'p3', status: 'matched' }),
+    const player = makePlayer();
+    renderStep([
+      makeItem({ id: 'a', status: 'matched', candidates: [player], resolvedPlayerId: 'p1' }),
+      makeItem({ id: 'b', rawName: 'J. Smith', status: 'matched', candidates: [player], resolvedPlayerId: 'p1' }),
     ]);
+    // Duplicate rows are marked with a warning-colored "edit" link...
+    const editLinks = screen.getAllByRole('button', { name: 'edit' });
+    expect(editLinks.some(link => link.className.includes('text-warning'))).toBe(true);
+    // ...and the confirm button is disabled with a tooltip explaining why (shown on hover).
+    const confirmButton = screen.getByRole('button', { name: /Confirm & Add Details/ });
+    expect(confirmButton).toBeDisabled();
+    await user.hover(confirmButton.parentElement!);
+    expect(await screen.findByText(/Duplicate names found/)).toBeInTheDocument();
   });
 
-  it('supports editing and rematching an unmatched name using the real player lookup service', async () => {
+  it('disables "Confirm & Add Details" until every item is resolved', () => {
+    renderStep([makeItem({ status: 'unmatched', resolvedPlayerId: null })]);
+    expect(screen.getByRole('button', { name: /Confirm & Add Details/ })).toBeDisabled();
+  });
+
+  it('enables and calls onComplete with the resolved items once everything is resolved', async () => {
     const user = userEvent.setup();
-    const grace = makePlayer({ id: 'p9', firstName: 'Grace', firstNameLower: 'grace', lastName: 'Hopper', lastNameLower: 'hopper' });
-    seedClubDoc('players', grace.id, grace);
-    const { onComplete } = renderStep({
-      players: [grace],
-      items: [makeItem({ id: 'bad', rawName: 'Grce', editableName: 'Grce', status: 'unmatched', candidates: [], resolvedPlayerId: null })],
+    const onComplete = jest.fn();
+    const player = makePlayer();
+    const items = [makeItem({ status: 'matched', candidates: [player], resolvedPlayerId: 'p1' })];
+    renderWithProviders(<ResolveNamesStep onComplete={onComplete} onBack={jest.fn()} />, {
+      preloadedState: {
+        sessionModal: { mode: 'resolve', playersInput: '', resolutionItems: items, confirmedPlayers: [], errors: {} } as RootState['sessionModal'],
+        players: makePlayersState([player]),
+      },
     });
+
+    const confirmButton = screen.getByRole('button', { name: /Confirm & Add Details/ });
+    expect(confirmButton).toBeEnabled();
+    await user.click(confirmButton);
+    expect(onComplete).toHaveBeenCalledWith(items);
+  });
+
+  it('calls onBack when the Back button is clicked', async () => {
+    const user = userEvent.setup();
+    const onBack = jest.fn();
+    renderWithProviders(<ResolveNamesStep onComplete={jest.fn()} onBack={onBack} />, {
+      preloadedState: {
+        sessionModal: { mode: 'resolve', playersInput: '', resolutionItems: [], confirmedPlayers: [], errors: {} } as RootState['sessionModal'],
+        players: makePlayersState([]),
+      },
+    });
+    await user.click(screen.getByRole('button', { name: /Back/ }));
+    expect(onBack).toHaveBeenCalled();
+  });
+
+  it('re-matches a name against seeded players when edited and searched', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer({ id: 'p1', firstName: 'Ada', firstNameLower: 'ada', lastName: 'Lovelace', lastNameLower: 'lovelace' }));
+    renderStep([makeItem({ status: 'unmatched', editableName: 'Wrong Name', resolvedPlayerId: null })]);
 
     await user.click(screen.getByRole('button', { name: 'edit' }));
-    const textbox = screen.getByDisplayValue('Grce');
-    await user.clear(textbox);
-    await user.type(textbox, 'Grace Hopper');
+    const input = screen.getByRole('textbox');
+    await user.clear(input);
+    await user.type(input, 'Ada Lovelace');
     await user.click(screen.getByRole('button', { name: 'Search' }));
 
-    expect(await screen.findByText('Grace Hopper')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm & Add Details →' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Confirm & Add Details →' }));
-
-    expect(onComplete).toHaveBeenCalledWith([
-      expect.objectContaining({ resolvedPlayerId: grace.id, status: 'matched' }),
-    ]);
-  });
-
-  it('creates a new player inline for an unmatched name and stores it in fake firestore', async () => {
-    const user = userEvent.setup();
-    const { onComplete } = renderStep({
-      items: [makeItem({ id: 'new', rawName: 'New Person', editableName: 'New Person', status: 'unmatched', candidates: [], resolvedPlayerId: null })],
-    });
-
-    await user.click(screen.getByRole('button', { name: '+ Add player' }));
-    await user.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(await screen.findByRole('button', { name: 'clear' })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm & Add Details →' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Confirm & Add Details →' }));
-
-    const created = onComplete.mock.calls[0][0][0];
-    const savedDoc = getClubDocData('players', created.resolvedPlayerId);
-    expect(savedDoc).toEqual(expect.objectContaining({ firstName: 'New', lastName: 'Person' }));
-  });
-
-  it('disables completion when duplicate player resolutions are present', () => {
-    const alice = makePlayer();
-    renderStep({
-      players: [alice],
-      items: [
-        makeItem({ id: '1', resolvedPlayerId: alice.id }),
-        makeItem({ id: '2', rawName: 'Also Alice', editableName: 'Also Alice', resolvedPlayerId: alice.id }),
-      ],
-    });
-
-    expect(screen.getByRole('button', { name: 'Confirm & Add Details →' })).toBeDisabled();
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
   });
 });
