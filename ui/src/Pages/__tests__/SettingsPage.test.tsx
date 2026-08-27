@@ -217,6 +217,65 @@ describe('SettingsPage', () => {
     });
   });
 
+  it('warns and requires confirmation before approving a request into an already-linked player', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', firstName: 'Taylor', lastName: 'Swift' })];
+    seedMemberDoc('existing-member', { role: 'member', playerId: 'p1' });
+    __seedDoc(`clubs/${TEST_CLUB_ID}/linkRequests/requester-2`, {
+      uid: 'requester-2',
+      firstName: 'Taylor',
+      lastName: 'Swift',
+      email: 'a-different-email@example.com',
+      createdAt: ts('2026-04-02T00:00:00.000Z'),
+    });
+
+    renderPage({ role: 'admin', players });
+
+    expect(await screen.findByText('Already linked to another member')).toBeInTheDocument();
+
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(false);
+    const requestRow = (await screen.findByText('Taylor Swift', { selector: 'strong' })).closest('.list-group-item');
+    const approveButton = within(requestRow as HTMLElement).getByRole('button', { name: 'Approve' });
+    await waitFor(() => expect(approveButton).toBeEnabled());
+
+    // Declining the confirmation must not approve the request.
+    await user.click(approveButton);
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}/linkRequests/requester-2`)).toBeDefined();
+
+    // Accepting it proceeds as normal.
+    confirmSpy.mockReturnValue(true);
+    await user.click(approveButton);
+    await waitFor(() => {
+      expect(__getDocData(`clubs/${TEST_CLUB_ID}/linkRequests/requester-2`)).toBeUndefined();
+      expect(__getDocData(`clubs/${TEST_CLUB_ID}/members/requester-2`)).toMatchObject({ playerId: 'p1' });
+    });
+
+    confirmSpy.mockRestore();
+  });
+
+  it('refreshes the link-request list on demand', async () => {
+    const user = userEvent.setup();
+    renderPage({ role: 'admin' });
+
+    expect(await screen.findByText('No pending requests.')).toBeInTheDocument();
+
+    // Simulates a request submitted after the page first loaded — nothing
+    // refetches it automatically, so the admin needs a manual way to see it.
+    __seedDoc(`clubs/${TEST_CLUB_ID}/linkRequests/late-requester`, {
+      uid: 'late-requester',
+      firstName: 'Casey',
+      lastName: 'Jordan',
+      email: '',
+      createdAt: ts('2026-04-03T00:00:00.000Z'),
+    });
+    expect(screen.queryByText('Casey Jordan')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect(await screen.findByText('Casey Jordan', { selector: 'strong' })).toBeInTheDocument();
+  });
+
   it('round-trips a downloaded JSON backup through the restore-from-file flow', async () => {
     const user = userEvent.setup();
     let capturedBlob: Blob | null = null;

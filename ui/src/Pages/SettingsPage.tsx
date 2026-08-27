@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup, Badge, Modal } from 'react-bootstrap';
 import { format } from 'date-fns';
 import { clearAllData, exportAllData, restoreAllData, CLEARABLE_COLLECTIONS, type ClearSummary, type BackupData } from '../services/firebase/admin';
@@ -139,6 +139,14 @@ export default function SettingsPage() {
     }
   };
 
+  // Existing members already linked to a player — used to flag a pending request
+  // whose suggested/selected match is already claimed by a different member, so
+  // an admin doesn't accidentally approve a duplicate link without noticing.
+  const linkedPlayerIds = useMemo(
+    () => new Set(members.filter((m) => m.playerId).map((m) => m.playerId as string)),
+    [members]
+  );
+
   const loadRequests = useCallback(async () => {
     if (!clubId) { setRequests([]); return; }
     setRequestsLoading(true);
@@ -171,6 +179,15 @@ export default function SettingsPage() {
     if (!clubId) return;
     const pid = reqSel[req.uid];
     if (!pid) { setRequestsError('Pick a player to link, or create a new one.'); return; }
+    if (linkedPlayerIds.has(pid)) {
+      const existing = players.find((p) => p.id === pid);
+      const name = existing ? playerLabel(existing) : 'This player';
+      const ok = window.confirm(
+        `${name} is already linked to another member. Linking ${req.firstName} too means both ` +
+        'accounts will share that one player record. Continue?'
+      );
+      if (!ok) return;
+    }
     setRequestsError('');
     setProcessingReq(req.uid);
     try {
@@ -418,7 +435,17 @@ export default function SettingsPage() {
       </Card>
 
       <Card className="mt-3">
-        <Card.Header>Link requests</Card.Header>
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span>Link requests</span>
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            onClick={loadRequests}
+            disabled={requestsLoading}
+          >
+            {requestsLoading ? <Spinner size="sm" animation="border" /> : 'Refresh'}
+          </Button>
+        </Card.Header>
         <Card.Body>
           <Card.Text className="text-muted">
             People who asked to be linked to a player. Match each to an existing player, or create a
@@ -431,37 +458,46 @@ export default function SettingsPage() {
             <p className="text-muted mb-0">No pending requests.</p>
           ) : (
             <ListGroup variant="flush">
-              {requests.map((r) => (
-                <ListGroup.Item key={r.uid} className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                  <span>
-                    <strong>{`${r.firstName} ${r.lastName ?? ''}`.trim() || '(no name)'}</strong>
-                    {r.email && <span className="text-muted small ms-2">{r.email}</span>}
-                  </span>
-                  <span className="d-flex align-items-center gap-2 flex-wrap">
-                    <Form.Select
-                      size="sm"
-                      value={reqSel[r.uid] ?? ''}
-                      onChange={(e) => setReqSel((prev) => ({ ...prev, [r.uid]: e.target.value }))}
-                      disabled={processingReq === r.uid}
-                      style={{ minWidth: 160 }}
-                    >
-                      <option value="">— match a player —</option>
-                      {players.map((p) => (
-                        <option key={p.id} value={p.id}>{playerLabel(p)}</option>
-                      ))}
-                    </Form.Select>
-                    <Button size="sm" variant="success" disabled={processingReq === r.uid || !reqSel[r.uid]} onClick={() => handleApproveRequest(r)}>
-                      {processingReq === r.uid ? <Spinner size="sm" animation="border" /> : 'Approve'}
-                    </Button>
-                    <Button size="sm" variant="outline-primary" disabled={processingReq === r.uid} onClick={() => handleCreateAndLink(r)}>
-                      Create player
-                    </Button>
-                    <Button size="sm" variant="outline-secondary" disabled={processingReq === r.uid} onClick={() => handleDismissRequest(r)}>
-                      Dismiss
-                    </Button>
-                  </span>
-                </ListGroup.Item>
-              ))}
+              {requests.map((r) => {
+                const selectedPlayerId = reqSel[r.uid];
+                const alreadyLinked = !!selectedPlayerId && linkedPlayerIds.has(selectedPlayerId);
+                return (
+                  <ListGroup.Item key={r.uid} className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                    <span>
+                      <strong>{`${r.firstName} ${r.lastName ?? ''}`.trim() || '(no name)'}</strong>
+                      {r.email && <span className="text-muted small ms-2">{r.email}</span>}
+                      {alreadyLinked && (
+                        <Badge bg="warning" text="dark" className="ms-2">
+                          Already linked to another member
+                        </Badge>
+                      )}
+                    </span>
+                    <span className="d-flex align-items-center gap-2 flex-wrap">
+                      <Form.Select
+                        size="sm"
+                        value={reqSel[r.uid] ?? ''}
+                        onChange={(e) => setReqSel((prev) => ({ ...prev, [r.uid]: e.target.value }))}
+                        disabled={processingReq === r.uid}
+                        style={{ minWidth: 160 }}
+                      >
+                        <option value="">— match a player —</option>
+                        {players.map((p) => (
+                          <option key={p.id} value={p.id}>{playerLabel(p)}</option>
+                        ))}
+                      </Form.Select>
+                      <Button size="sm" variant="success" disabled={processingReq === r.uid || !reqSel[r.uid]} onClick={() => handleApproveRequest(r)}>
+                        {processingReq === r.uid ? <Spinner size="sm" animation="border" /> : 'Approve'}
+                      </Button>
+                      <Button size="sm" variant="outline-primary" disabled={processingReq === r.uid} onClick={() => handleCreateAndLink(r)}>
+                        Create player
+                      </Button>
+                      <Button size="sm" variant="outline-secondary" disabled={processingReq === r.uid} onClick={() => handleDismissRequest(r)}>
+                        Dismiss
+                      </Button>
+                    </span>
+                  </ListGroup.Item>
+                );
+              })}
             </ListGroup>
           )}
         </Card.Body>
