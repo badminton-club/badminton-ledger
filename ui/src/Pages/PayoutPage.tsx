@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Container, Card, Button, Table, Spinner, Alert, Row, Col, Form, Badge } from 'react-bootstrap';
 import { format } from 'date-fns';
-import { fetchOwnerPayoutSummary, payOwner } from '../services/firebase';
+import { fetchOwnerPayoutSummary, payOwner, addCustomPayoutTransaction } from '../services/firebase';
 import { useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
 import { selectIsClubAdmin } from '../features/club/clubSlice';
@@ -54,6 +54,14 @@ export default function PayoutPage() {
   const [customAmount, setCustomAmount] = useState('');
   const [paying, setPaying] = useState(false);
   const [payResult, setPayResult] = useState('');
+
+  const [txType, setTxType] = useState<'add' | 'deduct'>('add');
+  const [txAmount, setTxAmount] = useState('');
+  const [txNote, setTxNote] = useState('');
+  const [txPlayerId, setTxPlayerId] = useState('');
+  const [txSubmitting, setTxSubmitting] = useState(false);
+  const [txError, setTxError] = useState('');
+  const [txResult, setTxResult] = useState('');
 
   const [sortColumn, setSortColumn] = useState<LedgerColumn>('dateRecorded');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
@@ -198,6 +206,40 @@ export default function PayoutPage() {
     }
   };
 
+  const handleAddTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsed = parseFloat(txAmount);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setTxError('Enter an amount greater than zero.');
+      return;
+    }
+    if (!txNote.trim()) {
+      setTxError('A note is required (e.g. what was sold and to whom).');
+      return;
+    }
+
+    setTxSubmitting(true);
+    setTxError('');
+    setTxResult('');
+    try {
+      const delta = txType === 'add' ? parsed : -parsed;
+      await addCustomPayoutTransaction(delta, txNote, txPlayerId || null);
+      setTxResult(
+        txType === 'add'
+          ? `Added ${money(parsed)} to the pending payout.`
+          : `Deducted ${money(parsed)} from the pending payout.`
+      );
+      setTxAmount('');
+      setTxNote('');
+      setTxPlayerId('');
+      await load();
+    } catch (err) {
+      setTxError(err instanceof Error ? err.message : 'Failed to add transaction.');
+    } finally {
+      setTxSubmitting(false);
+    }
+  };
+
   if (checkingAdmin) {
     return (
       <Container className="py-4 text-center">
@@ -302,6 +344,82 @@ export default function PayoutPage() {
               </Button>
             </Col>
           </Row>
+        </Card.Body>
+      </Card>
+
+      <Card className="mb-4">
+        <Card.Body>
+          <Card.Title>Add custom transaction</Card.Title>
+          <Card.Text className="text-muted">
+            Record money the club collected (or paid out) outside of a normal session
+            settlement — e.g. someone buying birdies from the shared stash with cash. This
+            adjusts the pending payout without touching any player's prepaid balance.
+          </Card.Text>
+          <Form onSubmit={handleAddTransaction}>
+            <Row className="g-3">
+              <Col md={3}>
+                <Form.Label>Type</Form.Label>
+                <Form.Select
+                  value={txType}
+                  onChange={(e) => setTxType(e.target.value as 'add' | 'deduct')}
+                  disabled={txSubmitting}
+                >
+                  <option value="add">Add to payout (+)</option>
+                  <option value="deduct">Deduct from payout (-)</option>
+                </Form.Select>
+              </Col>
+              <Col md={3}>
+                <Form.Label>Amount</Form.Label>
+                <Form.Control
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={txAmount}
+                  onChange={(e) => setTxAmount(e.target.value)}
+                  disabled={txSubmitting}
+                />
+              </Col>
+              <Col md={3}>
+                <Form.Label>Player (optional)</Form.Label>
+                <Form.Select
+                  value={txPlayerId}
+                  onChange={(e) => setTxPlayerId(e.target.value)}
+                  disabled={txSubmitting}
+                >
+                  <option value="">— None —</option>
+                  {players.map((p) => (
+                    <option key={p.id} value={p.id}>{`${p.firstName} ${p.lastName ?? ''}`.trim()}</option>
+                  ))}
+                </Form.Select>
+              </Col>
+              <Col md={3} className="d-flex align-items-end">
+                <Button variant="primary" type="submit" disabled={txSubmitting} className="w-100">
+                  {txSubmitting ? <Spinner size="sm" animation="border" /> : 'Add transaction'}
+                </Button>
+              </Col>
+              <Col md={12}>
+                <Form.Label>Note</Form.Label>
+                <Form.Control
+                  type="text"
+                  placeholder="e.g. Manager bought 2 tubes of birdies from the stash (cash)"
+                  value={txNote}
+                  onChange={(e) => setTxNote(e.target.value)}
+                  disabled={txSubmitting}
+                />
+              </Col>
+            </Row>
+          </Form>
+          {txError && (
+            <Alert variant="danger" className="mt-3 mb-0" onClose={() => setTxError('')} dismissible>
+              {txError}
+            </Alert>
+          )}
+          {txResult && (
+            <Alert variant="success" className="mt-3 mb-0" onClose={() => setTxResult('')} dismissible>
+              {txResult}
+            </Alert>
+          )}
         </Card.Body>
       </Card>
 

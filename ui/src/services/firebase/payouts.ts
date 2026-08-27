@@ -102,6 +102,38 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
 }
 
 /**
+ * Records a one-off transaction the club collected that isn't a session payment
+ * or a player's prepaid-balance top-up — e.g. a manager buying birdies from the
+ * shared stash and paying cash on the spot. Logged with reason 'manual' so it
+ * counts toward the owner payout like any other manual adjustment, but (unlike
+ * the per-player balance adjustment on the Players page) it never touches a
+ * player's prepaid balance — it's purely a payout-ledger entry.
+ */
+export async function addCustomPayoutTransaction(
+  amount: number,
+  note: string,
+  playerId?: string | null
+): Promise<void> {
+  return serviceCall('addCustomPayoutTransaction', async () => {
+    if (!Number.isFinite(amount) || amount === 0) {
+      throw new Error('Enter a non-zero amount.');
+    }
+    if (!note.trim()) {
+      throw new Error('A note is required.');
+    }
+
+    await setDoc(doc(refs.balanceLedger), {
+      playerId:  playerId ?? null,
+      sessionId: null,
+      delta:     amount,
+      reason:    'manual',
+      note:      note.trim(),
+      createdAt: serverTimestamp(),
+    });
+  });
+}
+
+/**
  * Records a cashout to the owner. When `amount` is omitted, the full pending
  * balance is paid out; otherwise the given custom amount is recorded. Recomputes
  * pending at call time so a full payout is never stale and a custom payout can't
