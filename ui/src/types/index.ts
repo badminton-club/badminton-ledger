@@ -82,6 +82,7 @@ export interface BirdieBatch {
   birdsInOpenTube: number;
   purchaserName: string;
   purchaseDate: Date;
+  notes?: string;
   createdAt: Timestamp;
 }
 

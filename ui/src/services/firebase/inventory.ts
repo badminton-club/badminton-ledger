@@ -64,7 +64,7 @@ export async function updateBirdieBatch(
     // @ts-ignore
     const changes = diffFields(original, updated, [
       'name', 'purchaseDate', 'purchaserName', 'costPerTube',
-      'tubesPurchased', 'birdsPerTube', 'unopenedTubesRemaining', 'birdsInOpenTube',
+      'tubesPurchased', 'birdsPerTube', 'unopenedTubesRemaining', 'birdsInOpenTube', 'notes',
     ]);
     if (changes.length === 0) return;
 
@@ -164,7 +164,7 @@ export async function updateCourtCreditBatch(
   return serviceCall('updateCourtCreditBatch', async () => {
     //@ts-ignore
     const changes = diffFields(original, updated, [
-      'purchaseDate', 'purchaserName', 'hoursPurchased',
+      'name', 'purchaseDate', 'purchaserName', 'hoursPurchased',
       'totalCost', 'remainingHours', 'notes',
     ]);
     if (changes.length === 0) return;

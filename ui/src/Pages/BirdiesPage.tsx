@@ -35,6 +35,7 @@ interface EditFormState {
   birdsPerTube:           number | '';
   unopenedTubesRemaining: number | '';
   birdsInOpenTube:        number | '';
+  notes:                  string;
 }
 
 interface HistoryItem {
@@ -210,6 +211,7 @@ export default function BirdiesPage() {
       birdsPerTube:           selectedBatch.birdsPerTube,
       unopenedTubesRemaining: selectedBatch.unopenedTubesRemaining,
       birdsInOpenTube:        selectedBatch.birdsInOpenTube,
+      notes:                  selectedBatch.notes ?? '',
     });
     setIsEditing(true);
     setPageError('');
@@ -251,7 +253,7 @@ export default function BirdiesPage() {
         selectedBatch.id,
         original,
         { ...editForm, costPerTube: cost, tubesPurchased: tubes, birdsPerTube: birds,
-          unopenedTubesRemaining: unopened, birdsInOpenTube: open },
+          unopenedTubesRemaining: unopened, birdsInOpenTube: open, notes: editForm.notes.trim() },
         editReason,
         'admin',
         'Admin',
@@ -372,6 +374,10 @@ export default function BirdiesPage() {
                 </Col>
               </Row>
               <Form.Group className="mb-3">
+                <Form.Label>Notes</Form.Label>
+                <Form.Control as="textarea" rows={2} name="notes" value={editForm.notes} onChange={handleFormChange} />
+              </Form.Group>
+              <Form.Group className="mb-3">
                 <Form.Label>Reason for Edit <span className="text-danger">*</span></Form.Label>
                 <Form.Control as="textarea" rows={2} value={editReason} onChange={e => setEditReason(e.target.value)} placeholder="e.g., Stock count correction" required />
               </Form.Group>
@@ -410,6 +416,9 @@ export default function BirdiesPage() {
               <p><strong>Total Remaining:</strong> <strong>{remaining}</strong></p>
             </Col>
           </Row>
+          {selectedBatch.notes && (
+            <p><strong>Notes:</strong> <span style={{ whiteSpace: 'pre-wrap' }}>{selectedBatch.notes}</span></p>
+          )}
 
           <hr />
           <h5>Batch History</h5>
@@ -436,7 +445,7 @@ export default function BirdiesPage() {
                     const style = item.type === 'adjustment' ? ADJUSTMENT_ROW_STYLE : {};
                     return (
                       <tr key={`${item.type}-${item.id ?? i}`}>
-                        <td style={style}>{format(item.eventDate, 'yyyy-MM-dd HH:mm')}</td>
+                        <td style={style}>{format(item.eventDate, 'yyyy-MM-dd')}</td>
                         <td style={style}>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
                         <td style={style}>
                           {item.type === 'sessionUsage' && `Used: ${item.quantityUsed as number} birds`}

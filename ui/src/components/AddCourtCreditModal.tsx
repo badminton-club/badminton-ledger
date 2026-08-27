@@ -13,6 +13,7 @@ interface Props {
 }
 
 export default function AddCourtCreditModal({ show, onHide, onAddBatch }: Props) {
+  const [name,              setName]             = useState('');
   const [purchaseDate,     setPurchaseDate]     = useState(new Date());
   const [costPerHour,      setCostPerHour]      = useState('');
   const [hoursPurchased,   setHoursPurchased]   = useState('');
@@ -25,7 +26,7 @@ export default function AddCourtCreditModal({ show, onHide, onAddBatch }: Props)
 
   useEffect(() => {
     if (!show) {
-      setPurchaseDate(new Date()); setCostPerHour(''); setHoursPurchased('');
+      setName(''); setPurchaseDate(new Date()); setCostPerHour(''); setHoursPurchased('');
       setTotalCost(''); setTotalCostEdited(false); setPurchaserName(''); setNotes(''); setError('');
     }
   }, [show]);
@@ -58,6 +59,7 @@ export default function AddCourtCreditModal({ show, onHide, onAddBatch }: Props)
     try {
       await onAddBatch({
         purchaseDate,
+        name:           name.trim() || undefined,
         purchaserName:  purchaserName.trim(),
         costPerHour:    cost,
         hoursPurchased: hours,
@@ -78,6 +80,10 @@ export default function AddCourtCreditModal({ show, onHide, onAddBatch }: Props)
       <Form onSubmit={handleSubmit}>
         <Modal.Body>
           {error && <Alert variant="danger">{error}</Alert>}
+          <Form.Group className="mb-3">
+            <Form.Label>Batch Name</Form.Label>
+            <Form.Control placeholder="Optional label, e.g. Winter block" value={name} onChange={e => setName(e.target.value)} disabled={isSubmitting} />
+          </Form.Group>
           <Form.Group className="mb-3">
             <Form.Label>Purchase Date <span className="text-danger">*</span></Form.Label>
             <div>

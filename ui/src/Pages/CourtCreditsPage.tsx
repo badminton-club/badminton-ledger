@@ -24,6 +24,7 @@ type SortKey = keyof CourtCreditBatch;
 type SortDir = 'asc' | 'desc';
 
 interface EditFormState {
+  name:           string;
   purchaseDate:   Date;
   purchaserName:  string;
   hoursPurchased: number | '';
@@ -40,6 +41,7 @@ interface HistoryItem {
 }
 
 const INIT_EDIT: EditFormState = {
+  name:           '',
   purchaseDate:   new Date(),
   purchaserName:  '',
   hoursPurchased: '',
@@ -140,6 +142,7 @@ export default function CourtCreditsPage() {
     setEditingId(batch.id);
     setActiveKey(batch.id);
     setEditForm({
+      name:           batch.name ?? '',
       purchaseDate:   batch.purchaseDate instanceof Date ? batch.purchaseDate : new Date(batch.purchaseDate),
       purchaserName:  batch.purchaserName,
       hoursPurchased: batch.hoursPurchased,
@@ -186,7 +189,7 @@ export default function CourtCreditsPage() {
       await updateCourtCreditBatch(
         editingId,
         original,
-        { ...editForm, hoursPurchased: hours, totalCost: cost, remainingHours: remaining },
+        { ...editForm, name: editForm.name.trim(), hoursPurchased: hours, totalCost: cost, remainingHours: remaining },
         editReason,
         'admin',
         'Admin',
@@ -218,9 +221,9 @@ export default function CourtCreditsPage() {
         <Card.Body>
           {/* Column headers */}
           <Row className="fw-bold text-muted py-2 px-4 border-bottom mb-2 d-none d-md-flex">
-            {(['costPerHour', 'remainingHours', 'purchaseDate', 'purchaserName'] as SortKey[]).map(key => (
-              <Col key={key} md={3} onClick={() => requestSort(key)} style={{ cursor: 'pointer' }}>
-                {{ costPerHour: 'Cost/Hr', remainingHours: 'Rem. Hrs', purchaseDate: 'Purchase Date', purchaserName: 'Purchaser' }[key]}
+            {(['name', 'costPerHour', 'remainingHours', 'purchaseDate', 'purchaserName'] as SortKey[]).map(key => (
+              <Col key={key} md={key === 'name' ? 2 : key === 'purchaseDate' ? 3 : key === 'purchaserName' ? 2 : 3} onClick={() => requestSort(key)} style={{ cursor: 'pointer' }}>
+                {{ name: 'Name', costPerHour: 'Cost/Hr', remainingHours: 'Rem. Hrs', purchaseDate: 'Purchase Date', purchaserName: 'Purchaser' }[key]}
                 {sortIndicator(key)}
               </Col>
             ))}
@@ -238,10 +241,11 @@ export default function CourtCreditsPage() {
               <Accordion.Item eventKey={batch.id} key={batch.id}>
                 <Accordion.Header>
                   <Row className="w-100 align-items-center gx-2">
+                    <Col md={2} className="text-truncate">{batch.name || '—'}</Col>
                     <Col md={3}>${batch.costPerHour?.toFixed(2) ?? 'N/A'}</Col>
                     <Col md={3}>{batch.remainingHours ?? 0}</Col>
                     <Col md={3}>{batch.purchaseDate ? format(batch.purchaseDate, 'yyyy-MM-dd') : 'N/A'}</Col>
-                    <Col md={3} className="text-muted small d-none d-md-block">{batch.purchaserName}</Col>
+                    <Col md={2} className="text-muted small d-none d-md-block">{batch.purchaserName}</Col>
                   </Row>
                 </Accordion.Header>
                 <Accordion.Body>
@@ -249,6 +253,20 @@ export default function CourtCreditsPage() {
                     // ── Edit form ────────────────────────────────────────────
                     <Form onSubmit={e => { e.preventDefault(); handleSaveEdit(); }}>
                       {formError && <Alert variant="danger" dismissible onClose={() => setFormError('')}>{formError}</Alert>}
+                      <Row>
+                        <Col md={6} className="mb-3">
+                          <Form.Group>
+                            <Form.Label>Batch Name</Form.Label>
+                            <Form.Control name="name" placeholder="Optional label" value={editForm.name} onChange={handleFormChange} />
+                          </Form.Group>
+                        </Col>
+                        <Col md={6} className="mb-3">
+                          <Form.Group>
+                            <Form.Label>Purchaser Name</Form.Label>
+                            <Form.Control name="purchaserName" value={editForm.purchaserName} onChange={handleFormChange} required />
+                          </Form.Group>
+                        </Col>
+                      </Row>
                       <Row>
                         <Col md={6} className="mb-3">
                           <Form.Group>
@@ -260,12 +278,6 @@ export default function CourtCreditsPage() {
                                 dateFormat="yyyy-MM-dd" className="form-control" maxDate={new Date()}
                               />
                             </div>
-                          </Form.Group>
-                        </Col>
-                        <Col md={6} className="mb-3">
-                          <Form.Group>
-                            <Form.Label>Purchaser Name</Form.Label>
-                            <Form.Control name="purchaserName" value={editForm.purchaserName} onChange={handleFormChange} required />
                           </Form.Group>
                         </Col>
                       </Row>
@@ -307,6 +319,7 @@ export default function CourtCreditsPage() {
                   ) : (
                     // ── Detail view ──────────────────────────────────────────
                     <>
+                      {batch.name && <p><strong>Name:</strong> {batch.name}</p>}
                       <Row className="mb-3">
                         <Col md={6}>
                           <p><strong>Purchase Date:</strong> {format(batch.purchaseDate, 'MMMM d, yyyy')}</p>
@@ -347,7 +360,7 @@ export default function CourtCreditsPage() {
                               const style = item.type === 'sessionUsage' ? SESSION_ROW_STYLE : ADJUSTMENT_ROW_STYLE;
                               return (
                                 <tr key={`${item.type}-${item.id ?? i}`}>
-                                  <td style={style}>{format(item.eventDate, 'yyyy-MM-dd HH:mm')}</td>
+                                  <td style={style}>{format(item.eventDate, 'yyyy-MM-dd')}</td>
                                   <td style={style}>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
                                   <td style={style}>
                                     {item.type === 'sessionUsage' && `Used: ${item.hoursUsed as number} hrs`}

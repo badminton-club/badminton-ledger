@@ -1,13 +1,48 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Container, Card, Button, Table, Spinner, Alert, Row, Col, Form, Badge } from 'react-bootstrap';
 import { format } from 'date-fns';
 import { fetchOwnerPayoutSummary, payOwner } from '../services/firebase';
 import { useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
 import { selectIsClubAdmin } from '../features/club/clubSlice';
-import type { OwnerPayoutSummary } from '../types';
+import type { OwnerPayoutSummary, PayoutLedgerEntry } from '../types';
 
 const money = (n: number) => `$${n.toFixed(2)}`;
+const moneySigned = (n: number) => (n < 0 ? `-${money(Math.abs(n))}` : money(n));
+
+const PAGE_SIZE = 100;
+
+type LedgerColumn = 'dateRecorded' | 'sessionDate' | 'player' | 'type' | 'note' | 'amount' | 'runningTotal';
+
+const LEDGER_COLUMNS: { key: LedgerColumn; label: string; align?: 'end' }[] = [
+  { key: 'dateRecorded', label: 'Date Recorded' },
+  { key: 'sessionDate',  label: 'Session Date' },
+  { key: 'player',       label: 'Player' },
+  { key: 'type',         label: 'Type' },
+  { key: 'note',         label: 'Note' },
+  { key: 'amount',       label: 'Amount', align: 'end' },
+  { key: 'runningTotal', label: 'Running Total', align: 'end' },
+];
+
+const ledgerTypeLabel = (type: PayoutLedgerEntry['type']) =>
+  type === 'payout' ? 'Payout' : type === 'payment' ? 'Payment' : type === 'comp' ? 'Comp' : 'Adjustment';
+
+/**
+ * Running total of what's owed to the owner, evaluated in true chronological order
+ * (oldest → newest) regardless of how the table is currently sorted. Comps don't
+ * count (the player paid the owner directly) and payouts reduce the balance.
+ */
+function computeRunningTotals(ledger: PayoutLedgerEntry[]): Map<string, number> {
+  const chronological = [...ledger].sort((a, b) => a.date.getTime() - b.date.getTime());
+  let running = 0;
+  const totals = new Map<string, number>();
+  for (const entry of chronological) {
+    if (entry.type === 'payout') running -= entry.amount;
+    else if (entry.type !== 'comp') running += entry.amount;
+    totals.set(`${entry.type}-${entry.id}`, running);
+  }
+  return totals;
+}
 
 export default function PayoutPage() {
   const isAdmin = useAppSelector(selectIsClubAdmin);
@@ -20,12 +55,19 @@ export default function PayoutPage() {
   const [paying, setPaying] = useState(false);
   const [payResult, setPayResult] = useState('');
 
+  const [sortColumn, setSortColumn] = useState<LedgerColumn>('dateRecorded');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [columnFilters, setColumnFilters] = useState<Record<LedgerColumn, string>>({
+    dateRecorded: '', sessionDate: '', player: '', type: '', note: '', amount: '', runningTotal: '',
+  });
+  const [page, setPage] = useState(1);
+
   const players = useAppSelector(selectAllPlayers);
-  const playerName = (id: string | null) => {
+  const playerName = useCallback((id: string | null) => {
     if (!id) return '';
     const p = players.find((pl) => pl.id === id);
     return p ? `${p.firstName} ${p.lastName ?? ''}`.trim() : 'Unknown player';
-  };
+  }, [players]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,6 +82,82 @@ export default function PayoutPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Running totals are computed once from the full ledger in true chronological order,
+  // so they stay stable no matter how the table is currently sorted or filtered.
+  const runningTotals = useMemo(
+    () => computeRunningTotals(summary?.ledger ?? []),
+    [summary]
+  );
+
+  const getColumnText = useCallback((entry: PayoutLedgerEntry, key: LedgerColumn): string => {
+    const runningTotal = runningTotals.get(`${entry.type}-${entry.id}`) ?? 0;
+    switch (key) {
+      case 'dateRecorded': return format(entry.date, 'MMM d, yyyy h:mm a');
+      case 'sessionDate':  return entry.sessionDate ? format(entry.sessionDate, 'MMM d, yyyy') : '';
+      case 'player':       return playerName(entry.playerId);
+      case 'type':         return ledgerTypeLabel(entry.type);
+      case 'note':         return entry.note;
+      case 'amount':       return money(entry.amount);
+      case 'runningTotal': return moneySigned(runningTotal);
+    }
+  }, [runningTotals, playerName]);
+
+  const getSortValue = useCallback((entry: PayoutLedgerEntry, key: LedgerColumn): number | string => {
+    switch (key) {
+      case 'dateRecorded': return entry.date.getTime();
+      case 'sessionDate':  return entry.sessionDate ? entry.sessionDate.getTime() : -Infinity;
+      case 'player':       return playerName(entry.playerId).toLowerCase();
+      case 'type':         return ledgerTypeLabel(entry.type).toLowerCase();
+      case 'note':         return entry.note.toLowerCase();
+      case 'amount':       return entry.amount;
+      case 'runningTotal': return runningTotals.get(`${entry.type}-${entry.id}`) ?? 0;
+    }
+  }, [runningTotals, playerName]);
+
+  const filteredLedger = useMemo(() => {
+    const ledger = summary?.ledger ?? [];
+    return ledger.filter((entry) =>
+      LEDGER_COLUMNS.every(({ key }) => {
+        const filterValue = columnFilters[key].trim().toLowerCase();
+        if (!filterValue) return true;
+        return getColumnText(entry, key).toLowerCase().includes(filterValue);
+      })
+    );
+  }, [summary, columnFilters, getColumnText]);
+
+  const sortedLedger = useMemo(() => {
+    const copy = [...filteredLedger];
+    copy.sort((a, b) => {
+      const av = getSortValue(a, sortColumn);
+      const bv = getSortValue(b, sortColumn);
+      const cmp = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv
+        : String(av).localeCompare(String(bv));
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+    return copy;
+  }, [filteredLedger, sortColumn, sortDirection, getSortValue]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedLedger.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedLedger = sortedLedger.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  // Reset to page 1 whenever the underlying data, sort, or filters change.
+  useEffect(() => { setPage(1); }, [summary, sortColumn, sortDirection, columnFilters]);
+
+  const handleSort = (key: LedgerColumn) => {
+    if (sortColumn === key) {
+      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortColumn(key);
+      setSortDirection(key === 'dateRecorded' ? 'desc' : 'asc');
+    }
+  };
+
+  const handleFilterChange = (key: LedgerColumn, value: string) => {
+    setColumnFilters((prev) => ({ ...prev, [key]: value }));
+  };
 
   const handlePayOwner = async (custom?: number) => {
     if (!summary || summary.pending <= 0) return;
@@ -186,48 +304,108 @@ export default function PayoutPage() {
           ) : !summary || summary.ledger.length === 0 ? (
             <p className="text-muted mb-0">No payments or adjustments yet.</p>
           ) : (
-            <Table hover responsive size="sm" className="mb-0">
-              <thead>
-                <tr>
-                  <th>Date Recorded</th>
-                  <th>Session Date</th>
-                  <th>Player</th>
-                  <th>Type</th>
-                  <th>Note</th>
-                  <th className="text-end">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.ledger.map((entry) => (
-                  <tr key={`${entry.type}-${entry.id}`}>
-                    <td>{format(entry.date, 'MMM d, yyyy')}</td>
-                    <td>{entry.sessionDate ? format(entry.sessionDate, 'MMM d, yyyy') : '—'}</td>
-                    <td>{playerName(entry.playerId)}</td>
-                    <td>
-                      {entry.type === 'payout' ? (
-                        <Badge bg="success">Payout</Badge>
-                      ) : entry.type === 'payment' ? (
-                        <Badge bg="primary">Payment</Badge>
-                      ) : entry.type === 'comp' ? (
-                        <Badge bg="info">Comp</Badge>
-                      ) : (
-                        <Badge bg="secondary">Adjustment</Badge>
-                      )}
-                    </td>
-                    <td>{entry.note}</td>
-                    {entry.type === 'comp' ? (
-                      <td className="text-end text-muted">
-                        {money(entry.amount)} <span className="small">(not counted)</span>
-                      </td>
-                    ) : (
-                      <td className={`text-end ${entry.type === 'payout' ? 'text-success' : entry.amount < 0 ? 'text-danger' : ''}`}>
-                        {entry.type === 'payout' ? `- ${money(entry.amount)}` : money(entry.amount)}
-                      </td>
-                    )}
+            <>
+              <Table hover responsive size="sm" className="mb-2">
+                <thead>
+                  <tr>
+                    {LEDGER_COLUMNS.map((col) => (
+                      <th
+                        key={col.key}
+                        onClick={() => handleSort(col.key)}
+                        role="button"
+                        className={col.align === 'end' ? 'text-end' : ''}
+                        style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                      >
+                        {col.label}
+                        {sortColumn === col.key && (
+                          <span className="ms-1">{sortDirection === 'asc' ? '▲' : '▼'}</span>
+                        )}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </Table>
+                  <tr>
+                    {LEDGER_COLUMNS.map((col) => (
+                      <th key={col.key} className="p-1">
+                        <Form.Control
+                          size="sm"
+                          placeholder="Search…"
+                          value={columnFilters[col.key]}
+                          onChange={(e) => handleFilterChange(col.key, e.target.value)}
+                        />
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedLedger.length === 0 ? (
+                    <tr>
+                      <td colSpan={LEDGER_COLUMNS.length} className="text-center text-muted py-3">
+                        No entries match your search.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedLedger.map((entry) => {
+                      const runningTotal = runningTotals.get(`${entry.type}-${entry.id}`) ?? 0;
+                      return (
+                        <tr key={`${entry.type}-${entry.id}`}>
+                          <td>{format(entry.date, 'MMM d, yyyy h:mm a')}</td>
+                          <td>{entry.sessionDate ? format(entry.sessionDate, 'MMM d, yyyy') : '—'}</td>
+                          <td>{playerName(entry.playerId)}</td>
+                          <td>
+                            {entry.type === 'payout' ? (
+                              <Badge bg="success">Payout</Badge>
+                            ) : entry.type === 'payment' ? (
+                              <Badge bg="primary">Payment</Badge>
+                            ) : entry.type === 'comp' ? (
+                              <Badge bg="info">Comp</Badge>
+                            ) : (
+                              <Badge bg="secondary">Adjustment</Badge>
+                            )}
+                          </td>
+                          <td>{entry.note}</td>
+                          {entry.type === 'comp' ? (
+                            <td className="text-end text-muted">
+                              {money(entry.amount)} <span className="small">(not counted)</span>
+                            </td>
+                          ) : (
+                            <td className={`text-end ${entry.type === 'payout' ? 'text-success' : entry.amount < 0 ? 'text-danger' : ''}`}>
+                              {entry.type === 'payout' ? `- ${money(entry.amount)}` : money(entry.amount)}
+                            </td>
+                          )}
+                          <td className="text-end">{moneySigned(runningTotal)}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </Table>
+              <div className="d-flex justify-content-between align-items-center">
+                <span className="text-muted small">
+                  {sortedLedger.length === 0
+                    ? 'No entries match your search.'
+                    : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, sortedLedger.length)} of ${sortedLedger.length}`}
+                </span>
+                <div className="d-flex align-items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline-secondary"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage((p) => p - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <span className="small text-muted">Page {currentPage} of {totalPages}</span>
+                  <Button
+                    size="sm"
+                    variant="outline-secondary"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </Card.Body>
       </Card>
