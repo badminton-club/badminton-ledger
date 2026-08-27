@@ -212,7 +212,7 @@ describe('SessionModal', () => {
     });
   });
 
-  it('also parses plain names separated by newlines or commas, with no numbering required', async () => {
+  it('parses plain names separated by newlines or commas', async () => {
     const user = userEvent.setup();
     const { store } = renderSessionModal({ mode: 'paste' });
 
@@ -224,6 +224,23 @@ describe('SessionModal', () => {
       'John Smith',
       'Jane Doe',
       'Bob Martin',
+    ]);
+  });
+
+  it('ignores header text before the first entry in a numbered list', async () => {
+    const user = userEvent.setup();
+    const { store } = renderSessionModal({ mode: 'paste' });
+
+    await user.type(
+      screen.getByRole('textbox'),
+      'Aug 12 xx court{enter}Doors open at 7pm{enter}1. John{enter}2. Wendy'
+    );
+    await user.click(screen.getByRole('button', { name: 'Next: Confirm Players' }));
+
+    expect(store.getState().sessionModal.mode).toBe('resolve');
+    expect(store.getState().sessionModal.resolutionItems.map((item) => item.rawName)).toEqual([
+      'John',
+      'Wendy',
     ]);
   });
 

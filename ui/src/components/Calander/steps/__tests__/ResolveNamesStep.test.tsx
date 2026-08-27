@@ -78,6 +78,19 @@ describe('ResolveNamesStep', () => {
     expect(screen.getByRole('option', { name: 'Jon Smith' })).toBeInTheDocument();
   });
 
+  it('shows email addresses for candidates with duplicate names', () => {
+    const candidates = [
+      makePlayer({ id: 'p1', email: 'john.one@example.com' }),
+      makePlayer({ id: 'p2', email: 'john.two@example.com' }),
+      makePlayer({ id: 'p3', firstName: 'Jon', email: 'jon@example.com' }),
+    ];
+    renderStep([makeItem({ status: 'conflict', candidates, resolvedPlayerId: null })]);
+
+    expect(screen.getByRole('option', { name: 'John Smith (john.one@example.com)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'John Smith (john.two@example.com)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Jon Smith' })).toBeInTheDocument();
+  });
+
   it('shows "no match found" with an add-player action for an unmatched item', () => {
     renderStep([makeItem({ status: 'unmatched' })]);
     expect(screen.getByText('No match found')).toBeInTheDocument();
