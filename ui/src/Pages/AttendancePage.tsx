@@ -247,7 +247,9 @@ export default function AttendancePage() {
                           >
                             {money(e.delta)}
                           </td>
-                          <td className="text-end fw-medium" style={{ fontVariantNumeric: 'tabular-nums' }}>{money(e.balanceAfter)}</td>
+                          <td className="text-end fw-medium" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {typeof e.balanceAfter === 'number' ? money(e.balanceAfter) : <span className="text-muted">—</span>}
+                          </td>
                         </tr>
                       );
                     })}

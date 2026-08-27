@@ -17,7 +17,11 @@ const BACKUP_FOLDER_NAME = DEFAULT_BACKUP_FOLDER_NAME;
 // session doesn't pop the Google consent screen twice in a row.
 const TOKEN_TTL_MS = 45 * 60 * 1000;
 
-let cachedToken: { value: string; expiresAt: number } | null = null;
+// Scoped to the signed-in uid it was issued for, and checked on every read —
+// this is an SPA where signing out/in doesn't reload the page, so without this
+// a second user signing in during the same tab session could otherwise reuse
+// the first user's still-valid cached Drive token.
+let cachedToken: { value: string; expiresAt: number; uid: string } | null = null;
 
 export interface DriveBackupResult {
   fileName: string;
@@ -44,10 +48,12 @@ export function defaultBackupFileName(): string {
  * once.
  */
 async function getDriveAccessToken(): Promise<string> {
-  if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value;
-
   const user = auth.currentUser;
   if (!user) throw new Error('You must be signed in to use Google Drive backups.');
+
+  if (cachedToken && cachedToken.uid === user.uid && cachedToken.expiresAt > Date.now()) {
+    return cachedToken.value;
+  }
 
   const provider = new GoogleAuthProvider();
   provider.addScope(DRIVE_FILE_SCOPE);
@@ -72,7 +78,7 @@ async function getDriveAccessToken(): Promise<string> {
   if (!credential?.accessToken) {
     throw new Error('Failed to get Google Drive access — please try again.');
   }
-  cachedToken = { value: credential.accessToken, expiresAt: Date.now() + TOKEN_TTL_MS };
+  cachedToken = { value: credential.accessToken, expiresAt: Date.now() + TOKEN_TTL_MS, uid: user.uid };
   return credential.accessToken;
 }
 

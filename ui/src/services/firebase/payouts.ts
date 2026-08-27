@@ -152,10 +152,25 @@ export async function addCustomPayoutTransaction(
       throw new Error('A note is required.');
     }
 
+    // Wallet-neutral (this entry never moves a player's balance), but every other
+    // balanceLedger writer always logs a real balanceBefore/balanceAfter — even
+    // when unchanged, e.g. the 'payment'/'comp' entries logged elsewhere set both
+    // to the same value. Matching that keeps the field non-optional in practice,
+    // so per-player ledger views (My Attendance, Balance History) can render a
+    // valid balance for this row instead of a broken value when a player is
+    // optionally attached for record-keeping.
+    let balance = 0;
+    if (playerId) {
+      const playerSnap = await getDoc(doc(refs.players, playerId));
+      balance = (playerSnap.data()?.balance as number) ?? 0;
+    }
+
     await setDoc(doc(refs.balanceLedger), {
       playerId:  playerId ?? null,
       sessionId: null,
       delta:     amount,
+      balanceBefore: balance,
+      balanceAfter:  balance,
       reason:    'manual',
       note:      note.trim(),
       walletAdjustment: false, // record-keeping only — never moves a player's balance
@@ -194,12 +209,15 @@ export async function undoPayoutAdjustment(entryId: string, reason: string): Pro
       if (entry.voided) throw new Error('This transaction has already been undone.');
 
       // Read the player (if any) before any writes — Firestore transactions require
-      // all reads to happen first. Only needed when the original entry actually
-      // moved the player's prepaid balance (a Players-page balance adjustment); a
-      // custom payout transaction never touched the wallet, so there's nothing to
-      // reverse there.
+      // all reads to happen first. Needed unless the entry is explicitly marked
+      // `walletAdjustment: false` (a custom payout transaction, which never
+      // touches the wallet). Older 'manual' entries predate this flag and were
+      // always Players-page balance adjustments that *did* move the wallet, so
+      // `undefined` must default to "yes, reverse it" — same safe default the
+      // Players-page Balance History filter already uses — otherwise undoing a
+      // legacy adjustment would silently leave the player's wallet balance wrong.
       const delta = entry.delta ?? 0;
-      const playerRef = entry.walletAdjustment && entry.playerId
+      const playerRef = entry.walletAdjustment !== false && entry.playerId
         ? doc(refs.players, entry.playerId)
         : null;
       const playerSnap = playerRef ? await tx.get(playerRef) : null;
