@@ -24,16 +24,39 @@ const LEDGER_COLUMNS: { key: LedgerColumn; label: string; align?: 'end'; searcha
   { key: 'runningTotal', label: 'Running Total', align: 'end', searchable: false },
 ];
 
+// 'default' hides comp and balance entries (the common view — just what's owed).
+// The rest narrow the ledger down to exactly one type for auditing.
+type TypeView = 'default' | 'all' | 'payment' | 'balance' | 'comp' | 'adjustment' | 'payout';
+
+const TYPE_VIEW_OPTIONS: { value: TypeView; label: string }[] = [
+  { value: 'default',    label: 'Default (hide comps & balance)' },
+  { value: 'all',        label: 'All types' },
+  { value: 'payment',    label: 'e-Transfer only' },
+  { value: 'balance',    label: 'Balance only' },
+  { value: 'comp',       label: 'Comp only' },
+  { value: 'adjustment', label: 'Adjustments only' },
+  { value: 'payout',     label: 'Payouts only' },
+];
+
 const ledgerTypeLabel = (type: PayoutLedgerEntry['type']) =>
-  type === 'payout' ? 'Payout' : type === 'payment' ? 'Payment' : type === 'comp' ? 'Comp' : 'Adjustment';
+  type === 'payout' ? 'Payout'
+    : type === 'payment' ? 'Payment'
+    : type === 'comp' ? 'Comp'
+    : type === 'balance' ? 'Balance'
+    : 'Adjustment';
+
+// Entry types that never count toward what's owed to the owner: a comp was paid
+// to the owner directly, and a balance entry is a prepaid-wallet movement that
+// was already collected whenever the player topped up their balance.
+const UNCOUNTED_TYPES = new Set<PayoutLedgerEntry['type']>(['comp', 'balance']);
 
 /**
  * Running total of what's owed to the owner, evaluated in true chronological order
- * (oldest → newest) regardless of how the table is currently sorted. Comps don't
- * count (the player paid the owner directly) and payouts reduce the balance. A
- * voided entry (an adjustment or payout that was undone) is skipped entirely —
- * it's kept in the ledger for the record but no longer contributes, matching how
- * fetchOwnerPayoutSummary excludes it from the totals.
+ * (oldest → newest) regardless of how the table is currently sorted. Comps and
+ * balance entries don't count (see UNCOUNTED_TYPES) and payouts reduce the
+ * balance. A voided entry (an adjustment or payout that was undone) is skipped
+ * entirely — it's kept in the ledger for the record but no longer contributes,
+ * matching how fetchOwnerPayoutSummary excludes it from the totals.
  */
 function computeRunningTotals(ledger: PayoutLedgerEntry[]): Map<string, number> {
   const chronological = [...ledger].sort((a, b) => a.date.getTime() - b.date.getTime());
@@ -42,7 +65,7 @@ function computeRunningTotals(ledger: PayoutLedgerEntry[]): Map<string, number> 
   for (const entry of chronological) {
     if (!entry.voided) {
       if (entry.type === 'payout') running -= entry.amount;
-      else if (entry.type !== 'comp') running += entry.amount;
+      else if (!UNCOUNTED_TYPES.has(entry.type)) running += entry.amount;
     }
     totals.set(`${entry.type}-${entry.id}`, running);
   }
@@ -75,8 +98,7 @@ export default function PayoutPage() {
   });
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
-  const [hideComps, setHideComps] = useState(true);
-  const [compsOnly, setCompsOnly] = useState(false);
+  const [typeView, setTypeView] = useState<TypeView>('default');
   const [undoTarget, setUndoTarget] = useState<PayoutLedgerEntry | null>(null);
   const [undoReason, setUndoReason] = useState('');
   const [undoSubmitting, setUndoSubmitting] = useState(false);
@@ -138,7 +160,11 @@ export default function PayoutPage() {
   const filteredLedger = useMemo(() => {
     const ledger = summary?.ledger ?? [];
     return ledger
-      .filter((entry) => (compsOnly ? entry.type === 'comp' : hideComps ? entry.type !== 'comp' : true))
+      .filter((entry) => {
+        if (typeView === 'default') return entry.type !== 'comp' && entry.type !== 'balance';
+        if (typeView === 'all') return true;
+        return entry.type === typeView;
+      })
       .filter((entry) =>
         LEDGER_COLUMNS.every(({ key }) => {
           const filterValue = columnFilters[key].trim().toLowerCase();
@@ -146,7 +172,7 @@ export default function PayoutPage() {
           return getColumnText(entry, key).toLowerCase().includes(filterValue);
         })
       );
-  }, [summary, columnFilters, getColumnText, hideComps, compsOnly]);
+  }, [summary, columnFilters, getColumnText, typeView]);
 
   const sortedLedger = useMemo(() => {
     const copy = [...filteredLedger];
@@ -166,7 +192,7 @@ export default function PayoutPage() {
   const paginatedLedger = sortedLedger.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   // Reset to page 1 whenever the underlying data, sort, or filters change.
-  useEffect(() => { setPage(1); }, [summary, sortColumn, sortDirection, columnFilters, hideComps, compsOnly]);
+  useEffect(() => { setPage(1); }, [summary, sortColumn, sortDirection, columnFilters, typeView]);
 
   const handleSort = (key: LedgerColumn) => {
     if (sortColumn === key) {
@@ -497,22 +523,18 @@ export default function PayoutPage() {
             <p className="text-muted mb-0">No payments or adjustments yet.</p>
           ) : (
             <>
-              <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
-                <Form.Check
-                  type="checkbox"
-                  id="hide-comps"
-                  label="Hide comp transactions"
-                  checked={hideComps}
-                  disabled={compsOnly}
-                  onChange={(e) => setHideComps(e.target.checked)}
-                />
-                <Form.Check
-                  type="checkbox"
-                  id="comps-only"
-                  label="Show comp transactions only"
-                  checked={compsOnly}
-                  onChange={(e) => setCompsOnly(e.target.checked)}
-                />
+              <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <Form.Label className="mb-0 small text-muted">Show:</Form.Label>
+                <Form.Select
+                  size="sm"
+                  style={{ width: 'auto' }}
+                  value={typeView}
+                  onChange={(e) => setTypeView(e.target.value as TypeView)}
+                >
+                  {TYPE_VIEW_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </Form.Select>
               </div>
               <div className="border rounded" style={{ maxHeight: 600, overflowY: 'auto' }}>
                 <Table hover striped responsive className="mb-0 align-middle">
@@ -577,6 +599,8 @@ export default function PayoutPage() {
                                 <Badge bg="primary">Payment</Badge>
                               ) : entry.type === 'comp' ? (
                                 <Badge bg="info">Comp</Badge>
+                              ) : entry.type === 'balance' ? (
+                                <Badge bg="warning" text="dark">Balance</Badge>
                               ) : (
                                 <Badge bg="secondary">Adjustment</Badge>
                               )}
@@ -589,9 +613,9 @@ export default function PayoutPage() {
                             <td style={{ maxWidth: 320, whiteSpace: 'normal', wordBreak: 'break-word', textDecoration: 'none' }}>
                               {entry.note || <span className="text-muted">—</span>}
                             </td>
-                            {entry.type === 'comp' ? (
+                            {entry.type === 'comp' || entry.type === 'balance' ? (
                               <td className="text-end text-muted" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                {money(entry.amount)} <span className="small">(not counted)</span>
+                                {moneySigned(entry.amount)} <span className="small">(not counted)</span>
                               </td>
                             ) : (
                               <td

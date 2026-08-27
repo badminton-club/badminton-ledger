@@ -142,10 +142,13 @@ export interface OwnerPayout {
 
 // One row in the payout ledger: money collected from players (a payment or a manual
 // balance adjustment) that is owed to the owner, or a payout that reduces the balance.
+// 'balance' entries (prepaid-wallet draws/refunds tied to a session) are shown for
+// record keeping, like comps, but never count toward the total — that money was
+// already collected from the player whenever they topped up their balance.
 export interface PayoutLedgerEntry {
   id: string;
   date: Date;
-  type: 'payment' | 'adjustment' | 'comp' | 'payout';
+  type: 'payment' | 'adjustment' | 'comp' | 'payout' | 'balance';
   amount: number;
   playerId: string | null;
   sessionId: string | null;

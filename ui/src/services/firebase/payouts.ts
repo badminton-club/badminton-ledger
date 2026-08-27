@@ -19,11 +19,18 @@ import type {
 } from 'types';
 
 // Balance-ledger reasons shown in the payout ledger. Payments and manual balance
-// adjustments are money collected by the club and owed to the owner. Comps are shown
-// for record keeping but NOT counted — the player paid the owner directly.
-// Manual adjustments made with "Include in owner payout" unchecked are logged as
-// 'manual-excluded' and intentionally omitted here, so they never affect the payout.
-const LEDGER_REASONS = ['payment', 'manual', 'comp'];
+// adjustments are money collected by the club and owed to the owner. Comps and
+// balance entries are shown for record keeping but NOT counted — a comp means the
+// player paid the owner directly, and a balance entry is a prepaid-wallet draw or
+// refund tied to a session, money that was already collected when the wallet was
+// topped up. Manual adjustments made with "Include in owner payout" unchecked are
+// logged as 'manual-excluded' and intentionally omitted here, so they never affect
+// the payout.
+const LEDGER_REASONS = ['payment', 'manual', 'comp', 'session', 'session-edit', 'session-deleted', 'settlement'];
+
+// Reasons that represent a prepaid-wallet movement tied to a session (paying with,
+// or refunding, a player's balance) rather than money owed to/from the owner.
+const BALANCE_REASONS = new Set(['session', 'session-edit', 'session-deleted', 'settlement']);
 
 /**
  * Builds the owner-payout summary from money collected from players (payments and
@@ -63,7 +70,10 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
     });
 
     const collected: PayoutLedgerEntry[] = rawLedger.map((l) => {
-      const type = l.reason === 'payment' ? 'payment' : l.reason === 'comp' ? 'comp' : 'adjustment';
+      const type = l.reason === 'payment' ? 'payment'
+        : l.reason === 'comp' ? 'comp'
+        : BALANCE_REASONS.has(l.reason ?? '') ? 'balance'
+        : 'adjustment';
       return {
         id: l.id,
         date: toJSDate(l.createdAt) ?? new Date(0),
@@ -75,9 +85,9 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
         note: l.note ?? '',
         voided: !!l.voided,
         voidedNote: l.voidedNote ?? null,
-        // Only manual adjustments can be undone here — payments/comps are derived
-        // from a session's settlement state and are reversed by re-toggling it
-        // there, not by editing the ledger directly.
+        // Only manual adjustments can be undone here — payments/comps/balance
+        // entries are derived from a session's settlement state and are reversed
+        // by re-toggling it there, not by editing the ledger directly.
         canUndo: l.reason === 'manual' && !l.voided,
       };
     });
@@ -99,11 +109,13 @@ export async function fetchOwnerPayoutSummary(): Promise<OwnerPayoutSummary> {
       };
     });
 
-    // Comps are for record keeping only — they don't count toward what's owed.
-    // A voided adjustment (undone from the ledger) is likewise excluded — it's
-    // shown struck-through for the record, but no longer contributes to the total.
+    // Comps and balance entries are for record keeping only — they don't count
+    // toward what's owed (a comp was paid to the owner directly; a balance entry
+    // was already collected when the player's wallet was topped up). A voided
+    // adjustment (undone from the ledger) is likewise excluded — it's shown
+    // struck-through for the record, but no longer contributes to the total.
     const totalCollected = collected
-      .filter((e) => e.type !== 'comp' && !e.voided)
+      .filter((e) => e.type !== 'comp' && e.type !== 'balance' && !e.voided)
       .reduce((sum, e) => sum + e.amount, 0);
     // Same for a voided payout: kept in the ledger for the audit trail, but
     // excluded from what's already been paid out.
