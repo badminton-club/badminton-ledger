@@ -371,6 +371,37 @@ describe('PlayersPage', () => {
     expect(await screen.findByText('Manual (off payout)')).toBeInTheDocument();
   });
 
+  it('stacks quick-add clicks (clicking +10 twice gives 20) and switches to credit', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', balance: 20 })];
+
+    renderPage({ players, route: '/?playerId=p1' });
+
+    expect(await screen.findByText('No balance history yet.')).toBeInTheDocument();
+    const amountInput = screen.getByPlaceholderText('Amount') as HTMLInputElement;
+
+    // Switch to debit first, to prove the quick-add button flips it back to credit
+    // and starts fresh rather than subtracting from a deduction.
+    await user.click(screen.getByRole('button', { name: 'Add (+)' }));
+    await user.click(screen.getByText('Deduct from balance (-)'));
+
+    await user.click(screen.getByRole('button', { name: '+10' }));
+    expect(amountInput.value).toBe('10');
+    expect(screen.getByRole('button', { name: 'Add (+)' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '+10' }));
+    expect(amountInput.value).toBe('20');
+
+    await user.click(screen.getByRole('button', { name: '+50' }));
+    expect(amountInput.value).toBe('70');
+
+    await user.type(screen.getByPlaceholderText(/Reason \(e\.g\., Cash Payment\)/), 'Quick top-up');
+    await user.click(screen.getByRole('button', { name: 'Update Balance' }));
+
+    await waitFor(() => expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 90 }));
+    expect(getClubDocData('balanceLedger', 'auto-id-1')).toMatchObject({ delta: 70 });
+  });
+
   it('hides the payout checkbox when the payout tab is disabled', async () => {
     renderPage({
       players: [makePlayer({ id: 'p1' })],

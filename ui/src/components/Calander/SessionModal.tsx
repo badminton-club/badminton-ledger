@@ -1,5 +1,6 @@
 import React, { useEffect, useCallback } from "react";
 import { Modal } from "react-bootstrap";
+import { format } from "date-fns";
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import {
     setMode,
@@ -23,6 +24,7 @@ interface Props {
     show: boolean;
     onHide: () => void;
     session?: Session;
+    date?: Date | null;
     onSessionUpdate: (sessionId: string) => void;
     onSaveSession: (data: unknown) => Promise<void>;
     onDeleteSession: (sessionId: string) => Promise<void>;
@@ -36,10 +38,20 @@ const MODAL_TITLES: Record<string, string> = {
     view: "Session Details",
 };
 
+// date-fns has no "Thur" abbreviation built in (its shortest non-narrow
+// weekday token, "EEE", gives "Thu") — Sunday..Saturday, matching Date#getDay().
+const WEEKDAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thur", "Fri", "Sat"];
+
+/** e.g. "Thur Aug 13 2026" — short weekday/month, no commas. */
+function formatShortDate(date: Date): string {
+    return `${WEEKDAY_ABBR[date.getDay()]} ${format(date, "MMM d yyyy")}`;
+}
+
 export default function SessionModal({
     show,
     onHide,
     session,
+    date,
     onSessionUpdate,
     onSaveSession,
     onDeleteSession,
@@ -128,11 +140,22 @@ export default function SessionModal({
     );
 
     const title = MODAL_TITLES[mode] ?? "Session Details";
+    // Only shown while creating a brand-new session (paste/resolve/details for
+    // a session with no id yet) — an existing session already shows its own
+    // date elsewhere (ExistingSessionView / the edit form).
+    const showDate = !!date && !session?.id && (mode === "paste" || mode === "resolve" || mode === "details");
 
     return (
         <Modal show={show} onHide={onHide} centered size="lg">
             <Modal.Header closeButton>
-                <Modal.Title>{title}</Modal.Title>
+                <div>
+                    <Modal.Title>{title}</Modal.Title>
+                    {showDate && (
+                        <div className="text-muted mt-1" style={{ fontSize: "0.95rem" }}>
+                            {formatShortDate(date as Date)}
+                        </div>
+                    )}
+                </div>
             </Modal.Header>
             <Modal.Body>
                 {mode === "paste" && <PasteNamesStep onSubmit={handlePasteSubmit} onCancel={onHide} />}

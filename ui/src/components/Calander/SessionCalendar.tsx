@@ -81,9 +81,10 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
         if (!hasSession) openAddSession(date);
     };
 
-    const handleOpenModal = (session: Session) => {
-        if (!selectedDate) return;
-        setClickedDate(selectedDate);
+    const handleOpenModal = (session: Session, dateOverride?: Date) => {
+        const targetDate = dateOverride ?? selectedDate;
+        if (!targetDate) return;
+        setClickedDate(targetDate);
         setModalSession(session);
         dispatch(setMode("view"));
         setShowModal(true);
@@ -92,6 +93,16 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
     const handleAddSession = () => {
         if (!selectedDate) return;
         openAddSession(selectedDate);
+    };
+
+    // Calendar-grid shortcut: jump straight to the "View details" modal for a
+    // day's session without first selecting it in the quick-view panel. Only
+    // wired up for days that actually have a session (see CalendarGrid).
+    const handleExpandDay = (date: Date) => {
+        const daySessions = sessions.filter((s) => +s.date === +date);
+        if (daySessions.length === 0) return;
+        setSelectedDate(date);
+        handleOpenModal(daySessions[0], date);
     };
 
     const handleSessionUpdate = useCallback(async (sessionId: string) => {
@@ -172,6 +183,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
                         sessions={sessions}
                         selectedDate={selectedDate}
                         onDayClick={handleDayClick}
+                        onExpandDay={handleExpandDay}
                     />
                 }
             </div>
@@ -195,6 +207,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
                 show={showModal}
                 onHide={() => setShowModal(false)}
                 session={modalSession}
+                date={clickedDate}
                 onSessionUpdate={handleSessionUpdate}
                 onSaveSession={handleSaveSession}
                 onDeleteSession={handleDeleteSession}

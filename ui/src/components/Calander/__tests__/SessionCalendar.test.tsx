@@ -1,5 +1,5 @@
 import React from 'react';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Timestamp } from 'firebase/firestore';
 import SessionCalendar from '../SessionCalendar';
@@ -25,6 +25,20 @@ beforeEach(() => {
 afterEach(() => {
   jest.useRealTimers();
 });
+
+// The date header renders as "Weekday" <br/> "Month d" (two lines, no
+// comma), so its text is split across sibling text nodes within one <p>.
+function dateHeading(text: string) {
+  return (_content: string, element: Element | null) => {
+    if (!element || element.tagName.toLowerCase() !== 'p') return false;
+    const joined = Array.from(element.childNodes)
+      .map((n) => (n.nodeType === Node.TEXT_NODE ? n.textContent : ' '))
+      .join('')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return joined === text;
+  };
+}
 
 function makePlayer(id: string, firstName: string, lastName: string): Player {
   return {
@@ -94,7 +108,7 @@ describe('SessionCalendar', () => {
 
     await user.click((await screen.findByText('10')).parentElement as HTMLElement);
 
-    expect(await screen.findByText('Monday, August 10')).toBeInTheDocument();
+    expect(await screen.findByText(dateHeading('Monday August 10'))).toBeInTheDocument();
     expect(screen.getByText('Court A')).toBeInTheDocument();
     expect(screen.getByText('1 unpaid')).toBeInTheDocument();
 
@@ -122,7 +136,7 @@ describe('SessionCalendar', () => {
     expect(await screen.findByRole('button', { name: 'September 2026' })).toBeInTheDocument();
 
     await user.click((await screen.findByText('2')).parentElement as HTMLElement);
-    expect(await screen.findByText('Wednesday, September 2')).toBeInTheDocument();
+    expect(await screen.findByText(dateHeading('Wednesday September 2'))).toBeInTheDocument();
     expect(await screen.findByText('Court B')).toBeInTheDocument();
     expect(screen.getByText('Fully paid')).toBeInTheDocument();
 
@@ -130,7 +144,7 @@ describe('SessionCalendar', () => {
     expect(await screen.findByRole('button', { name: 'August 2026' })).toBeInTheDocument();
 
     await user.click((await screen.findByText('10')).parentElement as HTMLElement);
-    expect(await screen.findByText('Monday, August 10')).toBeInTheDocument();
+    expect(await screen.findByText(dateHeading('Monday August 10'))).toBeInTheDocument();
     expect(await screen.findByText('Court A')).toBeInTheDocument();
   });
 
@@ -141,8 +155,33 @@ describe('SessionCalendar', () => {
     await screen.findByRole('button', { name: 'August 2026' });
     await user.click((await screen.findByText('11')).parentElement as HTMLElement);
 
-    expect(await screen.findByText('Tuesday, August 11')).toBeInTheDocument();
+    expect(await screen.findByText(dateHeading('Tuesday August 11'))).toBeInTheDocument();
     expect(screen.getByText('No session this day')).toBeInTheDocument();
     expect(screen.getByTestId('session-modal')).toHaveTextContent('new-session');
+  });
+
+  it('opens the View details modal straight from the calendar-grid expand button, without selecting the day first', async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    seedSession('aug-10', new Date(2026, 7, 10), { location: 'Court A' });
+
+    renderCalendar();
+
+    await screen.findByRole('button', { name: 'August 2026' });
+    const dayCell = (await screen.findByText('10')).parentElement as HTMLElement;
+
+    // No prior click on the day — go straight for the expand shortcut.
+    await user.click(within(dayCell).getByRole('button', { name: 'View session details' }));
+
+    expect(screen.getByTestId('session-modal')).toHaveTextContent('aug-10');
+  });
+
+  it('does not show the expand shortcut on a day with no session', async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    renderCalendar();
+
+    await screen.findByRole('button', { name: 'August 2026' });
+    const dayCell = (await screen.findByText('11')).parentElement as HTMLElement;
+
+    expect(within(dayCell).queryByRole('button', { name: 'View session details' })).not.toBeInTheDocument();
   });
 });

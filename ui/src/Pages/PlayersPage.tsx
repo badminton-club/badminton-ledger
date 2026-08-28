@@ -52,6 +52,9 @@ interface LedgerEntry {
 
 const INIT_BALANCE: BalanceAdjustment = { amount: '', reason: '', type: 'credit', includeInPayout: true };
 
+// Common top-up amounts shown as one-tap shortcuts in the Adjust Balance form.
+const QUICK_ADD_AMOUNTS = [10, 20, 50, 100];
+
 function formatPlayerName(player: Pick<Player, 'firstName' | 'lastName'>): string {
   return [player.firstName, player.lastName].filter(Boolean).join(' ');
 }
@@ -509,6 +512,26 @@ export default function PlayersPage() {
                             required
                           />
                         </InputGroup>
+                        <div className="d-flex gap-2 mb-2">
+                          {QUICK_ADD_AMOUNTS.map(quickAmount => (
+                            <Button
+                              key={quickAmount}
+                              type="button"
+                              size="sm"
+                              variant="outline-primary"
+                              onClick={() => setBalanceAdjustment(p => {
+                                // Stacks onto whatever's already entered while adding (e.g. clicking
+                                // +10 twice gives 20); switching from a deduction starts fresh instead
+                                // of subtracting from it.
+                                const current = p.type === 'credit' ? parseFloat(p.amount) : 0;
+                                const base = isNaN(current) ? 0 : current;
+                                return { ...p, type: 'credit', amount: String(base + quickAmount) };
+                              })}
+                            >
+                              +{quickAmount}
+                            </Button>
+                          ))}
+                        </div>
                         <Form.Control
                           type="text"
                           placeholder="Reason (e.g., Cash Payment)"

@@ -11,6 +11,20 @@ beforeEach(() => {
   resetFirebaseTestState();
 });
 
+// The date header renders as "Weekday" <br/> "Month d" (two lines, no
+// comma), so its text is split across sibling text nodes within one <p>.
+function dateHeading(text: string) {
+  return (_content: string, element: Element | null) => {
+    if (!element || element.tagName.toLowerCase() !== 'p') return false;
+    const joined = Array.from(element.childNodes)
+      .map((n) => (n.nodeType === Node.TEXT_NODE ? n.textContent : ' '))
+      .join('')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return joined === text;
+  };
+}
+
 function makePlayer(id: string, firstName: string, lastName: string): Player {
   return {
     id,
@@ -67,7 +81,7 @@ describe('SessionQuickView', () => {
       }
     );
 
-    expect(screen.getByText('Monday, August 10')).toBeInTheDocument();
+    expect(screen.getByText(dateHeading('Monday August 10'))).toBeInTheDocument();
     expect(screen.getByText('No session this day')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '+ Add Session' }));
