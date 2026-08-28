@@ -892,107 +892,107 @@ export default function SettingsPage() {
       </Modal>
 
       {isSuperAdmin && (
-      <Accordion className="mt-3">
-        <Accordion.Item eventKey="danger-zone" className="border-danger">
-          <Accordion.Header>
-            <span className="text-danger fw-semibold">⚠ Danger zone</span>
-          </Accordion.Header>
-          <Accordion.Body>
-          <h5>Clear all data</h5>
-          <p>
-            Permanently deletes every document from the collections below. The collections
-            themselves are left in place.
-          </p>
-          <ListGroup variant="flush" className="mb-3">
-            {CLEARABLE_COLLECTIONS.map((name) => (
-              <ListGroup.Item key={name}>{name}</ListGroup.Item>
-            ))}
-          </ListGroup>
-
-          <Form.Group className="mb-3" controlId="settings-clear-all-confirm">
-            <Form.Label>
-              Type <strong>{CONFIRM_PHRASE}</strong> to enable the button.
-            </Form.Label>
-            <Form.Control
-              type="text"
-              value={confirmText}
-              onChange={(e) => setConfirmText(e.target.value)}
-              placeholder={CONFIRM_PHRASE}
-              disabled={clearing}
-            />
-          </Form.Group>
-
-          <Button
-            variant="danger"
-            onClick={handleClear}
-            disabled={confirmText !== CONFIRM_PHRASE || clearing}
-          >
-            {clearing ? (
-              <>
-                <Spinner as="span" animation="border" size="sm" className="me-2" />
-                Clearing...
-              </>
-            ) : (
-              'Clear all data'
-            )}
-          </Button>
-
-          {error && (
-            <Alert variant="danger" className="mt-3">
-              {error}
-            </Alert>
-          )}
-
-          {result && (
-            <Alert variant="success" className="mt-3">
-              <div>Data cleared successfully.</div>
-              <ul className="mb-0 mt-2">
-                {Object.entries(result).map(([name, count]) => (
-                  <li key={name}>
-                    {name}: {count} document{count === 1 ? '' : 's'} deleted
-                  </li>
+        <Accordion className="mt-3">
+          <Accordion.Item eventKey="danger-zone" className="border-danger">
+            <Accordion.Header>
+              <span className="text-danger fw-semibold">⚠ Danger zone</span>
+            </Accordion.Header>
+            <Accordion.Body>
+              <h5>Clear all data</h5>
+              <p>
+                Permanently deletes every document from the collections below. The collections
+                themselves are left in place.
+              </p>
+              <ListGroup variant="flush" className="mb-3">
+                {CLEARABLE_COLLECTIONS.map((name) => (
+                  <ListGroup.Item key={name}>{name}</ListGroup.Item>
                 ))}
-              </ul>
-            </Alert>
-          )}
+              </ListGroup>
 
-          <hr />
+              <Form.Group className="mb-3" controlId="settings-clear-all-confirm">
+                <Form.Label>
+                  Type <strong>{CONFIRM_PHRASE}</strong> to enable the button.
+                </Form.Label>
+                <Form.Control
+                  type="text"
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder={CONFIRM_PHRASE}
+                  disabled={clearing}
+                />
+              </Form.Group>
 
-          <h5>Delete this club</h5>
-          <p>
-            Permanently deletes this club and its membership roster. Only allowed once every data
-            collection above is empty — use <strong>Clear all data</strong> first. Type the club id{' '}
-            <strong>{clubId}</strong> to confirm.
-          </p>
-          <Form.Control
-            className="mb-3"
-            value={deleteClubText}
-            onChange={(e) => setDeleteClubText(e.target.value)}
-            placeholder={clubId ?? ''}
-            disabled={deletingClub}
-          />
-          <Button
-            variant="danger"
-            onClick={handleDeleteClub}
-            disabled={deletingClub || !clubId || deleteClubText !== clubId}
-          >
-            {deletingClub ? (
-              <>
-                <Spinner as="span" animation="border" size="sm" className="me-2" />
-                Deleting…
-              </>
-            ) : (
-              'Delete club'
-            )}
-          </Button>
-          {deleteClubError && (
-            <Alert variant="danger" className="mt-3">
-              {deleteClubError}
-            </Alert>
-          )}
-          </Accordion.Body>
-        </Accordion.Item>
-      </Accordion>
+              <Button
+                variant="danger"
+                onClick={handleClear}
+                disabled={confirmText !== CONFIRM_PHRASE || clearing}
+              >
+                {clearing ? (
+                  <>
+                    <Spinner as="span" animation="border" size="sm" className="me-2" />
+                    Clearing...
+                  </>
+                ) : (
+                  'Clear all data'
+                )}
+              </Button>
+
+              {error && (
+                <Alert variant="danger" className="mt-3">
+                  {error}
+                </Alert>
+              )}
+
+              {result && (
+                <Alert variant="success" className="mt-3">
+                  <div>Data cleared successfully.</div>
+                  <ul className="mb-0 mt-2">
+                    {Object.entries(result).map(([name, count]) => (
+                      <li key={name}>
+                        {name}: {count} document{count === 1 ? '' : 's'} deleted
+                      </li>
+                    ))}
+                  </ul>
+                </Alert>
+              )}
+
+              <hr />
+
+              <h5>Delete this club</h5>
+              <p>
+                Permanently deletes this club and its membership roster. Only allowed once every
+                data collection above is empty — use <strong>Clear all data</strong> first. Type
+                the club id <strong>{clubId}</strong> to confirm.
+              </p>
+              <Form.Control
+                className="mb-3"
+                value={deleteClubText}
+                onChange={(e) => setDeleteClubText(e.target.value)}
+                placeholder={clubId ?? ''}
+                disabled={deletingClub}
+              />
+              <Button
+                variant="danger"
+                onClick={handleDeleteClub}
+                disabled={deletingClub || !clubId || deleteClubText !== clubId}
+              >
+                {deletingClub ? (
+                  <>
+                    <Spinner as="span" animation="border" size="sm" className="me-2" />
+                    Deleting…
+                  </>
+                ) : (
+                  'Delete club'
+                )}
+              </Button>
+              {deleteClubError && (
+                <Alert variant="danger" className="mt-3">
+                  {deleteClubError}
+                </Alert>
+              )}
+            </Accordion.Body>
+          </Accordion.Item>
+        </Accordion>
       )}
     </Container>
   );
