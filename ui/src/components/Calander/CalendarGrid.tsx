@@ -10,9 +10,10 @@ interface Props {
     sessions: Session[];
     selectedDate: Date | null;
     onDayClick: (date: Date) => void;
+    onExpandDay?: (date: Date) => void;
 }
 
-export default function CalendarGrid({ currentDate, sessions, selectedDate, onDayClick }: Props) {
+export default function CalendarGrid({ currentDate, sessions, selectedDate, onDayClick, onExpandDay }: Props) {
     const totalDays = getTotalDaysInMonth(currentDate);
     const startDay = getFirstDayOfMonthWeekday(currentDate);
     const year = getYear(currentDate);
@@ -42,6 +43,7 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, onDa
                 selected={!!selected}
                 allPaid={allPaid}
                 onClick={() => onDayClick(date)}
+                onExpand={daySessions.length > 0 && onExpandDay ? () => onExpandDay(date) : undefined}
             />,
         );
     }
@@ -81,6 +83,7 @@ function DayCell({
     selected,
     allPaid,
     onClick,
+    onExpand,
 }: {
     day: number;
     sessionCount: number;
@@ -88,6 +91,7 @@ function DayCell({
     selected: boolean;
     allPaid: boolean;
     onClick: () => void;
+    onExpand?: () => void;
 }) {
     const [hovered, setHovered] = useState(false);
 
@@ -130,18 +134,56 @@ function DayCell({
                     }}
                 />
             )}
-            {sessionCount > 1 && (
+
+            {/* Multi-session count + expand-to-details shortcut (only when a session exists) */}
+            {(sessionCount > 1 || onExpand) && (
                 <div
                     style={{
                         position: "absolute",
-                        top: 8,
-                        right: 8,
-                        fontSize: 10,
-                        fontWeight: 600,
-                        color: "var(--color-text-secondary)",
+                        top: 6,
+                        right: 6,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
                     }}
                 >
-                    ×{sessionCount}
+                    {sessionCount > 1 && (
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-text-secondary)" }}>
+                            ×{sessionCount}
+                        </span>
+                    )}
+                    {onExpand && (
+                        <button
+                            type="button"
+                            aria-label="View session details"
+                            title="View session details"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onExpand();
+                            }}
+                            style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                width: 18,
+                                height: 18,
+                                padding: 0,
+                                border: "none",
+                                borderRadius: 4,
+                                background: "transparent",
+                                color: "var(--color-text-secondary)",
+                                cursor: "pointer",
+                            }}
+                        >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <g stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                    <polyline points="15 3 21 3 21 9" />
+                                    <line x1="10" y1="14" x2="21" y2="3" />
+                                </g>
+                            </svg>
+                        </button>
+                    )}
                 </div>
             )}
         </div>

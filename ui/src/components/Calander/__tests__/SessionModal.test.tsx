@@ -114,13 +114,15 @@ function makeSession(overrides: Partial<Session> = {}): Session {
 
 function renderSessionModal(
   sessionModal: Partial<RootState['sessionModal']> = {},
-  session?: Session
+  session?: Session,
+  date?: Date
 ) {
   return renderWithProviders(
     <SessionModal
       show
       onHide={jest.fn()}
       session={session}
+      date={date}
       onSessionUpdate={jest.fn()}
       onSaveSession={jest.fn().mockResolvedValue(undefined)}
       onDeleteSession={jest.fn().mockResolvedValue(undefined)}
@@ -165,6 +167,38 @@ describe('SessionModal', () => {
       store.dispatch(setMode('edit'));
     });
     expect(screen.getByText('Edit Session')).toBeInTheDocument();
+  });
+
+  it('shows the clicked date under the title while creating a new session, but not when editing/viewing an existing one', () => {
+    const clickedDate = new Date(2026, 7, 11); // Tuesday, August 11 2026
+    const { store } = renderSessionModal({ mode: 'paste' }, undefined, clickedDate);
+
+    expect(screen.getByText('Tue Aug 11 2026')).toBeInTheDocument();
+
+    act(() => {
+      store.dispatch(setMode('resolve'));
+    });
+    expect(screen.getByText('Tue Aug 11 2026')).toBeInTheDocument();
+
+    act(() => {
+      store.dispatch(setMode('details'));
+    });
+    expect(screen.getByText('Tue Aug 11 2026')).toBeInTheDocument();
+
+    // An existing session (view/edit) already shows its own date elsewhere.
+    const session = makeSession();
+    act(() => {
+      store.dispatch(setMode('view'));
+    });
+    renderSessionModal({ mode: 'view' }, session, clickedDate);
+    expect(screen.queryByText('Tue Aug 11 2026')).not.toBeInTheDocument();
+  });
+
+  it('abbreviates Thursday as "Thur" (date-fns\' own short weekday token is "Thu")', () => {
+    const thursday = new Date(2026, 7, 13); // Thursday, August 13 2026
+    renderSessionModal({ mode: 'paste' }, undefined, thursday);
+
+    expect(screen.getByText('Thur Aug 13 2026')).toBeInTheDocument();
   });
 
   it('parses numbered names, ignores waitlist entries, and resolves matching players', async () => {

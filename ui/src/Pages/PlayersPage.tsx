@@ -52,6 +52,9 @@ interface LedgerEntry {
 
 const INIT_BALANCE: BalanceAdjustment = { amount: '', reason: '', type: 'credit', includeInPayout: true };
 
+// Common top-up amounts shown as one-tap shortcuts in the Adjust Balance form.
+const QUICK_ADD_AMOUNTS = [10, 20, 50, 100];
+
 function formatPlayerName(player: Pick<Player, 'firstName' | 'lastName'>): string {
   return [player.firstName, player.lastName].filter(Boolean).join(' ');
 }
@@ -367,16 +370,26 @@ export default function PlayersPage() {
                     action
                     active={selectedPlayerId === player.id}
                     onClick={() => setSelectedPlayerId(player.id)}
-                    className={`d-flex justify-content-between align-items-center ${
-                      selectedPlayerId !== player.id && i % 2 === 1 ? 'bg-light' : ''
-                    }`}
+                    className="d-flex justify-content-between align-items-center"
+                    style={
+                      selectedPlayerId !== player.id && i % 2 === 1
+                        ? { backgroundColor: 'var(--color-background-secondary)' }
+                        : undefined
+                    }
                   >
                     <span>{formatPlayerName(player)}</span>
-                    {(player.owed ?? 0) > 0 && (
-                      <Badge bg="danger" style={{ fontSize: 10 }}>
-                        ${(player.owed ?? 0).toFixed(2)} owed
-                      </Badge>
-                    )}
+                    <span className="d-flex flex-column align-items-end gap-1">
+                      {player.balance < 0 && (
+                        <Badge bg="warning" text="dark" style={{ fontSize: 10 }}>
+                          Overdrawn ${Math.abs(player.balance).toFixed(2)}
+                        </Badge>
+                      )}
+                      {(player.owed ?? 0) > 0 && (
+                        <Badge bg="danger" style={{ fontSize: 10 }}>
+                          ${(player.owed ?? 0).toFixed(2)} owed
+                        </Badge>
+                      )}
+                    </span>
                   </ListGroup.Item>
                 ))}
                 {filteredPlayers.length === 0 && searchTerm && (
@@ -502,6 +515,26 @@ export default function PlayersPage() {
                             required
                           />
                         </InputGroup>
+                        <div className="d-flex gap-2 mb-2">
+                          {QUICK_ADD_AMOUNTS.map(quickAmount => (
+                            <Button
+                              key={quickAmount}
+                              type="button"
+                              size="sm"
+                              variant="outline-primary"
+                              onClick={() => setBalanceAdjustment(p => {
+                                // Stacks onto whatever's already entered while adding (e.g. clicking
+                                // +10 twice gives 20); switching from a deduction starts fresh instead
+                                // of subtracting from it.
+                                const current = p.type === 'credit' ? parseFloat(p.amount) : 0;
+                                const base = isNaN(current) ? 0 : current;
+                                return { ...p, type: 'credit', amount: String(base + quickAmount) };
+                              })}
+                            >
+                              +{quickAmount}
+                            </Button>
+                          ))}
+                        </div>
                         <Form.Control
                           type="text"
                           placeholder="Reason (e.g., Cash Payment)"

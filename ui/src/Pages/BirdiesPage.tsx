@@ -295,6 +295,7 @@ export default function BirdiesPage() {
               </th>
             ))}
             <th>Total Cost</th>
+            <th><span className="visually-hidden">Details</span></th>
           </tr>
         </thead>
         <tbody>
@@ -302,7 +303,7 @@ export default function BirdiesPage() {
             <tr
               key={batch.id}
               onClick={(e) => { e.stopPropagation(); handleSelectBatch(selectedBatch?.id === batch.id ? null : batch); }}
-              style={{ cursor: 'pointer' }}
+              style={{ cursor: 'pointer', borderLeft: '3px solid var(--bs-primary)' }}
               className={selectedBatch?.id === batch.id ? 'table-primary' : ''}
             >
               <td>{batch.name}</td>
@@ -310,6 +311,17 @@ export default function BirdiesPage() {
               <td>${batch.costPerTube.toFixed(2)}</td>
               <td>{batch.unopenedTubesRemaining}</td>
               <td>${totalBatchValue(batch).toFixed(2)}</td>
+              <td className="text-end text-muted" title="View batch details">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M9 6l6 6-6 6"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </td>
             </tr>
           ))}
         </tbody>

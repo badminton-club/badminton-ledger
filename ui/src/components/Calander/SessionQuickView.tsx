@@ -14,6 +14,18 @@ interface Props {
     onOpenModal: (session: Session) => void;
 }
 
+// The weekday and month/day sit on their own lines (e.g. "Saturday" then
+// "August 29") next to the +Add button, rather than one long "Weekday, Month d" line.
+function DateLabel({ date }: { date: Date }) {
+    return (
+        <p style={styles.dateLabel}>
+            {format(date, "EEEE")}
+            <br />
+            {format(date, "MMMM d")}
+        </p>
+    );
+}
+
 export default function SessionQuickView({ date, sessions, onAddSession, onOpenModal }: Props) {
     const isAdmin = useAppSelector(selectIsClubAdmin);
     const [activeIndex, setActiveIndex] = React.useState(0);
@@ -25,7 +37,7 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
         return (
             <div style={styles.wrap}>
                 <div style={styles.header}>
-                    <p style={styles.dateLabel}>{format(date, "EEEE, MMMM d")}</p>
+                    <DateLabel date={date} />
                     {isAdmin && (
                         <Button size="sm" variant="primary" onClick={onAddSession}>
                             + Add Session
@@ -49,7 +61,7 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
         <div style={styles.wrap}>
             <div style={styles.header}>
                 <div>
-                    <p style={styles.dateLabel}>{format(date, "EEEE, MMMM d")}</p>
+                    <DateLabel date={date} />
                     <div
                         style={{
                             ...styles.statusBadge,

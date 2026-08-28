@@ -4,8 +4,13 @@ import userEvent from '@testing-library/user-event';
 import AppNavBar from '../AppNavBar';
 import { renderWithProviders, makeClubState } from '../../test-utils/renderWithProviders';
 
+beforeEach(() => {
+  window.localStorage.clear();
+  document.documentElement.removeAttribute('data-bs-theme');
+});
+
 describe('AppNavBar', () => {
-  it('shows only attendance and account links for non-admin members', () => {
+  it('shows home, attendance, and account links for non-admin members', () => {
     renderWithProviders(<AppNavBar />, {
       preloadedState: {
         club: makeClubState({
@@ -16,6 +21,7 @@ describe('AppNavBar', () => {
       },
     });
 
+    expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/');
     expect(screen.getByRole('link', { name: 'Attendance' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Account' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Birdies' })).not.toBeInTheDocument();
@@ -46,6 +52,21 @@ describe('AppNavBar', () => {
     expect(screen.queryByRole('link', { name: 'Payout' })).not.toBeInTheDocument();
   });
 
+  it('shows the account name to the right of the Account tab, with the theme toggle after it', () => {
+    renderWithProviders(<AppNavBar />, {
+      preloadedState: {
+        club: makeClubState({ accountName: 'Ada Lovelace' }),
+      },
+    });
+
+    const accountLink = screen.getByRole('link', { name: 'Account' });
+    const accountName = screen.getByText('Ada Lovelace');
+    const toggle = screen.getByRole('button', { name: 'Switch to dark mode' });
+
+    expect(accountLink.nextElementSibling).toBe(accountName);
+    expect(accountName.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('switches clubs from the dropdown and updates the current title', async () => {
     const user = userEvent.setup();
     const { store } = renderWithProviders(<AppNavBar />, {
@@ -66,5 +87,25 @@ describe('AppNavBar', () => {
 
     expect(store.getState().club.currentClubId).toBe('club-b');
     expect(screen.getByRole('button', { name: 'Beta Club' })).toBeInTheDocument();
+  });
+
+  it('toggles between light and dark mode', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AppNavBar />, {
+      preloadedState: { club: makeClubState() },
+    });
+
+    expect(document.documentElement.getAttribute('data-bs-theme')).toBe('light');
+    const toggle = screen.getByRole('button', { name: 'Switch to dark mode' });
+
+    await user.click(toggle);
+
+    expect(screen.getByRole('button', { name: 'Switch to light mode' })).toBeInTheDocument();
+    expect(document.documentElement.getAttribute('data-bs-theme')).toBe('dark');
+
+    await user.click(screen.getByRole('button', { name: 'Switch to light mode' }));
+
+    expect(screen.getByRole('button', { name: 'Switch to dark mode' })).toBeInTheDocument();
+    expect(document.documentElement.getAttribute('data-bs-theme')).toBe('light');
   });
 });

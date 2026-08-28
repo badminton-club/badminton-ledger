@@ -28,6 +28,7 @@ describe('clubSlice reducer', () => {
       clubs: [],
       disabledTabs: [],
       signedIn: false,
+      accountName: null,
       ready: false,
     });
   });
@@ -74,6 +75,7 @@ describe('clubSlice reducer', () => {
       clubs: [],
       disabledTabs: [],
       signedIn: false,
+      accountName: null,
       ready: true,
     });
   });

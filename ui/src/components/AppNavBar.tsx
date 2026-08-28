@@ -8,9 +8,11 @@ import {
     selectCurrentClubId,
     selectClubRole,
     selectDisabledTabs,
+    selectAccountName,
     setCurrentClub,
 } from "../features/club/clubSlice";
 import { TOGGLEABLE_TABS } from "../features/club/tabs";
+import ThemeToggle from "./ThemeToggle";
 
 export default function AppNavbar() {
     const dispatch = useAppDispatch();
@@ -19,6 +21,7 @@ export default function AppNavbar() {
     const currentClubId = useAppSelector(selectCurrentClubId);
     const role = useAppSelector(selectClubRole);
     const disabledTabs = useAppSelector(selectDisabledTabs);
+    const accountName = useAppSelector(selectAccountName);
     const isAdmin = role === "admin" || role === "superAdmin";
 
     return (
@@ -62,7 +65,10 @@ export default function AppNavbar() {
                             </NavDropdown>
                         )}
                     </Nav>
-                    <Nav className="ms-auto">
+                    <Nav className="ms-auto align-items-center">
+                        <Nav.Link as={Link} to="/">
+                            Home
+                        </Nav.Link>
                         {currentClubId && (
                             <Nav.Link as={Link} to="/attendance">
                                 Attendance
@@ -83,6 +89,14 @@ export default function AppNavbar() {
                         <Nav.Link as={Link} to="/auth">
                             Account
                         </Nav.Link>
+                        {accountName && (
+                            <Navbar.Text className="ms-2 text-white">
+                                {accountName}
+                            </Navbar.Text>
+                        )}
+                        <div className="ms-3 d-flex align-items-center">
+                            <ThemeToggle />
+                        </div>
                     </Nav>
                 </Navbar.Collapse>
             </Container>
