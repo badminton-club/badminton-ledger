@@ -124,6 +124,31 @@ describe('ResolveNamesStep', () => {
     expect(screen.getByRole('button', { name: /Confirm & Add Details/ })).toBeDisabled();
   });
 
+  it('removes an entire row (not just its match) when its remove button is clicked', async () => {
+    const user = userEvent.setup();
+    const player = makePlayer();
+    renderStep([
+      makeItem({ id: 'a', rawName: 'John Smith', status: 'matched', candidates: [player], resolvedPlayerId: 'p1' }),
+      makeItem({ id: 'b', rawName: 'Jane Doe', status: 'unmatched' }),
+    ]);
+
+    expect(screen.getByRole('button', { name: 'Remove John Smith' })).toBeInTheDocument();
+    expect(screen.getByText('Jane Doe')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Remove John Smith' }));
+
+    expect(screen.queryByRole('button', { name: 'Remove John Smith' })).not.toBeInTheDocument();
+    expect(screen.getByText('Jane Doe')).toBeInTheDocument();
+    // With the unresolved row still remaining, confirm must stay disabled...
+    expect(screen.getByRole('button', { name: /Confirm & Add Details/ })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Remove Jane Doe' }));
+    expect(screen.queryByText('Jane Doe')).not.toBeInTheDocument();
+    // ...but selectAllResolved requires at least one item, so with zero rows
+    // left, confirm still stays disabled rather than "trivially" enabling.
+    expect(screen.getByRole('button', { name: /Confirm & Add Details/ })).toBeDisabled();
+  });
+
   it('enables and calls onComplete with the resolved items once everything is resolved', async () => {
     const user = userEvent.setup();
     const onComplete = jest.fn();

@@ -6,6 +6,7 @@ import {
     selectFormError,
     selectAllResolved,
     updateResolutionItem,
+    setResolutionItems,
     setFormError,
 } from "../../../features/SessionModal/sessionModalSlice";
 import { findPlayersByName, addPlayer, formatPlayerName } from "../../../services/firebase";
@@ -29,6 +30,12 @@ export default function ResolveNamesStep({ onComplete, onBack }: Props) {
     const resolvedIds = items.map((i) => i.resolvedPlayerId).filter(Boolean);
     const duplicateIds = new Set(resolvedIds.filter((id, _, arr) => arr.filter((x) => x === id).length > 1));
 
+    // Drops the whole row — used when a suggested/matched player is wrong for
+    // this session and the attendee should just be excluded, not re-matched.
+    const handleRemove = (index: number) => {
+        dispatch(setResolutionItems(items.filter((_, i) => i !== index)));
+    };
+
     return (
         <>
             {pendingCount > 0 && (
@@ -45,6 +52,7 @@ export default function ResolveNamesStep({ onComplete, onBack }: Props) {
                     index={index}
                     dispatch={dispatch}
                     isDuplicate={!!item.resolvedPlayerId && duplicateIds.has(item.resolvedPlayerId)}
+                    onRemove={() => handleRemove(index)}
                 />
             ))}
 
@@ -103,11 +111,13 @@ function NameRow({
     index,
     dispatch,
     isDuplicate,
+    onRemove,
 }: {
     item: NameResolutionItem;
     index: number;
     dispatch: ReturnType<typeof useAppDispatch>;
     isDuplicate: boolean;
+    onRemove: () => void;
 }) {
     const [isRematching, setIsRematching] = useState(false);
     const [showInlineAdd, setShowInlineAdd] = useState(false);
@@ -143,8 +153,16 @@ function NameRow({
     };
 
     return (
-        <Card className="mb-2 shadow-sm">
-            <Card.Body className="py-2">
+        <Card className="mb-2 shadow-sm position-relative">
+            <button
+                type="button"
+                className="btn-close"
+                aria-label={`Remove ${item.rawName}`}
+                title="Remove this attendee"
+                onClick={onRemove}
+                style={{ position: "absolute", top: 12, right: 12 }}
+            />
+            <Card.Body className="py-2 pe-5">
                 <Row className="align-items-center g-2">
                     {/* Left: name + edit */}
                     <Col md={4}>
