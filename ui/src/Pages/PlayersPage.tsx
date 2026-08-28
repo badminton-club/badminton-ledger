@@ -370,9 +370,12 @@ export default function PlayersPage() {
                     action
                     active={selectedPlayerId === player.id}
                     onClick={() => setSelectedPlayerId(player.id)}
-                    className={`d-flex justify-content-between align-items-center ${
-                      selectedPlayerId !== player.id && i % 2 === 1 ? 'bg-light' : ''
-                    }`}
+                    className="d-flex justify-content-between align-items-center"
+                    style={
+                      selectedPlayerId !== player.id && i % 2 === 1
+                        ? { backgroundColor: 'var(--color-background-secondary)' }
+                        : undefined
+                    }
                   >
                     <span>{formatPlayerName(player)}</span>
                     <span className="d-flex flex-column align-items-end gap-1">

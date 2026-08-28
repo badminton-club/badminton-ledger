@@ -203,6 +203,23 @@ body {
     color: var(--color-text-primary);
 }
 
+/* Bootstrap's static light-background utilities (bg-light, table-light) don't
+ * adapt to dark mode on their own — retheme them to the same secondary
+ * background/text pair used elsewhere so light "info box" panels and table
+ * header rows stay legible in both themes. */
+.bg-light {
+    background-color: var(--color-background-secondary) !important;
+    color: var(--color-text-primary);
+}
+
+.table-light,
+.table-light > th,
+.table-light > td {
+    background-color: var(--color-background-secondary) !important;
+    color: var(--color-text-primary) !important;
+    border-color: var(--color-border-tertiary);
+}
+
 .modal-content {
     background-color: var(--color-background-primary);
     border: 0.5px solid var(--color-border-secondary);
