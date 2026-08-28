@@ -61,6 +61,7 @@ export default function SettingsPage() {
   const [members, setMembers] = useState<ClubMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState('');
+  const [membersMessage, setMembersMessage] = useState('');
   const [newMemberUid, setNewMemberUid] = useState('');
   const [newMemberRole, setNewMemberRole] = useState<ClubRole>('member');
   const [addingMember, setAddingMember] = useState(false);
@@ -87,6 +88,7 @@ export default function SettingsPage() {
     if (!clubId) { setMembers([]); return; }
     setMembersLoading(true);
     setMembersError('');
+    setMembersMessage('');
     try {
       setMembers(await fetchClubMembers(clubId));
     } catch (err) {
@@ -107,11 +109,27 @@ export default function SettingsPage() {
     try {
       await addClubMember(clubId, target, newMemberRole);
       setNewMemberUid('');
+      setMembersMessage('Member access saved. The club will appear the next time they refresh or sign in.');
       await loadMembers();
     } catch (err) {
       setMembersError(err instanceof Error ? err.message : 'Failed to add member.');
     } finally {
       setAddingMember(false);
+    }
+  };
+
+  const handleSyncMemberAccess = async (member: ClubMember) => {
+    if (!clubId) return;
+    setMembersError('');
+    setMembersMessage('');
+    setAssigningUid(member.uid);
+    try {
+      await addClubMember(clubId, member.uid, member.role);
+      setMembersMessage('Club access synced. Ask the member to refresh or sign in again.');
+    } catch (err) {
+      setMembersError(err instanceof Error ? err.message : 'Failed to sync member access.');
+    } finally {
+      setAssigningUid(null);
     }
   };
 
@@ -468,7 +486,8 @@ export default function SettingsPage() {
   return (
     <Container className="mt-4" style={{ maxWidth: 900 }}>
       <h3>Club settings</h3>
-      <p className="text-muted">Settings for the club you currently have open.</p>
+      <p className="text-muted mb-1">Settings for the club you currently have open.</p>
+      <p className="text-muted">Club ID: <code>{clubId}</code></p>
 
       <Card className="mt-3">
         <Card.Header>Tabs</Card.Header>
@@ -631,6 +650,10 @@ export default function SettingsPage() {
             Add people by their user ID (shown on their Account page) and link each to a player so
             they can see their own attendance.
           </Card.Text>
+          <Card.Text className="text-muted small">
+            Admins manage day-to-day club data. Super admins can also grant admin access, remove
+            members, clear all data, and delete the club.
+          </Card.Text>
 
           <InputGroup className="mb-3">
             <Form.Control
@@ -654,6 +677,7 @@ export default function SettingsPage() {
           </InputGroup>
 
           {membersError && <Alert variant="danger" className="py-2">{membersError}</Alert>}
+          {membersMessage && <Alert variant="success" className="py-2">{membersMessage}</Alert>}
 
           {membersLoading ? (
             <Spinner animation="border" size="sm" />
@@ -680,6 +704,14 @@ export default function SettingsPage() {
                         <option key={p.id} value={p.id}>{playerLabel(p)}</option>
                       ))}
                     </Form.Select>
+                    <Button
+                      size="sm"
+                      variant="outline-secondary"
+                      disabled={assigningUid === m.uid}
+                      onClick={() => handleSyncMemberAccess(m)}
+                    >
+                      Sync access
+                    </Button>
                     {isSuperAdmin && (
                       <Button size="sm" variant="outline-danger" disabled={assigningUid === m.uid} onClick={() => handleRemoveMember(m.uid)}>
                         Remove
@@ -892,7 +924,7 @@ export default function SettingsPage() {
       </Modal>
 
       {isSuperAdmin && (
-        <Accordion className="mt-3">
+        <Accordion className="mt-3 mb-4">
           <Accordion.Item eventKey="danger-zone" className="border-danger">
             <Accordion.Header>
               <span className="text-danger fw-semibold">⚠ Danger zone</span>

@@ -100,7 +100,17 @@ service cloud.firestore {
     // ── User profiles ──────────────────────────────────────────────────────────
     // Each user manages their own profile (their saved club list + default).
     match /users/{uid} {
-      allow read, create, delete: if isSignedIn() && request.auth.uid == uid;
+      allow read, delete: if isSignedIn() && request.auth.uid == uid;
+      allow create: if isSignedIn() && (
+        request.auth.uid == uid
+        // A club admin may initialize only the saved-club list for a user who
+        // does not have a profile yet.
+        || (
+          request.resource.data.keys().hasOnly(['clubs'])
+          && request.resource.data.clubs.size() == 1
+          && isClubAdmin(request.resource.data.clubs[0])
+        )
+      );
       allow update: if isSignedIn() && (
         request.auth.uid == uid
         // A club admin granting someone membership (see clubs.ts `addClubMember`)
@@ -111,8 +121,14 @@ service cloud.firestore {
         // exactly one id, and only a club the caller actually administers.
         || (
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clubs'])
-          && request.resource.data.clubs.size() == resource.data.get('clubs', []).size() + 1
-          && isClubAdmin(request.resource.data.clubs.removeAll(resource.data.get('clubs', []))[0])
+          && (
+            // Keep retries/idempotent syncs harmless when the club is already saved.
+            request.resource.data.clubs == resource.data.get('clubs', [])
+            || (
+              request.resource.data.clubs.size() == resource.data.get('clubs', []).size() + 1
+              && isClubAdmin(request.resource.data.clubs.removeAll(resource.data.get('clubs', []))[0])
+            )
+          )
         )
       );
     }

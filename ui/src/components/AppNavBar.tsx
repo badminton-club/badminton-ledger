@@ -86,14 +86,15 @@ export default function AppNavbar() {
                                 </Nav.Link>
                             </>
                         )}
-                        <Nav.Link as={Link} to="/auth">
-                            Account
-                        </Nav.Link>
-                        {accountName && (
-                            <Navbar.Text className="ms-2 text-white">
-                                {accountName}
-                            </Navbar.Text>
-                        )}
+                        <NavDropdown
+                            title={accountName || "Account"}
+                            id="account-menu"
+                            align="end"
+                        >
+                            <NavDropdown.Item as={Link} to="/auth">
+                                Account
+                            </NavDropdown.Item>
+                        </NavDropdown>
                         <div className="ms-3 d-flex align-items-center">
                             <ThemeToggle />
                         </div>

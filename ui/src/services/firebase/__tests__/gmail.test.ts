@@ -197,7 +197,7 @@ describe('searchEtransferEmails', () => {
       .mockResolvedValueOnce(jsonResponse({ messages: [{ id: 'msg-1', threadId: 'thread-1' }] }))
       .mockResolvedValueOnce(jsonResponse(message));
 
-    const results = await gmail.searchEtransferEmails('notify@payments.interac.ca');
+    const results = await gmail.searchEtransferEmails('notify@payments.interac.ca', '2026-08-27');
 
     expect(results).toHaveLength(1);
     expect(results[0].senderName).toBe('CAI FANG WU');
@@ -205,6 +205,7 @@ describe('searchEtransferEmails', () => {
 
     const searchUrl = fetchMock().mock.calls[0][0] as string;
     expect(searchUrl).toContain(encodeURIComponent('from:notify@payments.interac.ca'));
+    expect(searchUrl).toContain(encodeURIComponent(`after:${Date.UTC(2026, 7, 27) / 1000}`));
     expect(searchUrl).toContain(encodeURIComponent('-label:Processed'));
     expect(searchUrl).toContain(encodeURIComponent('-label:Rejected'));
     expectBearerToken(0, 'gmail-token');

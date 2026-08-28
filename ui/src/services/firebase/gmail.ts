@@ -26,6 +26,7 @@ let cachedToken: { value: string; expiresAt: number; uid: string } | null = null
 
 /** The default sender address for Interac e-Transfer autodeposit notifications. */
 export const DEFAULT_ETRANSFER_SENDER_ADDRESS = 'notify@payments.interac.ca';
+export const DEFAULT_ETRANSFER_SEARCH_AFTER_DATE = '2026-08-27';
 
 export interface ParsedEtransferEmail {
   gmailMessageId: string;
@@ -247,10 +248,32 @@ export function parseEtransferMessage(message: {
  * written to Gmail by this call — labelling happens only once an admin has
  * reviewed and applied or rejected an import.
  */
-export async function searchEtransferEmails(senderAddress: string): Promise<ParsedEtransferEmail[]> {
+function gmailAfterEpochSeconds(date: string): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) throw new Error('Enter a valid e-Transfer search date.');
+  const [, year, month, day] = match.map(Number);
+  const timestamp = Date.UTC(year, month - 1, day);
+  const parsed = new Date(timestamp);
+  if (
+    parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() !== month - 1
+    || parsed.getUTCDate() !== day
+  ) {
+    throw new Error('Enter a valid e-Transfer search date.');
+  }
+  return Math.floor(timestamp / 1000);
+}
+
+export async function searchEtransferEmails(
+  senderAddress: string,
+  searchAfterDate: string = DEFAULT_ETRANSFER_SEARCH_AFTER_DATE
+): Promise<ParsedEtransferEmail[]> {
   return serviceCall('searchEtransferEmails', async () => {
+    // Gmail accepts Unix seconds, which avoids its documented PST-based
+    // interpretation of calendar dates and makes the lower bound unambiguous.
+    const after = gmailAfterEpochSeconds(searchAfterDate);
     const accessToken = await getGmailAccessToken();
-    const q = `from:${senderAddress} subject:"automatically deposited" -label:${PROCESSED_LABEL_NAME} -label:${REJECTED_LABEL_NAME}`;
+    const q = `from:${senderAddress} subject:"automatically deposited" after:${after} -label:${PROCESSED_LABEL_NAME} -label:${REJECTED_LABEL_NAME}`;
     const { messages } = await gmailFetch<{ messages?: { id: string; threadId: string }[] }>(
       accessToken,
       `${GMAIL_API}/messages?q=${encodeURIComponent(q)}&maxResults=100`
@@ -299,4 +322,3 @@ export async function labelEtransferEmailRejected(gmailMessageId: string): Promi
     });
   });
 }
-

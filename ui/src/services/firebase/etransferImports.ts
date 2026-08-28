@@ -19,6 +19,7 @@ import {
   labelEtransferEmailProcessed,
   labelEtransferEmailRejected,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
+  DEFAULT_ETRANSFER_SEARCH_AFTER_DATE,
   type ParsedEtransferEmail,
 } from './gmail';
 import type { EtransferImport, EtransferSenderMapping } from 'types';
@@ -113,10 +114,11 @@ export async function deleteEtransferSenderMapping(id: string): Promise<void> {
  * confirm or correct before anything touches a balance.
  */
 export async function importEtransferEmails(
-  senderAddress: string = DEFAULT_ETRANSFER_SENDER_ADDRESS
+  senderAddress: string = DEFAULT_ETRANSFER_SENDER_ADDRESS,
+  searchAfterDate: string = DEFAULT_ETRANSFER_SEARCH_AFTER_DATE
 ): Promise<{ found: number; created: number }> {
   return serviceCall('importEtransferEmails', async () => {
-    const parsed = await searchEtransferEmails(senderAddress);
+    const parsed = await searchEtransferEmails(senderAddress, searchAfterDate);
     if (parsed.length === 0) return { found: 0, created: 0 };
 
     // A club's search results are a handful of emails at a time, so checking

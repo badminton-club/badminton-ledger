@@ -107,6 +107,7 @@ describe('SettingsPage', () => {
     renderPage({ role: 'admin' });
 
     expect(screen.getByText('Club settings')).toBeInTheDocument();
+    expect(screen.getByText(TEST_CLUB_ID)).toBeInTheDocument();
     expect(await screen.findByText('member-1')).toBeInTheDocument();
     expect(screen.queryByText(/danger zone/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
@@ -194,6 +195,20 @@ describe('SettingsPage', () => {
     // The new admin's own profile is updated too, so the club shows up in
     // their club switcher without them needing a separate join link.
     expect(__getDocData('users/new-admin')).toMatchObject({ clubs: [TEST_CLUB_ID] });
+  });
+
+  it('repairs saved club access for an existing member', async () => {
+    const user = userEvent.setup();
+    seedMemberDoc('member-1', { role: 'member', playerId: null });
+    renderPage({ role: 'superAdmin' });
+
+    const memberRow = (await screen.findByText('member-1')).closest('.list-group-item') as HTMLElement;
+    await user.click(within(memberRow).getByRole('button', { name: 'Sync access' }));
+
+    await waitFor(() => {
+      expect(__getDocData('users/member-1')).toMatchObject({ clubs: [TEST_CLUB_ID] });
+    });
+    expect(screen.getByText(/club access synced/i)).toBeInTheDocument();
   });
 
   it('approves pending link requests using the auto-suggested player match', async () => {

@@ -16,6 +16,7 @@ jest.mock('../gmail', () => ({
   labelEtransferEmailProcessed: jest.fn(),
   labelEtransferEmailRejected: jest.fn(),
   DEFAULT_ETRANSFER_SENDER_ADDRESS: 'notify@payments.interac.ca',
+  DEFAULT_ETRANSFER_SEARCH_AFTER_DATE: '2026-08-27',
 }));
 
 function makeParsedEmail(overrides: Partial<ParsedEtransferEmail> = {}): ParsedEtransferEmail {
@@ -88,7 +89,7 @@ describe('importEtransferEmails', () => {
 
     const result = await etransfer.importEtransferEmails();
 
-    expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca');
+    expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca', '2026-08-27');
     expect(result).toEqual({ found: 3, created: 3 });
 
     const mapped = helpers.getClubDocData('etransferImports', 'msg-2');
@@ -124,7 +125,7 @@ describe('importEtransferEmails', () => {
   it('passes a custom sender address through to the Gmail search', async () => {
     jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([]);
     await etransfer.importEtransferEmails('custom@bank.example');
-    expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith('custom@bank.example');
+    expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith('custom@bank.example', '2026-08-27');
   });
 });
 

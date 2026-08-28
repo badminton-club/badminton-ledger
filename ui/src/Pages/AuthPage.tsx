@@ -74,7 +74,7 @@ export default function AuthPage() {
   const [clubError, setClubError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const [setupName, setSetupName] = useState('Wed Badminton Club');
+  const [setupName, setSetupName] = useState('');
   const [setupBusy, setSetupBusy] = useState(false);
   const [setupError, setSetupError] = useState('');
   const [setupDone, setSetupDone] = useState('');
@@ -445,7 +445,7 @@ export default function AuthPage() {
               </ListGroup>
             )}
 
-            <Form.Label>Add a club</Form.Label>
+            <Form.Label>Join a club</Form.Label>
             <InputGroup>
               <Form.Control
                 placeholder="Club link or id"
@@ -455,7 +455,7 @@ export default function AuthPage() {
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddClub(); } }}
               />
               <Button variant="primary" onClick={handleAddClub} disabled={busy || !clubInput.trim()}>
-                {busy ? <Spinner size="sm" animation="border" /> : 'Add'}
+                {busy ? <Spinner size="sm" animation="border" /> : 'Join'}
               </Button>
             </InputGroup>
             {clubError && <Alert variant="danger" className="mt-2 mb-0 py-2">{clubError}</Alert>}
@@ -470,12 +470,14 @@ export default function AuthPage() {
             <Card.Text className="text-muted">
               Makes a new, empty club and adds you as its admin.
             </Card.Text>
-            <Form.Label>Club name</Form.Label>
-            <Form.Control
-              value={setupName}
-              onChange={(e) => setSetupName(e.target.value)}
-              disabled={setupBusy}
-            />
+            <Form.Group controlId="create-club-name">
+              <Form.Label>Club name</Form.Label>
+              <Form.Control
+                value={setupName}
+                onChange={(e) => setSetupName(e.target.value)}
+                disabled={setupBusy}
+              />
+            </Form.Group>
             {setupName.trim() && (
               <Form.Text className="text-muted">Club id: {slugify(setupName) || '—'}</Form.Text>
             )}

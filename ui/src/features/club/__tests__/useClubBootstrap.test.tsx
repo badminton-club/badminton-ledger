@@ -33,7 +33,7 @@ function renderBootstrap(store: ReturnType<typeof makeTestStore>, route = '/') {
 
 describe('useClubBootstrap', () => {
   it('resets club state and signs out when there is no user', async () => {
-    const store = makeTestStore({ club: { currentClubId: 'stale', role: 'admin', clubs: [], disabledTabs: [], signedIn: true, ready: true } });
+    const store = makeTestStore({ club: { currentClubId: 'stale', role: 'admin', clubs: [], disabledTabs: [], signedIn: true, accountName: 'Admin', ready: true } });
     renderBootstrap(store);
 
     await waitFor(() => expect(store.getState().club.signedIn).toBe(false));

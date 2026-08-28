@@ -6,6 +6,8 @@ import { renderWithProviders, makeClubState, makePlayersState } from '../../test
 import {
   resetFirebaseTestState,
   seedClubDoc,
+  seedClubMetaDoc,
+  getClubMetaDocData,
   getClubDocData,
   setCurrentUser,
   ts,
@@ -78,14 +80,39 @@ describe('EtransfersPage', () => {
 
     renderPage();
     expect(await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Search emails after')).toHaveValue('2026-08-27');
 
     await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
 
+    expect(searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca', '2026-08-27');
     expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
     expect(screen.getByText('cash for shoppers')).toBeInTheDocument();
     expect(await screen.findByText(/found 1 email\(s\) — 1 new/i)).toBeInTheDocument();
     // Single-candidate name lookup ("Cai" matches the seeded player "Cai Wu") pre-selects the player.
     expect(screen.getByRole('combobox')).toHaveValue('p1');
+  });
+
+  it('loads and persists the club-specific earliest search date', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc('test-club', {
+      name: 'Test Club',
+      etransferSearchAfterDate: '2026-09-01',
+    });
+
+    renderPage();
+    const dateInput = await screen.findByLabelText('Search emails after');
+    expect(dateInput).toHaveValue('2026-09-01');
+
+    await user.clear(dateInput);
+    await user.type(dateInput, '2026-10-15');
+    await user.click(screen.getByRole('button', { name: 'Save date' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Search date saved.')).toBeInTheDocument();
+    });
+    expect(getClubMetaDocData('test-club')).toMatchObject({
+      etransferSearchAfterDate: '2026-10-15',
+    });
   });
 
   it('approves a pending import: credits the player balance, moves it to history, and labels the Gmail message', async () => {

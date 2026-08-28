@@ -131,19 +131,22 @@ export async function setLastVisitedClub(uid: string, clubId: string): Promise<v
  * wouldn't see the club at all until they separately opened a share link.
  * That second write is a narrowly-scoped exception in the rules (see
  * firestore.rules) for exactly this case, so it's safe even though the caller
- * isn't the target user. Best-effort: if the target user doesn't have a
- * profile yet (e.g. they've never signed in), the membership itself still
- * succeeds and this part is silently skipped — it'll pick up on their own
- * profile the next time they use a club join link.
+ * isn't the target user. The writes are atomic so a profile-sync failure cannot
+ * leave behind a membership that the target user cannot discover.
  */
 export async function addClubMember(clubId: string, uid: string, role: ClubRole): Promise<void> {
   return serviceCall('addClubMember', async () => {
-    await setDoc(memberDoc(clubId, uid), { role, addedAt: serverTimestamp() }, { merge: true });
-    try {
-      await updateDoc(userDoc(uid), { clubs: arrayUnion(clubId) });
-    } catch (err) {
-      console.error('[addClubMember] failed to save the club to the member\'s profile', err);
-    }
+    const batch = writeBatch(db);
+    batch.set(memberDoc(clubId, uid), { role, addedAt: serverTimestamp() }, { merge: true });
+    batch.set(userDoc(uid), { clubs: arrayUnion(clubId) }, { merge: true });
+    await batch.commit();
+  });
+}
+
+/** Persists the earliest calendar date included in Gmail e-Transfer searches. */
+export async function setClubEtransferSearchAfterDate(clubId: string, date: string): Promise<void> {
+  return serviceCall('setClubEtransferSearchAfterDate', async () => {
+    await setDoc(clubDoc(clubId), { etransferSearchAfterDate: date }, { merge: true });
   });
 }
 

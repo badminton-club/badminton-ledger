@@ -99,7 +99,7 @@ describe('AuthPage', () => {
 
     await screen.findByText(/Signed in as/);
     await user.type(screen.getByPlaceholderText('Club link or id'), 'https://example.com/invite?club=join-club');
-    await user.click(screen.getByRole('button', { name: 'Add' }));
+    await user.click(screen.getByRole('button', { name: 'Join' }));
 
     expect(await screen.findByText('Join Club')).toBeInTheDocument();
     await waitFor(() => expect(store.getState().club.currentClubId).toBe('join-club'));
@@ -114,6 +114,8 @@ describe('AuthPage', () => {
     const { store } = renderPage({ signedIn: true });
 
     await screen.findByText(/Signed in as/);
+    const createClubCard = screen.getByText('Create a new club').closest('.card') as HTMLElement;
+    await user.type(within(createClubCard).getByRole('textbox', { name: 'Club name' }), 'Wed Badminton Club');
     await user.click(screen.getByRole('button', { name: 'Create new club' }));
 
     expect(await screen.findByText(`Created "Wed Badminton Club". It's empty and ready to use.`)).toBeInTheDocument();

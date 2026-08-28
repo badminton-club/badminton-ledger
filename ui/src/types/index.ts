@@ -226,6 +226,8 @@ export interface Club {
   // services/firebase/gmail.ts). Configurable since some banks/regions may use a
   // different notification address than the Canadian default.
   etransferSenderAddress?: string;
+  // ISO calendar date used as the lower bound for Gmail e-Transfer searches.
+  etransferSearchAfterDate?: string;
   createdAt?: Timestamp;
 }
 
