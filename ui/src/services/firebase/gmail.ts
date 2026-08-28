@@ -14,7 +14,7 @@ import { serviceCall } from './utils';
 // "Rejected" label so already-reviewed emails aren't found again on the next
 // search. It does not grant permanent deletion or sending mail.
 const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
-const TOKEN_TTL_MS = 45 * 60 * 1000;
+const TOKEN_TTL_MS = 55 * 60 * 1000;
 const PROCESSED_LABEL_NAME = 'Processed';
 const REJECTED_LABEL_NAME = 'Rejected';
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -23,6 +23,7 @@ const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 // drive.ts for why this matters in an SPA where the signed-in user can change
 // without a page reload.
 let cachedToken: { value: string; expiresAt: number; uid: string } | null = null;
+let pendingTokenRequest: { value: Promise<string>; uid: string } | null = null;
 
 /** The default sender address for Interac e-Transfer autodeposit notifications. */
 export const DEFAULT_ETRANSFER_SENDER_ADDRESS = 'notify@payments.interac.ca';
@@ -53,32 +54,45 @@ async function getGmailAccessToken(): Promise<string> {
   if (cachedToken && cachedToken.uid === user.uid && cachedToken.expiresAt > Date.now()) {
     return cachedToken.value;
   }
+  if (pendingTokenRequest?.uid === user.uid) return pendingTokenRequest.value;
+  if (pendingTokenRequest) {
+    await pendingTokenRequest.value.catch(() => undefined);
+    return getGmailAccessToken();
+  }
 
-  const provider = new GoogleAuthProvider();
-  provider.addScope(GMAIL_SCOPE);
-  provider.setCustomParameters({ prompt: 'consent' });
+  const request = (async () => {
+    const provider = new GoogleAuthProvider();
+    provider.addScope(GMAIL_SCOPE);
 
-  let result;
-  try {
-    result = await reauthenticateWithPopup(user, provider);
-  } catch (err) {
-    if (err instanceof FirebaseError) {
-      if (err.code === 'auth/user-mismatch') {
-        throw new Error("Select the same Google account you're signed in with.");
+    let result;
+    try {
+      result = await reauthenticateWithPopup(user, provider);
+    } catch (err) {
+      if (err instanceof FirebaseError) {
+        if (err.code === 'auth/user-mismatch') {
+          throw new Error("Select the same Google account you're signed in with.");
+        }
+        if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+          throw new Error('Gmail authorization was cancelled.');
+        }
       }
-      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
-        throw new Error('Gmail authorization was cancelled.');
-      }
+      throw err;
     }
-    throw err;
-  }
 
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  if (!credential?.accessToken) {
-    throw new Error('Failed to get Gmail access — please try again.');
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (!credential?.accessToken) {
+      throw new Error('Failed to get Gmail access — please try again.');
+    }
+    cachedToken = { value: credential.accessToken, expiresAt: Date.now() + TOKEN_TTL_MS, uid: user.uid };
+    return credential.accessToken;
+  })();
+  pendingTokenRequest = { value: request, uid: user.uid };
+
+  try {
+    return await request;
+  } finally {
+    if (pendingTokenRequest?.value === request) pendingTokenRequest = null;
   }
-  cachedToken = { value: credential.accessToken, expiresAt: Date.now() + TOKEN_TTL_MS, uid: user.uid };
-  return credential.accessToken;
 }
 
 async function gmailFetch<T>(accessToken: string, url: string, init: RequestInit = {}): Promise<T> {

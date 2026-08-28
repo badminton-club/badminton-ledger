@@ -187,7 +187,7 @@ describe('searchEtransferEmails', () => {
     helpers.setCurrentUser(userOne);
     const reauth = jest.fn(async (user, provider) => {
       expect(provider.getScopes()).toEqual(['https://www.googleapis.com/auth/gmail.modify']);
-      expect(provider.getCustomParameters()).toEqual({ prompt: 'consent' });
+      expect(provider.getCustomParameters()).toEqual({});
       return { user, __credential: { accessToken: 'gmail-token' } };
     });
     fakeAuth.__setReauthImplementation(reauth);
@@ -332,5 +332,33 @@ describe('remove e-Transfer decision labels', () => {
     await gmail.removeEtransferEmailRejectedLabel('msg-1');
 
     expect(fetchMock()).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Gmail authorization reuse', () => {
+  it('shares one authorization popup across concurrent Gmail operations', async () => {
+    helpers.setCurrentUser(userOne);
+    type AuthorizationResult = {
+      user: typeof userOne;
+      __credential: { accessToken: string };
+    };
+    let finishAuthorization: ((value: AuthorizationResult) => void) | undefined;
+    const authorization = new Promise<AuthorizationResult>((resolve) => {
+      finishAuthorization = resolve;
+    });
+    const reauth = jest.fn(() => authorization);
+    fakeAuth.__setReauthImplementation(reauth);
+
+    const processed = gmail.removeEtransferEmailProcessedLabel('msg-1');
+    const rejected = gmail.removeEtransferEmailRejectedLabel('msg-2');
+    expect(reauth).toHaveBeenCalledTimes(1);
+
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ labels: [] }))
+      .mockResolvedValueOnce(jsonResponse({ labels: [] }));
+    finishAuthorization?.({ user: userOne, __credential: { accessToken: 'gmail-token' } });
+
+    await expect(Promise.all([processed, rejected])).resolves.toEqual([undefined, undefined]);
+    expect(reauth).toHaveBeenCalledTimes(1);
   });
 });
