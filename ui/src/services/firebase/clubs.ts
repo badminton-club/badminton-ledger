@@ -307,22 +307,6 @@ export async function setClubTabEnabled(clubId: string, tabKey: string, enabled:
 }
 
 /**
- * Sets the sender address searched for Interac e-Transfer autodeposit
- * notifications (see the e-Transfers page / services/firebase/gmail.ts).
- * Passing an empty string clears the override, reverting to the standard
- * Interac default.
- */
-export async function setClubEtransferSenderAddress(clubId: string, senderAddress: string): Promise<void> {
-  return serviceCall('setClubEtransferSenderAddress', async () => {
-    await setDoc(
-      clubDoc(clubId),
-      { etransferSenderAddress: senderAddress.trim() || null },
-      { merge: true }
-    );
-  });
-}
-
-/**
  * Permanently deletes a club. Refuses unless every data subcollection is already
  * empty (clear the data first). Removes the membership roster + club doc and drops
  * the club from the caller's profile.
