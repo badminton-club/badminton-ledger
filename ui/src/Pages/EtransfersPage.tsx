@@ -83,6 +83,7 @@ export default function EtransfersPage() {
   const [undoReason, setUndoReason] = useState('');
   const [undoing, setUndoing] = useState(false);
   const [undoError, setUndoError] = useState('');
+  const [undoWarning, setUndoWarning] = useState('');
 
   const [mappings, setMappings] = useState<EtransferSenderMapping[]>([]);
   const [mappingSavingId, setMappingSavingId] = useState<string | null>(null);
@@ -225,8 +226,12 @@ export default function EtransfersPage() {
     if (!undoReason.trim()) { setUndoError('Enter a reason for undoing this.'); return; }
     setUndoing(true);
     setUndoError('');
+    setUndoWarning('');
     try {
-      await undoEtransferImport(undoTarget.id, undoReason);
+      const { labelFailed } = await undoEtransferImport(undoTarget.id, undoReason);
+      if (labelFailed) {
+        setUndoWarning('The import was reopened, but its Gmail label could not be removed. Remove the label manually in Gmail.');
+      }
       setUndoTarget(null);
       setUndoReason('');
       await load();
@@ -332,6 +337,7 @@ export default function EtransfersPage() {
       </Card>
 
       {loadError && <Alert variant="danger">{loadError}</Alert>}
+      {undoWarning && <Alert variant="warning">{undoWarning}</Alert>}
 
       <Card className="mb-4">
         <Card.Header>Pending review ({pending.length})</Card.Header>
@@ -466,7 +472,7 @@ export default function EtransfersPage() {
                         {imp.status === 'undone' && imp.undoneReason}
                       </td>
                       <td>
-                        {imp.status === 'applied' && (
+                        {['applied', 'rejected', 'undone'].includes(imp.status) && (
                           <Button
                             size="sm"
                             variant="outline-secondary"
@@ -586,9 +592,11 @@ export default function EtransfersPage() {
           <Modal.Body>
             {undoTarget && (
               <p className="text-muted">
-                {money(undoTarget.appliedAmount ?? undoTarget.amount)} will be reversed from{' '}
-                {playerName(undoTarget.matchedPlayerId)}'s balance. The original entry is kept for the
-                record — nothing is deleted, and the email stays labelled "Processed".
+                {undoTarget.status === 'applied'
+                  ? `${money(undoTarget.appliedAmount ?? undoTarget.amount)} will be reversed from ${playerName(undoTarget.matchedPlayerId)}'s balance. `
+                  : 'No player balance will be changed. '}
+                The import will return to pending review and its Gmail label will be removed. The
+                original decision and ledger entries are kept for the audit record.
               </p>
             )}
             <Form.Group className="mb-3" controlId="etransfer-undo-reason">

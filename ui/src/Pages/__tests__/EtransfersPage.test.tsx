@@ -12,7 +12,13 @@ import {
   setCurrentUser,
   ts,
 } from '../../test-utils/firebaseTestHelpers';
-import { searchEtransferEmails, labelEtransferEmailProcessed, labelEtransferEmailRejected } from '../../services/firebase/gmail';
+import {
+  searchEtransferEmails,
+  labelEtransferEmailProcessed,
+  labelEtransferEmailRejected,
+  removeEtransferEmailProcessedLabel,
+  removeEtransferEmailRejectedLabel,
+} from '../../services/firebase/gmail';
 import type { Player } from '../../types';
 
 jest.mock('../../services/firebase/gmail', () => {
@@ -22,6 +28,8 @@ jest.mock('../../services/firebase/gmail', () => {
     searchEtransferEmails: jest.fn(),
     labelEtransferEmailProcessed: jest.fn(),
     labelEtransferEmailRejected: jest.fn(),
+    removeEtransferEmailProcessedLabel: jest.fn(),
+    removeEtransferEmailRejectedLabel: jest.fn(),
   };
 });
 
@@ -59,6 +67,8 @@ describe('EtransfersPage', () => {
     jest.mocked(searchEtransferEmails).mockReset();
     jest.mocked(labelEtransferEmailProcessed).mockReset().mockResolvedValue(undefined);
     jest.mocked(labelEtransferEmailRejected).mockReset().mockResolvedValue(undefined);
+    jest.mocked(removeEtransferEmailProcessedLabel).mockReset().mockResolvedValue(undefined);
+    jest.mocked(removeEtransferEmailRejectedLabel).mockReset().mockResolvedValue(undefined);
   });
 
   it('finds new e-Transfer emails via search, matches by name, and lists them for review', async () => {
@@ -170,8 +180,9 @@ describe('EtransfersPage', () => {
     await user.type(within(dialog).getByLabelText(/reason for undoing this/i), 'wrong match');
     await user.click(within(dialog).getByRole('button', { name: 'Undo' }));
 
-    await waitFor(() => expect(getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'undone' }));
+    await waitFor(() => expect(getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'pending' }));
     expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
+    expect(removeEtransferEmailProcessedLabel).toHaveBeenCalledWith('msg-1');
   });
 
   it('rejects a pending import: labels it "Rejected" in Gmail (not "Processed"), and shows Rejected in history', async () => {
@@ -204,6 +215,32 @@ describe('EtransfersPage', () => {
     const historyCard = screen.getByText('History').closest('.card') as HTMLElement;
     expect(within(historyCard).getByText('Rejected')).toBeInTheDocument();
     expect(within(historyCard).getByText('not a club payment')).toBeInTheDocument();
+  });
+
+  it('undoes a rejected import, returns it to review, and removes the Rejected Gmail label', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer());
+    seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      senderName: 'CAI FANG WU',
+      amount: 200,
+      emailDate: ts('2026-08-26'),
+      status: 'rejected',
+      matchedPlayerId: 'p1',
+      rejectionReason: 'not a club payment',
+    });
+
+    renderPage();
+    const historyCard = (await screen.findByText('History')).closest('.card') as HTMLElement;
+    await user.click(within(historyCard).getByRole('button', { name: 'Undo' }));
+    const dialog = screen.getByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/reason for undoing this/i), 'review again');
+    await user.click(within(dialog).getByRole('button', { name: 'Undo' }));
+
+    await waitFor(() => expect(getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'pending' }));
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
+    expect(removeEtransferEmailRejectedLabel).toHaveBeenCalledWith('msg-1');
+    expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
   });
 
   it('shows saved sender mappings and lets an admin re-map the player or remove the mapping', async () => {

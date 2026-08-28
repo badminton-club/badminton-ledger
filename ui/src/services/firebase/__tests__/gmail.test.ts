@@ -309,3 +309,28 @@ describe('labelEtransferEmailRejected', () => {
     expect(modifyBody).toEqual({ addLabelIds: ['Label_new_rejected'] });
   });
 });
+
+describe('remove e-Transfer decision labels', () => {
+  it('removes an existing Processed label from the message', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ labels: [{ id: 'Label_1', name: 'Processed' }] }))
+      .mockResolvedValueOnce(jsonResponse({}));
+
+    await gmail.removeEtransferEmailProcessedLabel('msg-1');
+
+    const modifyBody = JSON.parse((fetchMock().mock.calls[1][1] as RequestInit).body as string);
+    expect(modifyBody).toEqual({ removeLabelIds: ['Label_1'] });
+  });
+
+  it('does nothing when the Rejected label does not exist', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+    fetchMock().mockResolvedValueOnce(jsonResponse({ labels: [] }));
+
+    await gmail.removeEtransferEmailRejectedLabel('msg-1');
+
+    expect(fetchMock()).toHaveBeenCalledTimes(1);
+  });
+});

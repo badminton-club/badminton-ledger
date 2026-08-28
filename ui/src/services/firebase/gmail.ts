@@ -114,6 +114,25 @@ async function getOrCreateLabelId(accessToken: string, labelName: string): Promi
   return created.id;
 }
 
+async function removeLabelByName(
+  accessToken: string,
+  gmailMessageId: string,
+  labelName: string
+): Promise<void> {
+  const { labels } = await gmailFetch<{ labels?: { id: string; name: string }[] }>(
+    accessToken,
+    `${GMAIL_API}/labels`
+  );
+  const labelId = labels?.find((label) => label.name === labelName)?.id;
+  if (!labelId) return;
+
+  await gmailFetch(accessToken, `${GMAIL_API}/messages/${gmailMessageId}/modify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ removeLabelIds: [labelId] }),
+  });
+}
+
 /** Base64url-decodes a Gmail message body part into a UTF-8 string. */
 function decodeBody(data: string): string {
   const base64 = data.replace(/-/g, '+').replace(/_/g, '/');
@@ -320,5 +339,21 @@ export async function labelEtransferEmailRejected(gmailMessageId: string): Promi
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ addLabelIds: [labelId] }),
     });
+  });
+}
+
+/** Removes the app's "Processed" label when an applied import is reopened. */
+export async function removeEtransferEmailProcessedLabel(gmailMessageId: string): Promise<void> {
+  return serviceCall('removeEtransferEmailProcessedLabel', async () => {
+    const accessToken = await getGmailAccessToken();
+    await removeLabelByName(accessToken, gmailMessageId, PROCESSED_LABEL_NAME);
+  });
+}
+
+/** Removes the app's "Rejected" label when a rejected import is reopened. */
+export async function removeEtransferEmailRejectedLabel(gmailMessageId: string): Promise<void> {
+  return serviceCall('removeEtransferEmailRejectedLabel', async () => {
+    const accessToken = await getGmailAccessToken();
+    await removeLabelByName(accessToken, gmailMessageId, REJECTED_LABEL_NAME);
   });
 }

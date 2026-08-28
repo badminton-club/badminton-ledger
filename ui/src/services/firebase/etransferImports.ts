@@ -17,6 +17,8 @@ import {
   searchEtransferEmails,
   labelEtransferEmailProcessed,
   labelEtransferEmailRejected,
+  removeEtransferEmailProcessedLabel,
+  removeEtransferEmailRejectedLabel,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
   DEFAULT_ETRANSFER_SEARCH_AFTER_DATE,
   type ParsedEtransferEmail,
@@ -364,34 +366,45 @@ export async function rejectEtransferImport(importId: string, reason: string): P
 }
 
 /**
- * Undoes a previously applied import: reverses the balance with a new offsetting
- * `balanceLedger` entry (the original is never edited/deleted, matching the
- * undo pattern used for payout/balance adjustments elsewhere in the app) and
- * marks the import `undone`. The Gmail message is deliberately left labelled
- * "Processed" — undo corrects the ledger, it doesn't put the email back in the
- * queue to be re-matched and re-applied.
+ * Reopens an applied, rejected, or legacy-undone import for review. Applied
+ * imports first reverse the balance with a new offsetting ledger entry; rejected
+ * and already-undone imports do not touch balances. Audit fields and original
+ * ledger entries are retained. The corresponding Gmail label is removed so the
+ * message no longer appears Processed/Rejected outside the app.
  */
-export async function undoEtransferImport(importId: string, reason: string): Promise<void> {
+export async function undoEtransferImport(importId: string, reason: string): Promise<{ labelFailed: boolean }> {
   return serviceCall('undoEtransferImport', async () => {
     if (!reason.trim()) throw new Error('A reason for undoing this is required.');
 
     const importRef = doc(refs.etransferImports, importId);
 
-    await runTransaction(db, async (tx) => {
+    const { previousStatus, gmailMessageId } = await runTransaction(db, async (tx) => {
       const importSnap = await tx.get(importRef);
       if (!importSnap.exists()) throw new Error('Import record not found.');
       const importData = importSnap.data();
-      if (importData.status !== 'applied') {
-        throw new Error('Only an applied import can be undone.');
+      const previousStatus = importData.status as EtransferImport['status'];
+      if (!['applied', 'rejected', 'undone'].includes(previousStatus)) {
+        throw new Error('Only a reviewed import can be undone.');
       }
 
-      const playerId = importData.matchedPlayerId as string | null;
-      const delta = -((importData.appliedAmount as number) ?? 0);
+      const playerId = previousStatus === 'applied'
+        ? importData.matchedPlayerId as string | null
+        : null;
+      const appliedAmount = previousStatus === 'applied'
+        ? importData.appliedAmount as number | undefined
+        : undefined;
+      if (previousStatus === 'applied' && (!Number.isFinite(appliedAmount) || (appliedAmount ?? 0) <= 0)) {
+        throw new Error('This applied import has no valid amount to reverse.');
+      }
+      const delta = previousStatus === 'applied' ? -(appliedAmount as number) : 0;
       const playerRef = playerId ? doc(refs.players, playerId) : null;
       const playerSnap = playerRef ? await tx.get(playerRef) : null;
+      if (previousStatus === 'applied' && (!playerRef || !playerSnap?.exists())) {
+        throw new Error('The credited player no longer exists, so this import cannot be safely undone.');
+      }
 
       tx.update(importRef, {
-        status: 'undone',
+        status: 'pending',
         undoneByUid: auth.currentUser?.uid ?? null,
         undoneAt: serverTimestamp(),
         undoneReason: reason.trim(),
@@ -412,6 +425,24 @@ export async function undoEtransferImport(importId: string, reason: string): Pro
           createdAt: serverTimestamp(),
         });
       }
+
+      return {
+        previousStatus,
+        gmailMessageId: (importData.gmailMessageId as string) ?? importId,
+      };
     });
+
+    let labelFailed = false;
+    try {
+      if (previousStatus === 'rejected') {
+        await removeEtransferEmailRejectedLabel(gmailMessageId);
+      } else {
+        await removeEtransferEmailProcessedLabel(gmailMessageId);
+      }
+    } catch (err) {
+      console.error('[undoEtransferImport] removing Gmail label failed', err);
+      labelFailed = true;
+    }
+    return { labelFailed };
   });
 }

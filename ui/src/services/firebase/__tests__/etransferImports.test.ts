@@ -15,6 +15,8 @@ jest.mock('../gmail', () => ({
   searchEtransferEmails: jest.fn(),
   labelEtransferEmailProcessed: jest.fn(),
   labelEtransferEmailRejected: jest.fn(),
+  removeEtransferEmailProcessedLabel: jest.fn(),
+  removeEtransferEmailRejectedLabel: jest.fn(),
   DEFAULT_ETRANSFER_SENDER_ADDRESS: 'notify@payments.interac.ca',
   DEFAULT_ETRANSFER_SEARCH_AFTER_DATE: '2026-08-27',
 }));
@@ -61,6 +63,8 @@ beforeEach(() => {
   jest.mocked(gmailMock.searchEtransferEmails).mockReset();
   jest.mocked(gmailMock.labelEtransferEmailProcessed).mockReset().mockResolvedValue(undefined);
   jest.mocked(gmailMock.labelEtransferEmailRejected).mockReset().mockResolvedValue(undefined);
+  jest.mocked(gmailMock.removeEtransferEmailProcessedLabel).mockReset().mockResolvedValue(undefined);
+  jest.mocked(gmailMock.removeEtransferEmailRejectedLabel).mockReset().mockResolvedValue(undefined);
 });
 
 describe('importEtransferEmails', () => {
@@ -301,7 +305,7 @@ describe('rejectEtransferImport', () => {
 });
 
 describe('undoEtransferImport', () => {
-  it('reverses the balance with a new offsetting ledger entry and marks the import undone, without deleting anything', async () => {
+  it('reverses an applied balance, reopens the import, and removes the Processed label', async () => {
     helpers.seedClubDoc('etransferImports', 'msg-1', {
       gmailMessageId: 'msg-1',
       status: 'applied',
@@ -311,13 +315,15 @@ describe('undoEtransferImport', () => {
     });
     seedPlayer('p1', { balance: 210 }); // already includes the +200 credit
 
-    await etransfer.undoEtransferImport('msg-1', 'wrong player matched');
+    await expect(etransfer.undoEtransferImport('msg-1', 'wrong player matched')).resolves.toEqual({
+      labelFailed: false,
+    });
 
     expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
 
     const importDoc = helpers.getClubDocData('etransferImports', 'msg-1');
     expect(importDoc).toMatchObject({
-      status: 'undone',
+      status: 'pending',
       undoneByUid: 'admin-1',
       undoneReason: 'wrong player matched',
     });
@@ -337,11 +343,32 @@ describe('undoEtransferImport', () => {
       reason: 'etransfer-import-undo',
       walletAdjustment: true,
     });
+    expect(gmailMock.removeEtransferEmailProcessedLabel).toHaveBeenCalledWith('msg-1');
   });
 
-  it('only allows undoing an applied import', async () => {
+  it('reopens a rejected import without changing balances and removes the Rejected label', async () => {
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      status: 'rejected',
+      rejectionReason: 'not a payment',
+    });
+    seedPlayer('p1', { balance: 10 });
+
+    await etransfer.undoEtransferImport('msg-1', 'reconsidering');
+
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
+      status: 'pending',
+      rejectionReason: 'not a payment',
+      undoneReason: 'reconsidering',
+    });
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
+    expect(gmailMock.removeEtransferEmailRejectedLabel).toHaveBeenCalledWith('msg-1');
+    expect(gmailMock.removeEtransferEmailProcessedLabel).not.toHaveBeenCalled();
+  });
+
+  it('only allows undoing a reviewed import', async () => {
     helpers.seedClubDoc('etransferImports', 'msg-1', { gmailMessageId: 'msg-1', status: 'pending' });
-    await expect(etransfer.undoEtransferImport('msg-1', 'reason')).rejects.toThrow('Only an applied import');
+    await expect(etransfer.undoEtransferImport('msg-1', 'reason')).rejects.toThrow('Only a reviewed import');
   });
 
   it('requires a reason', async () => {
