@@ -295,7 +295,7 @@ export default function BirdiesPage() {
               </th>
             ))}
             <th>Total Cost</th>
-            <th aria-hidden="true" />
+            <th><span className="visually-hidden">Details</span></th>
           </tr>
         </thead>
         <tbody>

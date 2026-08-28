@@ -43,7 +43,7 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, onDa
                 selected={!!selected}
                 allPaid={allPaid}
                 onClick={() => onDayClick(date)}
-                onExpand={daySessions.length > 0 ? () => onExpandDay?.(date) : undefined}
+                onExpand={daySessions.length > 0 && onExpandDay ? () => onExpandDay(date) : undefined}
             />,
         );
     }

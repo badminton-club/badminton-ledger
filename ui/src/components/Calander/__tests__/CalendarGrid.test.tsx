@@ -123,4 +123,18 @@ describe('CalendarGrid', () => {
     expect(onExpandDay).toHaveBeenCalledWith(new Date(2026, 7, 10));
     expect(onDayClick).not.toHaveBeenCalled();
   });
+
+  it('does not render the expand button at all when onExpandDay is omitted', () => {
+    renderWithProviders(
+      <CalendarGrid
+        currentDate={new Date(2026, 7, 1)}
+        selectedDate={null}
+        onDayClick={jest.fn()}
+        sessions={[makeSession('s1', new Date(2026, 7, 10))]}
+      />
+    );
+
+    const dayWithSession = screen.getByText('10').parentElement as HTMLElement;
+    expect(within(dayWithSession).queryByRole('button', { name: 'View session details' })).not.toBeInTheDocument();
+  });
 });
