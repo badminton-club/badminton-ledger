@@ -68,8 +68,17 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchParams]);
 
+    const openAddSession = (date: Date) => {
+        setClickedDate(date);
+        setModalSession(undefined);
+        dispatch(setMode("paste"));
+        setShowModal(true);
+    };
+
     const handleDayClick = (date: Date) => {
         setSelectedDate(date);
+        const hasSession = sessions.some((session) => +session.date === +date);
+        if (!hasSession) openAddSession(date);
     };
 
     const handleOpenModal = (session: Session) => {
@@ -82,10 +91,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
 
     const handleAddSession = () => {
         if (!selectedDate) return;
-        setClickedDate(selectedDate);
-        setModalSession(undefined);
-        dispatch(setMode("paste"));
-        setShowModal(true);
+        openAddSession(selectedDate);
     };
 
     const handleSessionUpdate = useCallback(async (sessionId: string) => {

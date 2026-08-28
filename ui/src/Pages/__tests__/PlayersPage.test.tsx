@@ -157,6 +157,8 @@ describe('PlayersPage', () => {
     expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.getByText('Bea')).toBeInTheDocument();
     expect(screen.getByText('$3.50 owed')).toBeInTheDocument();
+    expect(screen.getByText('Overdrawn $4.00')).toBeInTheDocument();
+    expect(screen.queryByText('Overdrawn $12.50')).not.toBeInTheDocument();
 
     await user.type(screen.getByPlaceholderText(/Search by name/), 'zoe');
     expect(screen.getByText('No players matching "zoe"')).toBeInTheDocument();

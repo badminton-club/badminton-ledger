@@ -43,6 +43,7 @@ describe('App', () => {
     // confirming useClubBootstrap picked the right club and the app rendered
     // past the sign-in gate into the real calendar page (not just the shell).
     expect(await screen.findByText('Smashers Club')).toBeInTheDocument();
+    expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sign in with Google' })).not.toBeInTheDocument();
   });
 });

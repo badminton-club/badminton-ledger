@@ -24,30 +24,31 @@
     --border-radius-xl: 16px;
 }
 
-/* @media (prefers-color-scheme: dark) {
-    :root {
-        --color-background-primary: #1e1e1e;
-        --color-background-secondary: #2a2a2a;
-        --color-background-tertiary: #121212;
-        --color-background-info: #1a2e4a;
-        --color-background-success: #1a2e1a;
-        --color-background-danger: #3c1a1a;
-        --color-background-warning: #3c2e00;
-        --color-text-primary: #e8eaed;
-        --color-text-secondary: #9aa0a6;
-        --color-text-tertiary: #5f6368;
-        --color-text-info: #8ab4f8;
-        --color-text-success: #81c995;
-        --color-text-danger: #f28b82;
-        --color-text-warning: #fdd663;
-        --color-border-tertiary: rgba(255, 255, 255, 0.12);
-        --color-border-secondary: rgba(255, 255, 255, 0.24);
-        --color-border-primary: rgba(255, 255, 255, 0.38);
-        --color-border-info: #8ab4f8;
-        --color-border-success: #81c995;
-        --color-border-danger: #f28b82;
-    }
-} */
+/* Dark mode overrides — toggled by useTheme setting <html data-bs-theme="dark">,
+ * the same attribute Bootstrap 5.3's own dark mode reads, so our --color-*
+ * variables and Bootstrap's built-in dark styling flip together. */
+:root[data-bs-theme="dark"] {
+    --color-background-primary: #1e1e1e;
+    --color-background-secondary: #2a2a2a;
+    --color-background-tertiary: #121212;
+    --color-background-info: #1a2e4a;
+    --color-background-success: #1a2e1a;
+    --color-background-danger: #3c1a1a;
+    --color-background-warning: #3c2e00;
+    --color-text-primary: #e8eaed;
+    --color-text-secondary: #9aa0a6;
+    --color-text-tertiary: #5f6368;
+    --color-text-info: #8ab4f8;
+    --color-text-success: #81c995;
+    --color-text-danger: #f28b82;
+    --color-text-warning: #fdd663;
+    --color-border-tertiary: rgba(255, 255, 255, 0.12);
+    --color-border-secondary: rgba(255, 255, 255, 0.24);
+    --color-border-primary: rgba(255, 255, 255, 0.38);
+    --color-border-info: #8ab4f8;
+    --color-border-success: #81c995;
+    --color-border-danger: #f28b82;
+}
 
 /* ── Base ─────────────────────────────────────────────────────────────────── */
 

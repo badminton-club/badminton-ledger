@@ -372,11 +372,18 @@ export default function PlayersPage() {
                     }`}
                   >
                     <span>{formatPlayerName(player)}</span>
-                    {(player.owed ?? 0) > 0 && (
-                      <Badge bg="danger" style={{ fontSize: 10 }}>
-                        ${(player.owed ?? 0).toFixed(2)} owed
-                      </Badge>
-                    )}
+                    <span className="d-flex flex-column align-items-end gap-1">
+                      {player.balance < 0 && (
+                        <Badge bg="warning" text="dark" style={{ fontSize: 10 }}>
+                          Overdrawn ${Math.abs(player.balance).toFixed(2)}
+                        </Badge>
+                      )}
+                      {(player.owed ?? 0) > 0 && (
+                        <Badge bg="danger" style={{ fontSize: 10 }}>
+                          ${(player.owed ?? 0).toFixed(2)} owed
+                        </Badge>
+                      )}
+                    </span>
                   </ListGroup.Item>
                 ))}
                 {filteredPlayers.length === 0 && searchTerm && (

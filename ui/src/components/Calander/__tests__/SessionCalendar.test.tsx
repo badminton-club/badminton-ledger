@@ -134,7 +134,7 @@ describe('SessionCalendar', () => {
     expect(await screen.findByText('Court A')).toBeInTheDocument();
   });
 
-  it('opens a new-session modal when an admin clicks an empty day and chooses add', async () => {
+  it('opens a new-session modal immediately when an admin clicks an empty day', async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
     renderCalendar();
 
@@ -143,8 +143,6 @@ describe('SessionCalendar', () => {
 
     expect(await screen.findByText('Tuesday, August 11')).toBeInTheDocument();
     expect(screen.getByText('No session this day')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: '+ Add Session' }));
     expect(screen.getByTestId('session-modal')).toHaveTextContent('new-session');
   });
 });
