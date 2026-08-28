@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup, Badge, Modal } from 'react-bootstrap';
+import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup, Badge, Modal, Accordion } from 'react-bootstrap';
 import { format } from 'date-fns';
 import { clearAllData, exportAllData, restoreAllData, CLEARABLE_COLLECTIONS, type ClearSummary, type BackupData } from '../services/firebase/admin';
 import {
@@ -892,15 +892,17 @@ export default function SettingsPage() {
       </Modal>
 
       {isSuperAdmin && (
-      <>
-      <Card border="danger" className="mt-3">
-        <Card.Header className="bg-danger text-white">Danger zone</Card.Header>
-        <Card.Body>
-          <Card.Title>Clear all data</Card.Title>
-          <Card.Text>
+      <Accordion className="mt-3">
+        <Accordion.Item eventKey="danger-zone" className="border-danger">
+          <Accordion.Header>
+            <span className="text-danger fw-semibold">⚠ Danger zone</span>
+          </Accordion.Header>
+          <Accordion.Body>
+          <h5>Clear all data</h5>
+          <p>
             Permanently deletes every document from the collections below. The collections
             themselves are left in place.
-          </Card.Text>
+          </p>
           <ListGroup variant="flush" className="mb-3">
             {CLEARABLE_COLLECTIONS.map((name) => (
               <ListGroup.Item key={name}>{name}</ListGroup.Item>
@@ -953,17 +955,15 @@ export default function SettingsPage() {
               </ul>
             </Alert>
           )}
-        </Card.Body>
-      </Card>
 
-      <Card border="danger" className="mt-3">
-        <Card.Header className="bg-danger text-white">Delete this club</Card.Header>
-        <Card.Body>
-          <Card.Text>
+          <hr />
+
+          <h5>Delete this club</h5>
+          <p>
             Permanently deletes this club and its membership roster. Only allowed once every data
             collection above is empty — use <strong>Clear all data</strong> first. Type the club id{' '}
             <strong>{clubId}</strong> to confirm.
-          </Card.Text>
+          </p>
           <Form.Control
             className="mb-3"
             value={deleteClubText}
@@ -990,9 +990,9 @@ export default function SettingsPage() {
               {deleteClubError}
             </Alert>
           )}
-        </Card.Body>
-      </Card>
-      </>
+          </Accordion.Body>
+        </Accordion.Item>
+      </Accordion>
       )}
     </Container>
   );

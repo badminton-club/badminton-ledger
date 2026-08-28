@@ -98,9 +98,23 @@ service cloud.firestore {
     }
 
     // ── User profiles ──────────────────────────────────────────────────────────
-    // Each user reads/writes only their own profile (their saved club list + default).
+    // Each user manages their own profile (their saved club list + default).
     match /users/{uid} {
-      allow read, write: if isSignedIn() && request.auth.uid == uid;
+      allow read, create, delete: if isSignedIn() && request.auth.uid == uid;
+      allow update: if isSignedIn() && (
+        request.auth.uid == uid
+        // A club admin granting someone membership (see clubs.ts `addClubMember`)
+        // also needs their club to show up in that member's own club switcher —
+        // otherwise it only appears once the member separately opens a share
+        // link. Scoped tightly so an admin can't touch anything else on another
+        // user's profile: only the `clubs` field may change, only by appending
+        // exactly one id, and only a club the caller actually administers.
+        || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clubs'])
+          && request.resource.data.clubs.size() == resource.data.get('clubs', []).size() + 1
+          && isClubAdmin(request.resource.data.clubs.removeAll(resource.data.get('clubs', []))[0])
+        )
+      );
     }
 
     // ── Deny everything else ───────────────────────────────────────────────────

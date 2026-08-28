@@ -108,9 +108,23 @@ describe('SettingsPage', () => {
 
     expect(screen.getByText('Club settings')).toBeInTheDocument();
     expect(await screen.findByText('member-1')).toBeInTheDocument();
-    expect(screen.queryByText('Danger zone')).not.toBeInTheDocument();
+    expect(screen.queryByText(/danger zone/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Admin' })).not.toBeInTheDocument();
+  });
+
+  it('collapses the danger zone behind a dropdown for super admins until expanded', async () => {
+    const user = userEvent.setup();
+    renderPage({ role: 'superAdmin' });
+
+    const dangerZoneToggle = await screen.findByRole('button', { name: /danger zone/i });
+    expect(dangerZoneToggle).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(dangerZoneToggle);
+
+    expect(dangerZoneToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Clear all data' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete club' })).toBeInTheDocument();
   });
 
   it('persists tab visibility toggles to Firestore and Redux state', async () => {
@@ -177,6 +191,9 @@ describe('SettingsPage', () => {
       });
     });
     expect(await screen.findByText('new-admin')).toBeInTheDocument();
+    // The new admin's own profile is updated too, so the club shows up in
+    // their club switcher without them needing a separate join link.
+    expect(__getDocData('users/new-admin')).toMatchObject({ clubs: [TEST_CLUB_ID] });
   });
 
   it('approves pending link requests using the auto-suggested player match', async () => {
@@ -436,6 +453,8 @@ describe('SettingsPage', () => {
     });
 
     renderPage({ role: 'superAdmin' });
+
+    await user.click(screen.getByRole('button', { name: /danger zone/i }));
 
     const clearButton = screen.getByRole('button', { name: 'Clear all data' });
     expect(clearButton).toBeDisabled();

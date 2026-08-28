@@ -185,6 +185,16 @@ describe('addClubMember', () => {
       addedAt: expect.any(Timestamp),
     });
   });
+
+  it("saves the club onto the new member's own profile, so it shows up in their club switcher", async () => {
+    seedUserDoc('user-1', { clubs: ['other-club'], lastVisitedClub: 'other-club' });
+
+    await addClubMember('club-a', 'user-1', 'member');
+
+    expect(__getDocData('users/user-1')).toMatchObject({
+      clubs: ['other-club', 'club-a'],
+    });
+  });
 });
 
 describe('fetchMemberPlayerId', () => {
