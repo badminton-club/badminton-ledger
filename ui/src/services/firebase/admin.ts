@@ -13,6 +13,8 @@ export const CLEARABLE_COLLECTIONS = [
   'balanceLedger',
   'archivedSessions',
   'payouts',
+  'etransferImports',
+  'etransferSenderMappings',
 ] as const;
 
 export type ClearableCollection = (typeof CLEARABLE_COLLECTIONS)[number];

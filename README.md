@@ -23,6 +23,10 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   verification reminder).
 - **Google Drive backup/restore** — admins can export/import all club data to their own
   Google Drive, reusing the same Google sign-in (no separate credentials to set up).
+- **Gmail e-Transfer import** — admins can search Gmail for Interac e-Transfer autodeposit
+  notifications, review the suggested player match and amount, then apply to credit a
+  player's balance. Every import is recorded and undoable, and processed emails are labelled
+  in Gmail so they aren't found again.
 
 ## Tech stack
 

@@ -91,6 +91,10 @@ service cloud.firestore {
       }
       match /archivedSessions/{doc}      { allow read, write: if isClubAdmin(clubId); }
       match /payouts/{doc}               { allow read, write: if isClubAdmin(clubId); }
+      // Gmail e-Transfer autodeposit import review queue + remembered sender→player
+      // mappings — admins only, same as other financial data.
+      match /etransferImports/{doc}        { allow read, write: if isClubAdmin(clubId); }
+      match /etransferSenderMappings/{doc} { allow read, write: if isClubAdmin(clubId); }
     }
 
     // ── User profiles ──────────────────────────────────────────────────────────

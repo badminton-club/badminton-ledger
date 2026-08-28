@@ -222,6 +222,10 @@ export interface Club {
   id: string;
   name: string;
   disabledTabs?: string[];    // tab keys hidden for this club (see features/club/tabs.ts)
+  // Sender address searched for Interac e-Transfer autodeposit notifications (see
+  // services/firebase/gmail.ts). Configurable since some banks/regions may use a
+  // different notification address than the Canadian default.
+  etransferSenderAddress?: string;
   createdAt?: Timestamp;
 }
 
@@ -277,6 +281,58 @@ export interface BalanceLedgerEntry {
   walletAdjustment?: boolean;
   voided?: boolean;      // true if this entry was undone (kept for audit, shown de-emphasized)
   voidedNote?: string;   // admin-entered reason for the undo, when voided
+}
+
+// ─── Gmail e-Transfer autodeposit import ────────────────────────────────────────
+
+export type EtransferImportStatus = 'pending' | 'applied' | 'rejected' | 'undone';
+
+// clubs/{clubId}/etransferImports/{id} — one Interac autodeposit notification email
+// found in Gmail, its parsed details, and (once reviewed) what was done about it.
+// The Firestore doc ID is always the Gmail message ID, so re-running the Gmail
+// search is naturally idempotent — an email already recorded here is never
+// re-created. Nothing is ever deleted: applying, rejecting, and undoing all just
+// move `status` forward, so every email's history stays fully auditable.
+export interface EtransferImport {
+  id: string;               // == gmailMessageId
+  gmailMessageId: string;
+  gmailThreadId: string;
+  subject: string;
+  senderName: string;       // display name from the "Sent From" field / From header
+  senderEmail: string | null; // the sender's own email, from the Reply-To header
+  amount: number;            // amount parsed from the email
+  memo: string | null;       // the optional "Message" the sender attached
+  referenceNumber: string | null;
+  emailDate: Timestamp;
+  status: EtransferImportStatus;
+  // Best-guess player match shown for review — from a saved sender mapping first,
+  // then a name lookup; always editable by the admin before applying.
+  matchedPlayerId: string | null;
+  matchSource: 'mapping' | 'name-lookup' | null;
+  // Set once reviewed (applied/rejected); undone imports keep these from the
+  // original apply and add the undo fields below.
+  reviewedByUid?: string | null;
+  reviewedAt?: Timestamp | null;
+  appliedAmount?: number | null;         // amount actually credited (may differ if edited)
+  balanceLedgerEntryId?: string | null;  // the balanceLedger entry this created, for undo
+  rejectionReason?: string | null;
+  undoneByUid?: string | null;
+  undoneAt?: Timestamp | null;
+  undoneReason?: string | null;
+  createdAt?: Timestamp;
+}
+
+// clubs/{clubId}/etransferSenderMappings/{id} — a remembered "this Gmail sender
+// is this player" mapping, saved (optionally) when an import is applied so future
+// emails from a sender whose e-Transfer name differs from their app name are
+// pre-matched automatically. Keyed by the sender's email when known (stable),
+// falling back to their normalized display name otherwise.
+export interface EtransferSenderMapping {
+  id: string;              // normalized sender email, or "name:<lowercased name>"
+  senderName: string;      // last-seen display name, for display in the mappings list
+  senderEmail: string | null;
+  playerId: string;
+  updatedAt?: Timestamp;
 }
 
 // users/{uid} — the signed-in user's global profile (their saved club list + default)

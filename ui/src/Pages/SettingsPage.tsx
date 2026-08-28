@@ -11,7 +11,8 @@ import {
   type DriveBackupResult,
   type DriveBackupFile,
 } from '../services/firebase/drive';
-import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, updatePlayerProfile } from '../services/firebase';
+import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, updatePlayerProfile, fetchClub, setClubEtransferSenderAddress } from '../services/firebase';
+import { DEFAULT_ETRANSFER_SENDER_ADDRESS } from '../services/firebase/gmail';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
@@ -67,6 +68,10 @@ export default function SettingsPage() {
   const [assigningUid, setAssigningUid] = useState<string | null>(null);
   const [togglingTab, setTogglingTab] = useState<string | null>(null);
   const [tabsError, setTabsError] = useState('');
+  const [etransferSenderAddress, setEtransferSenderAddress] = useState('');
+  const [savingEtransferAddress, setSavingEtransferAddress] = useState(false);
+  const [etransferAddressSaved, setEtransferAddressSaved] = useState(false);
+  const [etransferAddressError, setEtransferAddressError] = useState('');
 
   const [requests, setRequests] = useState<LinkRequest[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
@@ -288,6 +293,15 @@ export default function SettingsPage() {
     }
   };
 
+  useEffect(() => {
+    if (!clubId) return;
+    let cancelled = false;
+    fetchClub(clubId).then((club) => {
+      if (!cancelled) setEtransferSenderAddress(club?.etransferSenderAddress ?? '');
+    });
+    return () => { cancelled = true; };
+  }, [clubId]);
+
   const handleToggleTab = async (tabKey: string, enabled: boolean) => {
     if (!clubId) return;
     setTabsError('');
@@ -302,6 +316,22 @@ export default function SettingsPage() {
       setTabsError(err instanceof Error ? err.message : 'Failed to update the tab.');
     } finally {
       setTogglingTab(null);
+    }
+  };
+
+  const handleSaveEtransferAddress = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!clubId) return;
+    setEtransferAddressError('');
+    setEtransferAddressSaved(false);
+    setSavingEtransferAddress(true);
+    try {
+      await setClubEtransferSenderAddress(clubId, etransferSenderAddress);
+      setEtransferAddressSaved(true);
+    } catch (err) {
+      setEtransferAddressError(err instanceof Error ? err.message : 'Failed to save.');
+    } finally {
+      setSavingEtransferAddress(false);
     }
   };
 
@@ -489,6 +519,32 @@ export default function SettingsPage() {
             />
           ))}
           {tabsError && <Alert variant="danger" className="mt-2 mb-0 py-2">{tabsError}</Alert>}
+        </Card.Body>
+      </Card>
+
+      <Card className="mt-3">
+        <Card.Header>e-Transfer import</Card.Header>
+        <Card.Body>
+          <Card.Text className="text-muted">
+            The <strong>e-Transfers</strong> tab searches Gmail for Interac e-Transfer autodeposit
+            notifications from this address and offers them for review before crediting a
+            player's balance. Leave blank to use the standard Interac address
+            ({DEFAULT_ETRANSFER_SENDER_ADDRESS}).
+          </Card.Text>
+          <Form onSubmit={handleSaveEtransferAddress} className="d-flex gap-2 align-items-start">
+            <Form.Control
+              type="email"
+              placeholder={DEFAULT_ETRANSFER_SENDER_ADDRESS}
+              value={etransferSenderAddress}
+              onChange={(e) => { setEtransferSenderAddress(e.target.value); setEtransferAddressSaved(false); }}
+              style={{ maxWidth: 360 }}
+            />
+            <Button type="submit" variant="outline-primary" disabled={savingEtransferAddress || !clubId}>
+              {savingEtransferAddress ? <Spinner size="sm" animation="border" /> : 'Save'}
+            </Button>
+          </Form>
+          {etransferAddressSaved && <Alert variant="success" className="mt-2 mb-0 py-2">Saved.</Alert>}
+          {etransferAddressError && <Alert variant="danger" className="mt-2 mb-0 py-2">{etransferAddressError}</Alert>}
         </Card.Body>
       </Card>
 

@@ -12,4 +12,5 @@ export const TOGGLEABLE_TABS: ToggleableTab[] = [
   { key: 'credits', label: 'Credits', path: '/credits' },
   { key: 'players', label: 'Players', path: '/players' },
   { key: 'payout',  label: 'Payout',  path: '/payout' },
+  { key: 'etransfers', label: 'e-Transfers', path: '/etransfers' },
 ];
