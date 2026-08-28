@@ -10,7 +10,7 @@ import {
   setCurrentUser,
   ts,
 } from '../../test-utils/firebaseTestHelpers';
-import { searchEtransferEmails, labelEtransferEmailProcessed } from '../../services/firebase/gmail';
+import { searchEtransferEmails, labelEtransferEmailProcessed, labelEtransferEmailRejected } from '../../services/firebase/gmail';
 import type { Player } from '../../types';
 
 jest.mock('../../services/firebase/gmail', () => {
@@ -19,6 +19,7 @@ jest.mock('../../services/firebase/gmail', () => {
     ...actual,
     searchEtransferEmails: jest.fn(),
     labelEtransferEmailProcessed: jest.fn(),
+    labelEtransferEmailRejected: jest.fn(),
   };
 });
 
@@ -55,6 +56,7 @@ describe('EtransfersPage', () => {
     setCurrentUser({ uid: 'admin-1', displayName: 'Admin', email: 'admin@example.com' });
     jest.mocked(searchEtransferEmails).mockReset();
     jest.mocked(labelEtransferEmailProcessed).mockReset().mockResolvedValue(undefined);
+    jest.mocked(labelEtransferEmailRejected).mockReset().mockResolvedValue(undefined);
   });
 
   it('finds new e-Transfer emails via search, matches by name, and lists them for review', async () => {
@@ -143,5 +145,74 @@ describe('EtransfersPage', () => {
 
     await waitFor(() => expect(getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'undone' }));
     expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
+  });
+
+  it('rejects a pending import: labels it "Rejected" in Gmail (not "Processed"), and shows Rejected in history', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer());
+    seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      senderName: 'CAI FANG WU',
+      amount: 200,
+      emailDate: ts('2026-08-26'),
+      status: 'pending',
+      matchedPlayerId: 'p1',
+      matchSource: 'name-lookup',
+    });
+
+    renderPage();
+    expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /reject/i }));
+    const dialog = screen.getByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/reason/i), 'not a club payment');
+    await user.click(within(dialog).getByRole('button', { name: 'Reject' }));
+
+    await waitFor(() => expect(getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'rejected' }));
+    expect(labelEtransferEmailRejected).toHaveBeenCalledWith('msg-1');
+    expect(labelEtransferEmailProcessed).not.toHaveBeenCalled();
+    // No balance change for a rejected import.
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
+
+    const historyCard = screen.getByText('History').closest('.card') as HTMLElement;
+    expect(within(historyCard).getByText('Rejected')).toBeInTheDocument();
+    expect(within(historyCard).getByText('not a club payment')).toBeInTheDocument();
+  });
+
+  it('shows saved sender mappings and lets an admin re-map the player or remove the mapping', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer());
+    seedClubDoc('players', 'p2', makePlayer({ id: 'p2', firstName: 'Jordan', firstNameLower: 'jordan', lastName: 'Lee', lastNameLower: 'lee' }));
+    seedClubDoc('etransferSenderMappings', 'caifang1966@gmail.com', {
+      senderName: 'CAI FANG WU',
+      senderEmail: 'caifang1966@gmail.com',
+      playerId: 'p1',
+      updatedAt: ts('2026-08-01'),
+    });
+
+    const { store } = renderWithProviders(<EtransfersPage />, {
+      route: '/etransfers',
+      preloadedState: {
+        club: makeClubState(),
+        players: makePlayersState([makePlayer(), makePlayer({ id: 'p2', firstName: 'Jordan', firstNameLower: 'jordan', lastName: 'Lee', lastNameLower: 'lee' })]),
+      },
+    });
+    void store;
+
+    const mappingsCard = (await screen.findByText('Saved sender mappings')).closest('.card') as HTMLElement;
+    expect(within(mappingsCard).getByText('CAI FANG WU')).toBeInTheDocument();
+    expect(within(mappingsCard).getByText('caifang1966@gmail.com')).toBeInTheDocument();
+
+    const playerSelect = within(mappingsCard).getByRole('combobox');
+    await user.selectOptions(playerSelect, 'p2');
+
+    await waitFor(() =>
+      expect(getClubDocData('etransferSenderMappings', 'caifang1966@gmail.com')).toMatchObject({ playerId: 'p2' })
+    );
+
+    await user.click(within(mappingsCard).getByRole('button', { name: /remove/i }));
+
+    await waitFor(() => expect(within(mappingsCard).queryByText('CAI FANG WU')).not.toBeInTheDocument());
+    expect(getClubDocData('etransferSenderMappings', 'caifang1966@gmail.com')).toBeUndefined();
   });
 });

@@ -17,6 +17,7 @@ import { findPlayersByName } from './players';
 import {
   searchEtransferEmails,
   labelEtransferEmailProcessed,
+  labelEtransferEmailRejected,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
   type ParsedEtransferEmail,
 } from './gmail';
@@ -267,8 +268,10 @@ export async function applyEtransferImport(
 
 /**
  * Rejects a reviewed import (e.g. it's not actually a club payment, or the
- * amount/sender couldn't be resolved) without touching any balance. Still labels
- * the Gmail message "Processed" so it isn't found again next search.
+ * amount/sender couldn't be resolved) without touching any balance. Labels the
+ * Gmail message "Rejected" (distinct from "Processed", which is reserved for
+ * applied imports) so it's clear in Gmail itself why it was skipped, and so it
+ * isn't found again on the next search.
  */
 export async function rejectEtransferImport(importId: string, reason: string): Promise<{ labelFailed: boolean }> {
   return serviceCall('rejectEtransferImport', async () => {
@@ -289,7 +292,7 @@ export async function rejectEtransferImport(importId: string, reason: string): P
 
     let labelFailed = false;
     try {
-      await labelEtransferEmailProcessed((importData.gmailMessageId as string) ?? importId);
+      await labelEtransferEmailRejected((importData.gmailMessageId as string) ?? importId);
     } catch (err) {
       console.error('[rejectEtransferImport] labeling failed', err);
       labelFailed = true;

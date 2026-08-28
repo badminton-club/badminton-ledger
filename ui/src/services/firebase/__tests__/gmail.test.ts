@@ -206,6 +206,7 @@ describe('searchEtransferEmails', () => {
     const searchUrl = fetchMock().mock.calls[0][0] as string;
     expect(searchUrl).toContain(encodeURIComponent('from:notify@payments.interac.ca'));
     expect(searchUrl).toContain(encodeURIComponent('-label:Processed'));
+    expect(searchUrl).toContain(encodeURIComponent('-label:Rejected'));
     expectBearerToken(0, 'gmail-token');
     expectBearerToken(1, 'gmail-token');
   });
@@ -268,5 +269,42 @@ describe('labelEtransferEmailProcessed', () => {
     expect(createBody).toMatchObject({ name: 'Processed' });
     const modifyBody = JSON.parse((fetchMock().mock.calls[2][1] as RequestInit).body as string);
     expect(modifyBody).toEqual({ addLabelIds: ['Label_new'] });
+  });
+});
+
+describe('labelEtransferEmailRejected', () => {
+  it('applies a distinct "Rejected" label (not "Processed") so rejections are visibly different in Gmail', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ labels: [{ id: 'Label_2', name: 'Rejected' }] }))
+      .mockResolvedValueOnce(jsonResponse({}));
+
+    await gmail.labelEtransferEmailRejected('msg-1');
+
+    expect(fetchMock()).toHaveBeenCalledTimes(2);
+    const modifyUrl = fetchMock().mock.calls[1][0] as string;
+    expect(modifyUrl).toContain('/messages/msg-1/modify');
+    const modifyBody = JSON.parse((fetchMock().mock.calls[1][1] as RequestInit).body as string);
+    expect(modifyBody).toEqual({ addLabelIds: ['Label_2'] });
+  });
+
+  it('creates the "Rejected" label when it does not exist yet', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ labels: [] }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'Label_new_rejected' }))
+      .mockResolvedValueOnce(jsonResponse({}));
+
+    await gmail.labelEtransferEmailRejected('msg-1');
+
+    expect(fetchMock()).toHaveBeenCalledTimes(3);
+    const createBody = JSON.parse((fetchMock().mock.calls[1][1] as RequestInit).body as string);
+    expect(createBody).toMatchObject({ name: 'Rejected' });
+    const modifyBody = JSON.parse((fetchMock().mock.calls[2][1] as RequestInit).body as string);
+    expect(modifyBody).toEqual({ addLabelIds: ['Label_new_rejected'] });
   });
 });

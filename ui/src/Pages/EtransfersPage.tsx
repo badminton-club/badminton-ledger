@@ -9,6 +9,9 @@ import {
   applyEtransferImport,
   rejectEtransferImport,
   undoEtransferImport,
+  fetchEtransferSenderMappings,
+  saveEtransferSenderMapping,
+  deleteEtransferSenderMapping,
   formatPlayerName,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
 } from '../services/firebase';
@@ -16,7 +19,7 @@ import { toJSDate } from '../services/firebase/utils';
 import { useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
 import { selectIsClubAdmin, selectCurrentClubId } from '../features/club/clubSlice';
-import type { EtransferImport } from '../types';
+import type { EtransferImport, EtransferSenderMapping } from '../types';
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 
@@ -76,6 +79,10 @@ export default function EtransfersPage() {
   const [undoing, setUndoing] = useState(false);
   const [undoError, setUndoError] = useState('');
 
+  const [mappings, setMappings] = useState<EtransferSenderMapping[]>([]);
+  const [mappingSavingId, setMappingSavingId] = useState<string | null>(null);
+  const [mappingError, setMappingError] = useState('');
+
   const playerName = useCallback((id: string | null) => {
     if (!id) return '';
     const p = players.find((pl) => pl.id === id);
@@ -87,14 +94,16 @@ export default function EtransfersPage() {
     setLoading(true);
     setLoadError('');
     try {
-      const [club, pendingList, historyList] = await Promise.all([
+      const [club, pendingList, historyList, mappingList] = await Promise.all([
         clubId ? fetchClub(clubId) : Promise.resolve(null),
         fetchPendingEtransferImports(),
         fetchEtransferImportHistory(),
+        fetchEtransferSenderMappings(),
       ]);
       setSenderAddress(club?.etransferSenderAddress || DEFAULT_ETRANSFER_SENDER_ADDRESS);
       setPending(pendingList);
       setHistory(historyList);
+      setMappings(mappingList);
       setRowEdits((prev) => {
         const next = { ...prev };
         for (const imp of pendingList) {
@@ -203,6 +212,33 @@ export default function EtransfersPage() {
       setUndoError(err instanceof Error ? err.message : 'Failed to undo.');
     } finally {
       setUndoing(false);
+    }
+  };
+
+  const handleMappingPlayerChange = async (mapping: EtransferSenderMapping, playerId: string) => {
+    if (!playerId) return;
+    setMappingError('');
+    setMappingSavingId(mapping.id);
+    try {
+      await saveEtransferSenderMapping(mapping.senderEmail, mapping.senderName, playerId);
+      setMappings((prev) => prev.map((m) => (m.id === mapping.id ? { ...m, playerId } : m)));
+    } catch (err) {
+      setMappingError(err instanceof Error ? err.message : 'Failed to update mapping.');
+    } finally {
+      setMappingSavingId(null);
+    }
+  };
+
+  const handleDeleteMapping = async (mapping: EtransferSenderMapping) => {
+    setMappingError('');
+    setMappingSavingId(mapping.id);
+    try {
+      await deleteEtransferSenderMapping(mapping.id);
+      setMappings((prev) => prev.filter((m) => m.id !== mapping.id));
+    } catch (err) {
+      setMappingError(err instanceof Error ? err.message : 'Failed to remove mapping.');
+    } finally {
+      setMappingSavingId(null);
     }
   };
 
@@ -405,6 +441,64 @@ export default function EtransfersPage() {
         </Card.Body>
       </Card>
 
+      <Card className="mt-4">
+        <Card.Header>Saved sender mappings</Card.Header>
+        <Card.Body className="p-0">
+          <p className="text-muted p-3 pb-0 mb-0">
+            Remembered matches between a Gmail sender (their e-Transfer name/email, which may differ
+            from their name in the app) and a player. Change the player or remove a mapping below —
+            removing one just means that sender's next email will need to be matched again, either
+            automatically by name or manually.
+          </p>
+          {mappingError && <Alert variant="danger" className="mx-3 mt-3 mb-0 py-2">{mappingError}</Alert>}
+          {mappings.length === 0 ? (
+            <p className="text-muted p-3 mb-0">No saved mappings yet.</p>
+          ) : (
+            <Table responsive hover className="mb-0 align-middle">
+              <thead>
+                <tr>
+                  <th>Gmail sender name</th>
+                  <th>Gmail sender email</th>
+                  <th>Mapped player</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {mappings.map((mapping) => (
+                  <tr key={mapping.id}>
+                    <td>{mapping.senderName}</td>
+                    <td className="text-muted">{mapping.senderEmail || '—'}</td>
+                    <td>
+                      <Form.Select
+                        size="sm"
+                        value={mapping.playerId}
+                        disabled={mappingSavingId === mapping.id}
+                        onChange={(e) => handleMappingPlayerChange(mapping, e.target.value)}
+                        style={{ maxWidth: 220 }}
+                      >
+                        {players.map((p) => (
+                          <option key={p.id} value={p.id}>{formatPlayerName(p)}</option>
+                        ))}
+                      </Form.Select>
+                    </td>
+                    <td>
+                      <Button
+                        size="sm"
+                        variant="outline-danger"
+                        disabled={mappingSavingId === mapping.id}
+                        onClick={() => handleDeleteMapping(mapping)}
+                      >
+                        {mappingSavingId === mapping.id ? <Spinner size="sm" animation="border" /> : 'Remove'}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Card.Body>
+      </Card>
+
       <Modal show={!!rejectTarget} onHide={() => setRejectTarget(null)} centered>
         <Modal.Header closeButton>
           <Modal.Title>Reject e-Transfer import</Modal.Title>
@@ -414,7 +508,7 @@ export default function EtransfersPage() {
             {rejectTarget && (
               <p className="text-muted">
                 This email ({money(rejectTarget.amount)} from {rejectTarget.senderName}) will be marked
-                rejected and labelled "Processed" in Gmail so it isn't found again. No balance is changed.
+                rejected and labelled "Rejected" in Gmail so it isn't found again. No balance is changed.
               </p>
             )}
             <Form.Group className="mb-3" controlId="etransfer-reject-reason">

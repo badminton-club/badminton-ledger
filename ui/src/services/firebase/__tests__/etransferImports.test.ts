@@ -14,6 +14,7 @@ let fakeFirestore: FakeFirestoreModule;
 jest.mock('../gmail', () => ({
   searchEtransferEmails: jest.fn(),
   labelEtransferEmailProcessed: jest.fn(),
+  labelEtransferEmailRejected: jest.fn(),
   DEFAULT_ETRANSFER_SENDER_ADDRESS: 'notify@payments.interac.ca',
 }));
 
@@ -58,6 +59,7 @@ beforeEach(() => {
   helpers.setCurrentUser({ uid: 'admin-1', displayName: 'Admin', email: 'admin@example.com' });
   jest.mocked(gmailMock.searchEtransferEmails).mockReset();
   jest.mocked(gmailMock.labelEtransferEmailProcessed).mockReset().mockResolvedValue(undefined);
+  jest.mocked(gmailMock.labelEtransferEmailRejected).mockReset().mockResolvedValue(undefined);
 });
 
 describe('importEtransferEmails', () => {
@@ -232,7 +234,7 @@ describe('applyEtransferImport', () => {
 });
 
 describe('rejectEtransferImport', () => {
-  it('marks the import rejected without touching any balance, and labels the Gmail message', async () => {
+  it('marks the import rejected without touching any balance, and labels the Gmail message "Rejected" (distinct from "Processed")', async () => {
     helpers.seedClubDoc('etransferImports', 'msg-1', {
       gmailMessageId: 'msg-1', status: 'pending', amount: 200, matchedPlayerId: null,
     });
@@ -247,7 +249,8 @@ describe('rejectEtransferImport', () => {
       reviewedByUid: 'admin-1',
     });
     expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
-    expect(gmailMock.labelEtransferEmailProcessed).toHaveBeenCalledWith('msg-1');
+    expect(gmailMock.labelEtransferEmailRejected).toHaveBeenCalledWith('msg-1');
+    expect(gmailMock.labelEtransferEmailProcessed).not.toHaveBeenCalled();
   });
 
   it('requires a reason', async () => {
