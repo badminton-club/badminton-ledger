@@ -127,6 +127,46 @@ describe('importEtransferEmails', () => {
     await etransfer.importEtransferEmails('custom@bank.example');
     expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith('custom@bank.example', '2026-08-27');
   });
+
+  it('auto-matches the uniquely strongest player despite middle or reordered sender names', async () => {
+    seedPlayer('p1');
+    seedPlayer('p2', {
+      firstName: 'Cai',
+      firstNameLower: 'cai',
+      lastName: 'Lee',
+      lastNameLower: 'lee',
+    });
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([
+      makeParsedEmail({ gmailMessageId: 'middle-name', senderName: 'CAI FANG WU' }),
+      makeParsedEmail({ gmailMessageId: 'reordered-name', senderName: 'WU, CAI' }),
+    ]);
+
+    await etransfer.importEtransferEmails();
+
+    expect(helpers.getClubDocData('etransferImports', 'middle-name')).toMatchObject({
+      matchedPlayerId: 'p1',
+      matchSource: 'name-lookup',
+    });
+    expect(helpers.getClubDocData('etransferImports', 'reordered-name')).toMatchObject({
+      matchedPlayerId: 'p1',
+      matchSource: 'name-lookup',
+    });
+  });
+
+  it('leaves equally strong name matches unselected for human review', async () => {
+    seedPlayer('p1');
+    seedPlayer('p2');
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([
+      makeParsedEmail({ senderName: 'CAI FANG WU' }),
+    ]);
+
+    await etransfer.importEtransferEmails();
+
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
+      matchedPlayerId: null,
+      matchSource: null,
+    });
+  });
 });
 
 describe('applyEtransferImport', () => {

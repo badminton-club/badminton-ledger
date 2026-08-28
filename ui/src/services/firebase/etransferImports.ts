@@ -13,7 +13,6 @@ import {
 } from 'firebase/firestore';
 import { db, refs, auth } from './client';
 import { serviceCall, toJSDate } from './utils';
-import { findPlayersByName } from './players';
 import {
   searchEtransferEmails,
   labelEtransferEmailProcessed,
@@ -22,12 +21,69 @@ import {
   DEFAULT_ETRANSFER_SEARCH_AFTER_DATE,
   type ParsedEtransferEmail,
 } from './gmail';
-import type { EtransferImport, EtransferSenderMapping } from 'types';
+import type { EtransferImport, EtransferSenderMapping, Player } from 'types';
 
 /** Normalizes a sender identity to the doc id used for its remembered mapping. */
 function mappingKeyFor(senderEmail: string | null, senderName: string): string {
   if (senderEmail) return senderEmail.toLowerCase();
   return `name:${senderName.trim().toLowerCase()}`;
+}
+
+function nameTokens(name: string): string[] {
+  return name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .split(/[^a-z0-9\u00c0-\u024f\u4e00-\u9fff]+/)
+    .filter(Boolean);
+}
+
+function tokenCounts(tokens: string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const token of tokens) counts.set(token, (counts.get(token) ?? 0) + 1);
+  return counts;
+}
+
+function containsAllTokens(haystack: string[], needles: string[]): boolean {
+  const available = tokenCounts(haystack);
+  for (const token of needles) {
+    const remaining = available.get(token) ?? 0;
+    if (remaining === 0) return false;
+    available.set(token, remaining - 1);
+  }
+  return true;
+}
+
+function playerNameMatchScore(senderName: string, player: Player): number {
+  const sender = nameTokens(senderName);
+  const first = nameTokens(player.firstName);
+  const last = nameTokens(player.lastName ?? '');
+  const full = [...first, ...last];
+  if (sender.length === 0 || first.length === 0) return 0;
+
+  if (sender.join(' ') === full.join(' ')) return 100;
+  if (sender.length === full.length && containsAllTokens(sender, full)) return 95;
+  if (last.length > 0 && containsAllTokens(sender, full)) return 90;
+  if (containsAllTokens(sender, first)) return 50;
+  return 0;
+}
+
+/** Returns a player only when one candidate has a uniquely strongest name match. */
+function findUniqueBestPlayerMatch(senderName: string, players: Player[]): Player | null {
+  let bestScore = 0;
+  let best: Player[] = [];
+
+  for (const player of players) {
+    const score = playerNameMatchScore(senderName, player);
+    if (score > bestScore) {
+      bestScore = score;
+      best = [player];
+    } else if (score > 0 && score === bestScore) {
+      best.push(player);
+    }
+  }
+
+  return best.length === 1 ? best[0] : null;
 }
 
 function toEtransferImport(id: string, data: Record<string, unknown>): EtransferImport {
@@ -128,24 +184,28 @@ export async function importEtransferEmails(
       parsed.map((p) => getDoc(doc(refs.etransferImports, p.gmailMessageId)))
     );
     const toCreate = parsed.filter((_, i) => !existsChecks[i].exists());
+    const playerSnap = toCreate.length > 0 ? await getDocs(refs.players) : null;
+    const players = playerSnap
+      ? playerSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Player, 'id'>) }))
+      : [];
 
     for (const email of toCreate) {
-      await createPendingImport(email);
+      await createPendingImport(email, players);
     }
 
     return { found: parsed.length, created: toCreate.length };
   });
 }
 
-async function createPendingImport(email: ParsedEtransferEmail): Promise<void> {
+async function createPendingImport(email: ParsedEtransferEmail, players: Player[]): Promise<void> {
   const mappedPlayerId = await lookupSenderMapping(email.senderEmail, email.senderName);
   let matchedPlayerId: string | null = mappedPlayerId;
   let matchSource: EtransferImport['matchSource'] = mappedPlayerId ? 'mapping' : null;
 
   if (!matchedPlayerId) {
-    const candidates = await findPlayersByName(email.senderName);
-    if (candidates.length === 1) {
-      matchedPlayerId = candidates[0].id;
+    const candidate = findUniqueBestPlayerMatch(email.senderName, players);
+    if (candidate) {
+      matchedPlayerId = candidate.id;
       matchSource = 'name-lookup';
     }
   }
