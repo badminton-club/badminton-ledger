@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Container, Card, Button, Alert, ListGroup, Badge, Form, InputGroup, Spinner } from 'react-bootstrap';
 import type { User } from 'firebase/auth';
+import { FirebaseError } from 'firebase/app';
 import {
   signInWithGoogle,
   signUpWithEmail,
@@ -73,6 +74,7 @@ export default function AuthPage() {
   const [clubInput, setClubInput] = useState('');
   const [clubError, setClubError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [googleAuthBusy, setGoogleAuthBusy] = useState(false);
 
   const [setupName, setSetupName] = useState('');
   const [setupBusy, setSetupBusy] = useState(false);
@@ -102,11 +104,26 @@ export default function AuthPage() {
   };
 
   const handleSignIn = async () => {
+    if (googleAuthBusy) return;
     setError('');
+    setGoogleAuthBusy(true);
     try {
       await signInWithGoogle();
     } catch (err) {
+      if (err instanceof FirebaseError) {
+        if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+          // The user dismissed the popup (or double-clicked and triggered a
+          // second, superseded request) — not a real failure, so stay quiet.
+          return;
+        }
+        if (err.code === 'auth/popup-blocked') {
+          setError('Your browser blocked the Google sign-in popup — please allow popups for this site and try again.');
+          return;
+        }
+      }
       setError(err instanceof Error ? err.message : 'Google sign-in failed.');
+    } finally {
+      setGoogleAuthBusy(false);
     }
   };
 
@@ -294,8 +311,13 @@ export default function AuthPage() {
           ) : (
             <>
               <p className="mb-3">You are not signed in.</p>
-              <Button variant="primary" onClick={handleSignIn} className="w-100">
-                Sign in with Google
+              <Button
+                variant="primary"
+                onClick={handleSignIn}
+                className="w-100"
+                disabled={googleAuthBusy}
+              >
+                {googleAuthBusy ? <Spinner size="sm" animation="border" /> : 'Sign in with Google'}
               </Button>
 
               <div className="d-flex align-items-center my-3">

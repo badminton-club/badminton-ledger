@@ -427,7 +427,7 @@ describe('PlayersPage', () => {
     await user.type(amountInput, '0');
     await user.type(reasonInput, 'Cash top-up');
     await user.click(screen.getByRole('button', { name: 'Update Balance' }));
-    expect(await screen.findByText('Enter a valid non-zero amount.')).toBeInTheDocument();
+    expect(await screen.findByText('Enter a valid positive amount.')).toBeInTheDocument();
 
     await user.clear(amountInput);
     await user.type(amountInput, '5');
@@ -436,6 +436,41 @@ describe('PlayersPage', () => {
     expect(await screen.findByText('Reason is required.')).toBeInTheDocument();
     expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 20 });
     expect(getClubDocData('balanceLedger', 'auto-id-1')).toBeUndefined();
+  });
+
+  it('rejects a negative amount instead of silently flipping credit/debit', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', balance: 20 })];
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    await user.type(screen.getByPlaceholderText('Amount'), '-5');
+    await user.type(screen.getByPlaceholderText(/Reason \(e\.g\., Cash Payment\)/), 'Oops');
+    await user.click(screen.getByRole('button', { name: 'Update Balance' }));
+
+    expect(await screen.findByText('Enter a valid positive amount.')).toBeInTheDocument();
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 20 });
+  });
+
+  it('warns before a manual debit would overdraw the player, and Cancel stops the write', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', balance: 10 })];
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    await user.click(screen.getByRole('button', { name: 'Add (+)' }));
+    await user.click(screen.getByText('Deduct from balance (-)'));
+    await user.type(screen.getByPlaceholderText('Amount'), '15');
+    await user.type(screen.getByPlaceholderText(/Reason \(e\.g\., Cash Payment\)/), 'Correction');
+    await user.click(screen.getByRole('button', { name: 'Update Balance' }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('will leave them at $-5.00 (negative)'));
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
+    expect(getClubDocData('balanceLedger', 'auto-id-1')).toBeUndefined();
+    confirm.mockRestore();
   });
 
   it('records an included-in-payout manual credit and resets the form', async () => {
@@ -578,6 +613,22 @@ describe('PlayersPage', () => {
 
     expect(await screen.findByText('No balance history yet.')).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'Include in owner payout' })).not.toBeInTheDocument();
+  });
+
+  it('excludes a manual balance adjustment from payout when the Payout tab is disabled', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', balance: 20 })];
+
+    renderPage({ players, route: '/?playerId=p1', disabledTabs: ['payout'] });
+    await screen.findByText('No balance history yet.');
+    expect(screen.queryByRole('checkbox', { name: 'Include in owner payout' })).not.toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText('Amount'), '10');
+    await user.type(screen.getByPlaceholderText(/Reason \(e\.g\., Cash Payment\)/), 'Cash top-up');
+    await user.click(screen.getByRole('button', { name: 'Update Balance' }));
+
+    await waitFor(() => expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 30 }));
+    expect(getClubDocData('balanceLedger', 'auto-id-1')).toMatchObject({ reason: 'manual-excluded' });
   });
 
   it('adds a player through the modal and shows them once the players slice refreshes', async () => {

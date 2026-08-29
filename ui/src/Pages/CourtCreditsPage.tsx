@@ -400,7 +400,11 @@ export default function CourtCreditsPage() {
                                   <td style={style}>{format(item.eventDate, 'yyyy-MM-dd')}</td>
                                   <td style={style}>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
                                   <td style={style}>
-                                    {item.type === 'sessionUsage' && `Used: ${item.hoursUsed as number} hrs`}
+                                    {item.type === 'sessionUsage' && (
+                                      (item.hoursUsed as number) < 0
+                                        ? `Returned: ${Math.abs(item.hoursUsed as number)} hrs`
+                                        : `Used: ${item.hoursUsed as number} hrs`
+                                    )}
                                     {item.type === 'adjustment' && (
                                       <>
                                         Reason: {item.reason as string}

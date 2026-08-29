@@ -67,6 +67,40 @@ describe('AuthPage', () => {
     expect(screen.getByText(currentUser.uid)).toBeInTheDocument();
   });
 
+  it('disables the Google sign-in button while a sign-in is in flight, so a double-click cannot fire twice', async () => {
+    const user = userEvent.setup();
+    let resolveSignIn: () => void = () => {};
+    jest.mocked(signInWithGoogle).mockImplementation(() => new Promise((resolve) => {
+      resolveSignIn = () => resolve(currentUser as never);
+    }));
+
+    renderPage();
+    const button = screen.getByRole('button', { name: 'Sign in with Google' });
+
+    await user.click(button);
+    await user.click(button); // second click while still in flight
+
+    expect(signInWithGoogle).toHaveBeenCalledTimes(1);
+    expect(button).toBeDisabled();
+
+    resolveSignIn();
+    await waitFor(() => expect(button).not.toBeDisabled());
+  });
+
+  it('quietly clears the busy state without an error banner when the Google popup is closed by the user', async () => {
+    const user = userEvent.setup();
+    const { FirebaseError } = jest.requireActual('firebase/app') as typeof import('firebase/app');
+    jest.mocked(signInWithGoogle).mockRejectedValueOnce(
+      new FirebaseError('auth/popup-closed-by-user', 'The popup has been closed by the user before finalizing the operation.')
+    );
+
+    renderPage();
+    await user.click(screen.getByRole('button', { name: 'Sign in with Google' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sign in with Google' })).not.toBeDisabled());
+    expect(screen.queryByText(/failed/i)).not.toBeInTheDocument();
+  });
+
   it('lets the user switch which saved club is current', async () => {
     const user = userEvent.setup();
     setCurrentUser(currentUser);

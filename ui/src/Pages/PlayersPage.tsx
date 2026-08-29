@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Container, Row, Col, Card, Form, Button, ButtonGroup,
   ListGroup, Spinner, Alert, InputGroup,
@@ -142,7 +142,12 @@ export default function PlayersPage() {
   }, [searchTerm, playerSort, playersList]);
 
   // Balance ledger
+  // Guards against rapid player switches: an older in-flight request resolving
+  // after a newer one has started must never overwrite the newer request's
+  // result (or its loading/error state) with stale data.
+  const ledgerRequestSeqRef = useRef(0);
   const fetchLedger = useCallback(async (playerId: string, opts?: { silent?: boolean }) => {
+    const seq = ++ledgerRequestSeqRef.current;
     if (!opts?.silent) setIsLoadingLedger(true);
     setLedgerError('');
     try {
@@ -151,6 +156,7 @@ export default function PlayersPage() {
         where('playerId', '==', playerId),
       );
       const snap = await getDocs(q);
+      if (seq !== ledgerRequestSeqRef.current) return; // superseded by a newer request
       const entries = snap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry));
       // Sort client-side to avoid needing a composite (playerId + createdAt) index.
       entries.sort((a, b) => (b.createdAt?.toDate().getTime() ?? 0) - (a.createdAt?.toDate().getTime() ?? 0));
@@ -163,6 +169,7 @@ export default function PlayersPage() {
       )];
       if (sessionIds.length > 0) {
         const results = await Promise.allSettled(sessionIds.map(fetchSessionById));
+        if (seq !== ledgerRequestSeqRef.current) return; // superseded by a newer request
         const sessions: Record<string, Session> = {};
         results.forEach((result) => {
           if (result.status === 'fulfilled') sessions[result.value.id] = result.value;
@@ -172,9 +179,9 @@ export default function PlayersPage() {
         setLinkedSessionsById({});
       }
     } catch {
-      setLedgerError('Failed to load balance history.');
+      if (seq === ledgerRequestSeqRef.current) setLedgerError('Failed to load balance history.');
     } finally {
-      if (!opts?.silent) setIsLoadingLedger(false);
+      if (!opts?.silent && seq === ledgerRequestSeqRef.current) setIsLoadingLedger(false);
     }
   }, []);
 
@@ -203,7 +210,9 @@ export default function PlayersPage() {
   }, [selectedPlayerId]);
 
   // Attended sessions
+  const sessionsRequestSeqRef = useRef(0);
   const fetchAttendedSessions = useCallback(async (opts?: { silent?: boolean }) => {
+    const seq = ++sessionsRequestSeqRef.current;
     if (!selectedPlayerId) { setAttendedSessions([]); return; }
     if (!opts?.silent) setIsLoadingSessions(true);
     setSessionsError('');
@@ -215,14 +224,15 @@ export default function PlayersPage() {
         orderBy('date', 'desc'),
       );
       const snap = await getDocs(q);
+      if (seq !== sessionsRequestSeqRef.current) return; // superseded by a newer request
       const all  = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Session[];
       setAttendedSessions(all.filter(s =>
         Array.isArray(s.players) && s.players.some(p => p.id === selectedPlayerId)
       ));
     } catch {
-      setSessionsError('Failed to load sessions.');
+      if (seq === sessionsRequestSeqRef.current) setSessionsError('Failed to load sessions.');
     } finally {
-      if (!opts?.silent) setIsLoadingSessions(false);
+      if (!opts?.silent && seq === sessionsRequestSeqRef.current) setIsLoadingSessions(false);
     }
   }, [selectedPlayerId, currentMonth]);
 
@@ -267,12 +277,25 @@ export default function PlayersPage() {
     if (!selectedPlayer) return;
 
     const amount = parseFloat(balanceAdjustment.amount);
-    if (isNaN(amount) || amount === 0) { setBalanceError('Enter a valid non-zero amount.'); return; }
+    if (isNaN(amount) || amount <= 0) { setBalanceError('Enter a valid positive amount.'); return; }
     if (!balanceAdjustment.reason.trim()) { setBalanceError('Reason is required.'); return; }
+
+    const delta = balanceAdjustment.type === 'credit' ? amount : -amount;
+    const projectedBalance = (selectedPlayer.balance ?? 0) + delta;
+    if (delta < 0 && projectedBalance < 0) {
+      const ok = window.confirm(
+        `${formatPlayerName(selectedPlayer)} has $${(selectedPlayer.balance ?? 0).toFixed(2)} — ` +
+        `deducting $${amount.toFixed(2)} will leave them at $${projectedBalance.toFixed(2)} (negative). Continue?`
+      );
+      if (!ok) return;
+    }
 
     setIsUpdatingBalance(true);
     setBalanceError('');
-    const delta = balanceAdjustment.type === 'credit' ? amount : -amount;
+    // The checkbox itself is hidden (not just disabled) when the Payout tab is
+    // off, so its stale value must never leak into the write — force exclusion
+    // whenever the admin never had the option to see/set it.
+    const includeInPayout = !disabledTabs.includes('payout') && balanceAdjustment.includeInPayout;
 
     try {
       await runTransaction(db, async tx => {
@@ -289,7 +312,7 @@ export default function PlayersPage() {
           balanceAfter:  before + delta,
           // 'manual' counts toward the owner payout; 'manual-excluded' is a balance
           // change the club doesn't owe the owner (e.g. correcting an error).
-          reason:        balanceAdjustment.includeInPayout ? 'manual' : 'manual-excluded',
+          reason:        includeInPayout ? 'manual' : 'manual-excluded',
           note:          balanceAdjustment.reason.trim(),
           walletAdjustment: true, // this entry actually moves the player's prepaid balance
           createdAt:     serverTimestamp(),

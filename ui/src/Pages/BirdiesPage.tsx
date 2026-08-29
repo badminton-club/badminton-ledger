@@ -299,7 +299,7 @@ export default function BirdiesPage() {
                 {sortIndicator(key)}
               </th>
             ))}
-            <th>Total Cost</th>
+            <th title="Value of the batch's remaining stock — the unopened tubes plus the open tube's fraction, at cost/tube">Remaining Value</th>
             <th><span className="visually-hidden">Details</span></th>
           </tr>
         </thead>
@@ -476,7 +476,11 @@ export default function BirdiesPage() {
                         <td style={style}>{format(item.eventDate, 'yyyy-MM-dd')}</td>
                         <td style={style}>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
                         <td style={style}>
-                          {item.type === 'sessionUsage' && `Used: ${item.quantityUsed as number} birds`}
+                          {item.type === 'sessionUsage' && (
+                            (item.quantityUsed as number) < 0
+                              ? `Returned: ${Math.abs(item.quantityUsed as number)} birds`
+                              : `Used: ${item.quantityUsed as number} birds`
+                          )}
                           {item.type === 'adjustment' && (
                             <>
                               Reason: {item.reason as string}

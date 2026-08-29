@@ -99,6 +99,38 @@ describe('BirdiesPage', () => {
     expect(screen.getByRole('link', { name: 'View on calendar' })).toHaveAttribute('href', '/?date=2026-03-04');
   });
 
+  it('labels a negative session-usage transaction (a session-edit return) as Returned, not a negative Used', async () => {
+    seedClubDoc('birdieInventory', 'b1', {
+      name: 'Club 30',
+      costPerTube: 33,
+      birdsPerTube: 12,
+      tubesPurchased: 5,
+      unopenedTubesRemaining: 2,
+      birdsInOpenTube: 4,
+      purchaserName: 'Pat',
+      purchaseDate: ts('2026-02-10T12:00:00Z'),
+      createdAt: ts('2026-02-10T12:00:00Z'),
+    });
+    seedClubDoc('transactions', 'tx-1', {
+      resourceType: 'birdie',
+      batchId: 'b1',
+      quantityUsed: -3,
+      cost: -8.25,
+      sessionId: 's1',
+      date: ts('2026-03-04T12:00:00Z'),
+      createdAt: ts('2026-03-04T12:00:00Z'),
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText('Club 30')).toBeInTheDocument();
+    await user.click(screen.getByText('Club 30').closest('tr')!);
+
+    expect(await screen.findByText('Returned: 3 birds')).toBeInTheDocument();
+    expect(screen.queryByText('Used: -3 birds')).not.toBeInTheDocument();
+  });
+
   it('validates edits, saves them, logs an adjustment, and keeps the batch selected after reload', async () => {
     const user = userEvent.setup();
 

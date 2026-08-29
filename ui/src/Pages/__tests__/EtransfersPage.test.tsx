@@ -16,7 +16,7 @@ import {
   searchEtransferEmails,
   getDefaultEtransferSearchAfterDate,
 } from '../../services/firebase/gmail';
-import { rejectEtransferImport } from '../../services/firebase';
+import { rejectEtransferImport, dismissEtransferImport } from '../../services/firebase';
 import type { Player } from '../../types';
 
 jest.mock('../../services/firebase/gmail', () => {
@@ -30,6 +30,7 @@ jest.mock('../../services/firebase/gmail', () => {
 jest.mock('../../services/firebase', () => ({
   ...jest.requireActual('../../services/firebase'),
   rejectEtransferImport: jest.fn(),
+  dismissEtransferImport: jest.fn(),
 }));
 
 function makePlayer(overrides: Partial<Player> = {}): Player {
@@ -66,6 +67,7 @@ describe('EtransfersPage', () => {
     jest.mocked(searchEtransferEmails).mockReset();
     const actual = jest.requireActual('../../services/firebase');
     jest.mocked(rejectEtransferImport).mockImplementation(actual.rejectEtransferImport);
+    jest.mocked(dismissEtransferImport).mockImplementation(actual.dismissEtransferImport);
   });
 
   it('finds new e-Transfer emails via search, matches by name, and lists them for review', async () => {
@@ -356,6 +358,51 @@ describe('EtransfersPage', () => {
     }]);
     await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
     expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
+
+    confirmSpy.mockRestore();
+  });
+
+  it('tracks dismiss in-flight state per-row, so one row finishing does not re-enable another still in flight', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    seedClubDoc('players', 'p1', makePlayer());
+    seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1', senderName: 'Row A', amount: 100,
+      emailDate: ts('2026-08-26'), status: 'pending', matchedPlayerId: 'p1', matchSource: 'name-lookup',
+    });
+    seedClubDoc('etransferImports', 'msg-2', {
+      gmailMessageId: 'msg-2', senderName: 'Row B', amount: 150,
+      emailDate: ts('2026-08-27'), status: 'pending', matchedPlayerId: 'p1', matchSource: 'name-lookup',
+    });
+
+    let resolveA: () => void = () => {};
+    let resolveB: () => void = () => {};
+    jest.mocked(dismissEtransferImport).mockImplementation((importId: string) => {
+      if (importId === 'msg-1') return new Promise((resolve) => { resolveA = resolve; });
+      return new Promise((resolve) => { resolveB = resolve; });
+    });
+
+    renderPage();
+    expect(await screen.findByText('Row A')).toBeInTheDocument();
+    expect(await screen.findByText('Row B')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Ignore Row A for now' }));
+    await user.click(screen.getByRole('button', { name: 'Ignore Row B for now' }));
+
+    expect(screen.getByRole('button', { name: 'Ignore Row A for now' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Ignore Row B for now' })).toBeDisabled();
+
+    // Row A finishes first — row B, still in flight, must stay disabled.
+    resolveA();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Ignore Row A for now' })).not.toBeDisabled()
+    );
+    expect(screen.getByRole('button', { name: 'Ignore Row B for now' })).toBeDisabled();
+
+    resolveB();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Ignore Row B for now' })).not.toBeDisabled()
+    );
 
     confirmSpy.mockRestore();
   });

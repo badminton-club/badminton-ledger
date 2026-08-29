@@ -119,7 +119,7 @@ export default function EtransfersPage() {
   const [rejecting, setRejecting] = useState(false);
   const [rejectError, setRejectError] = useState('');
 
-  const [dismissingId, setDismissingId] = useState<string | null>(null);
+  const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
   const [dismissError, setDismissError] = useState<Record<string, string>>({});
 
   const [undoTarget, setUndoTarget] = useState<EtransferImport | null>(null);
@@ -128,7 +128,7 @@ export default function EtransfersPage() {
   const [undoError, setUndoError] = useState('');
 
   const [mappings, setMappings] = useState<EtransferSenderMapping[]>([]);
-  const [mappingSavingId, setMappingSavingId] = useState<string | null>(null);
+  const [mappingSavingIds, setMappingSavingIds] = useState<Set<string>>(new Set());
   const [mappingError, setMappingError] = useState('');
 
   const playerName = useCallback((id: string | null) => {
@@ -321,7 +321,7 @@ export default function EtransfersPage() {
       `Ignore this e-Transfer from ${imp.senderName} for now? It will be picked up again next time you search Gmail.`
     )) return;
     setDismissError((prev) => ({ ...prev, [imp.id]: '' }));
-    setDismissingId(imp.id);
+    setDismissingIds((prev) => new Set(prev).add(imp.id));
     try {
       await dismissEtransferImport(imp.id);
       await load();
@@ -331,7 +331,11 @@ export default function EtransfersPage() {
         [imp.id]: err instanceof Error ? err.message : 'Failed to dismiss.',
       }));
     } finally {
-      setDismissingId(null);
+      setDismissingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(imp.id);
+        return next;
+      });
     }
   };
 
@@ -356,27 +360,35 @@ export default function EtransfersPage() {
   const handleMappingPlayerChange = async (mapping: EtransferSenderMapping, playerId: string) => {
     if (!playerId) return;
     setMappingError('');
-    setMappingSavingId(mapping.id);
+    setMappingSavingIds((prev) => new Set(prev).add(mapping.id));
     try {
       await saveEtransferSenderMapping(mapping.senderEmail, mapping.senderName, playerId);
       setMappings((prev) => prev.map((m) => (m.id === mapping.id ? { ...m, playerId } : m)));
     } catch (err) {
       setMappingError(err instanceof Error ? err.message : 'Failed to update mapping.');
     } finally {
-      setMappingSavingId(null);
+      setMappingSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(mapping.id);
+        return next;
+      });
     }
   };
 
   const handleDeleteMapping = async (mapping: EtransferSenderMapping) => {
     setMappingError('');
-    setMappingSavingId(mapping.id);
+    setMappingSavingIds((prev) => new Set(prev).add(mapping.id));
     try {
       await deleteEtransferSenderMapping(mapping.id);
       setMappings((prev) => prev.filter((m) => m.id !== mapping.id));
     } catch (err) {
       setMappingError(err instanceof Error ? err.message : 'Failed to remove mapping.');
     } finally {
-      setMappingSavingId(null);
+      setMappingSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(mapping.id);
+        return next;
+      });
     }
   };
 
@@ -678,12 +690,12 @@ export default function EtransfersPage() {
                           size="sm"
                           variant="outline-secondary"
                           className="ms-2"
-                          disabled={batchApplying || batchPreviewing || dismissingId === imp.id}
+                          disabled={batchApplying || batchPreviewing || dismissingIds.has(imp.id)}
                           onClick={() => handleDismiss(imp)}
                           title="Ignore this time — it'll be picked up again on the next Gmail search"
                           aria-label={`Ignore ${imp.senderName} for now`}
                         >
-                          {dismissingId === imp.id ? <Spinner size="sm" animation="border" /> : '×'}
+                          {dismissingIds.has(imp.id) ? <Spinner size="sm" animation="border" /> : '×'}
                         </Button>
                         {applyError[imp.id] && (
                           <div className="text-danger small mt-1">{applyError[imp.id]}</div>
@@ -806,7 +818,7 @@ export default function EtransfersPage() {
                       <Form.Select
                         size="sm"
                         value={mapping.playerId}
-                        disabled={mappingSavingId === mapping.id}
+                        disabled={mappingSavingIds.has(mapping.id)}
                         onChange={(e) => handleMappingPlayerChange(mapping, e.target.value)}
                         style={{ maxWidth: 220 }}
                       >
@@ -819,10 +831,10 @@ export default function EtransfersPage() {
                       <Button
                         size="sm"
                         variant="outline-danger"
-                        disabled={mappingSavingId === mapping.id}
+                        disabled={mappingSavingIds.has(mapping.id)}
                         onClick={() => handleDeleteMapping(mapping)}
                       >
-                        {mappingSavingId === mapping.id ? <Spinner size="sm" animation="border" /> : 'Remove'}
+                        {mappingSavingIds.has(mapping.id) ? <Spinner size="sm" animation="border" /> : 'Remove'}
                       </Button>
                     </td>
                   </tr>
