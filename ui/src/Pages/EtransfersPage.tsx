@@ -29,7 +29,7 @@ import { selectAllPlayers } from '../features/players/playersSlice';
 import { selectIsClubAdmin, selectCurrentClubId } from '../features/club/clubSlice';
 import type { EtransferImport, EtransferSenderMapping } from '../types';
 
-const money = (n: number) => `$${n.toFixed(2)}`;
+const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toFixed(2)}`;
 
 interface RowEdit {
   playerId: string;
@@ -228,6 +228,14 @@ export default function EtransfersPage() {
 
   const selectedCount = useMemo(
     () => pending.filter((imp) => (rowEdits[imp.id] ?? initialRowEdit(imp)).selected).length,
+    [pending, rowEdits]
+  );
+  // Rows without a matched player can never be selected (their checkbox is
+  // disabled), so "select all" should be considered fully checked once every
+  // *selectable* row is selected — not compared against the total pending
+  // count, which would never match whenever any row is unmatched.
+  const selectableCount = useMemo(
+    () => pending.filter((imp) => !!(rowEdits[imp.id] ?? initialRowEdit(imp)).playerId).length,
     [pending, rowEdits]
   );
 
@@ -552,7 +560,7 @@ export default function EtransfersPage() {
                   <th>
                     <Form.Check
                       aria-label="Select all matched imports"
-                      checked={selectedCount === pending.length && pending.length > 0}
+                      checked={selectableCount > 0 && selectedCount === selectableCount}
                       onChange={(e) => {
                         const selected = e.target.checked;
                         setRowEdits((prev) => {
@@ -606,10 +614,19 @@ export default function EtransfersPage() {
                         <Form.Select
                           size="sm"
                           value={edit.playerId}
-                          onChange={(e) => updateRowEdit(imp.id, {
-                            playerId: e.target.value,
-                            selected: !!e.target.value,
-                          })}
+                          onChange={(e) => {
+                            const playerId = e.target.value;
+                            updateRowEdit(imp.id, {
+                              playerId,
+                              selected: !!playerId,
+                              // Correcting the match away from what a saved mapping
+                              // suggested should default to saving the correction,
+                              // since the old remembered mapping was apparently wrong.
+                              remember: playerId !== '' && playerId !== imp.matchedPlayerId
+                                ? true
+                                : edit.remember,
+                            });
+                          }}
                           disabled={batchApplying || batchPreviewing}
                         >
                           <option value="">— Select player —</option>
@@ -630,13 +647,13 @@ export default function EtransfersPage() {
                           disabled={batchApplying || batchPreviewing}
                         />
                       </td>
-                      <td>
+                      <td title={`Remember "${imp.senderName}" → this player for future imports`}>
                         <Form.Check
                           type="checkbox"
+                          aria-label={`Remember "${imp.senderName}" → this player for future imports`}
                           checked={edit.remember}
                           onChange={(e) => updateRowEdit(imp.id, { remember: e.target.checked })}
                           disabled={batchApplying || batchPreviewing}
-                          title={`Remember "${imp.senderName}" → this player for future imports`}
                         />
                       </td>
                       <td className="text-nowrap">
@@ -904,7 +921,7 @@ export default function EtransfersPage() {
         </Modal.Footer>
       </Modal>
 
-      <Modal show={!!rejectTarget} onHide={() => setRejectTarget(null)} centered>
+      <Modal show={!!rejectTarget} onHide={() => { if (!rejecting) setRejectTarget(null); }} centered>
         <Modal.Header closeButton>
           <Modal.Title>Reject e-Transfer import</Modal.Title>
         </Modal.Header>
@@ -950,7 +967,7 @@ export default function EtransfersPage() {
         </Form>
       </Modal>
 
-      <Modal show={!!undoTarget} onHide={() => setUndoTarget(null)} centered>
+      <Modal show={!!undoTarget} onHide={() => { if (!undoing) setUndoTarget(null); }} centered>
         <Modal.Header closeButton>
           <Modal.Title>Undo e-Transfer import</Modal.Title>
         </Modal.Header>

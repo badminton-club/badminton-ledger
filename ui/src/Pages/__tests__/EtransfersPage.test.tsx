@@ -16,6 +16,7 @@ import {
   searchEtransferEmails,
   getDefaultEtransferSearchAfterDate,
 } from '../../services/firebase/gmail';
+import { rejectEtransferImport } from '../../services/firebase';
 import type { Player } from '../../types';
 
 jest.mock('../../services/firebase/gmail', () => {
@@ -25,6 +26,11 @@ jest.mock('../../services/firebase/gmail', () => {
     searchEtransferEmails: jest.fn(),
   };
 });
+
+jest.mock('../../services/firebase', () => ({
+  ...jest.requireActual('../../services/firebase'),
+  rejectEtransferImport: jest.fn(),
+}));
 
 function makePlayer(overrides: Partial<Player> = {}): Player {
   return {
@@ -58,6 +64,8 @@ describe('EtransfersPage', () => {
     resetFirebaseTestState();
     setCurrentUser({ uid: 'admin-1', displayName: 'Admin', email: 'admin@example.com' });
     jest.mocked(searchEtransferEmails).mockReset();
+    const actual = jest.requireActual('../../services/firebase');
+    jest.mocked(rejectEtransferImport).mockImplementation(actual.rejectEtransferImport);
   });
 
   it('finds new e-Transfer emails via search, matches by name, and lists them for review', async () => {
@@ -497,5 +505,118 @@ describe('EtransfersPage', () => {
 
     await waitFor(() => expect(within(mappingsCard).queryByText('CAI FANG WU')).not.toBeInTheDocument());
     expect(getClubDocData('etransferSenderMappings', 'caifang1966@gmail.com')).toBeUndefined();
+  });
+
+  it('checks "select all" once every matchable row is selected, even when another row has no matched player', async () => {
+    seedClubDoc('players', 'p1', makePlayer());
+    seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      senderName: 'CAI FANG WU',
+      amount: 10,
+      emailDate: ts('2026-08-20'),
+      status: 'pending',
+      matchedPlayerId: 'p1',
+      matchSource: 'name-lookup',
+    });
+    seedClubDoc('etransferImports', 'msg-2', {
+      gmailMessageId: 'msg-2',
+      senderName: 'UNKNOWN SENDER',
+      amount: 5,
+      emailDate: ts('2026-08-21'),
+      status: 'pending',
+      matchedPlayerId: null,
+      matchSource: null,
+    });
+
+    renderPage();
+    await screen.findByText('CAI FANG WU');
+    await screen.findByText('UNKNOWN SENDER');
+
+    // The only matchable row is already selected by default, but the unmatched
+    // row can never be selected, so "select all" should already read as fully
+    // checked instead of comparing against the total (unreachable) row count.
+    expect(screen.getByRole('checkbox', { name: 'Select all matched imports' })).toBeChecked();
+  });
+
+  it('defaults to saving the corrected mapping when an admin changes a remembered match to a different player', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer());
+    seedClubDoc('players', 'p2', makePlayer({ id: 'p2', firstName: 'Jordan', firstNameLower: 'jordan', lastName: 'Lee', lastNameLower: 'lee' }));
+    seedClubDoc('etransferSenderMappings', 'caifang1966@gmail.com', {
+      senderName: 'CAI FANG WU',
+      senderEmail: 'caifang1966@gmail.com',
+      playerId: 'p1',
+      updatedAt: ts('2026-08-01'),
+    });
+    seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'caifang1966@gmail.com',
+      amount: 10,
+      emailDate: ts('2026-08-20'),
+      status: 'pending',
+      matchedPlayerId: 'p1',
+      matchSource: 'mapping',
+    });
+
+    renderWithProviders(<EtransfersPage />, {
+      route: '/etransfers',
+      preloadedState: {
+        club: makeClubState(),
+        players: makePlayersState([
+          makePlayer(),
+          makePlayer({ id: 'p2', firstName: 'Jordan', firstNameLower: 'jordan', lastName: 'Lee', lastNameLower: 'lee' }),
+        ]),
+      },
+    });
+
+    const rememberCheckbox = await screen.findByRole(
+      'checkbox',
+      { name: 'Remember "CAI FANG WU" → this player for future imports' }
+    );
+    expect(rememberCheckbox).not.toBeChecked();
+
+    const pendingCard = screen.getByText(/Pending review/).closest('.card') as HTMLElement;
+    const playerSelect = within(pendingCard).getByDisplayValue('Cai Wu');
+    await user.selectOptions(playerSelect, 'p2');
+
+    expect(rememberCheckbox).toBeChecked();
+  });
+
+  it('does not let the Reject dialog be dismissed while a rejection is still in flight, so a later reopen is not clobbered', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer());
+    seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      senderName: 'CAI FANG WU',
+      amount: 10,
+      emailDate: ts('2026-08-20'),
+      status: 'pending',
+      matchedPlayerId: 'p1',
+      matchSource: 'name-lookup',
+    });
+
+    let resolveReject: () => void = () => {};
+    jest.mocked(rejectEtransferImport).mockImplementation(
+      () => new Promise((resolve) => { resolveReject = () => resolve(undefined); })
+    );
+
+    renderPage();
+    await screen.findByText('CAI FANG WU');
+    await user.click(screen.getByRole('button', { name: 'Reject' }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/Reason/), 'testing in-flight dismiss');
+    await user.click(within(dialog).getByRole('button', { name: 'Reject' }));
+
+    // The reject request is now in flight (unresolved) — trying to dismiss the
+    // dialog via its close button must not succeed while it's pending, since
+    // doing so would let a later reopen for a different import be silently
+    // clobbered once this request eventually resolves.
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    resolveReject();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 });

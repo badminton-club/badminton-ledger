@@ -259,8 +259,17 @@ export function parseEtransferMessage(message: {
   const fromHeader = parseAddressHeader(header('From'));
   const replyTo = parseAddressHeader(header('Reply-To'));
 
-  const senderName = (bodySentFrom || subjectMatch[2] || fromHeader.name).trim();
-  const amount = parseAmount(bodyAmount || subjectMatch[1]);
+  // Subject wins over the body's "Sent From"/"Amount" fields — the body is
+  // scanned for those labels anywhere in the decoded text, and the sender's own
+  // free-text "Message" memo appears earlier in the body than the real labels,
+  // so a memo containing literal text like "Sent From: X" or "Amount: $9.99"
+  // would otherwise be mistaken for the real field and silently override the
+  // subject line's authoritative (Interac-generated, not sender-controlled)
+  // amount/name. The body values are kept only as a fallback for the — under
+  // the current subject regex, unreachable — case where the subject somehow
+  // didn't capture them.
+  const senderName = (subjectMatch[2] || bodySentFrom || fromHeader.name).trim();
+  const amount = parseAmount(subjectMatch[1] || bodyAmount || '');
   const emailDate = header('Date') ? new Date(header('Date') as string)
     : message.internalDate ? new Date(Number(message.internalDate))
     : new Date();

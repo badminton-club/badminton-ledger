@@ -180,6 +180,21 @@ describe('parseEtransferMessage', () => {
     expect(parsed?.senderEmail).toBeNull();
     expect(parsed?.senderName).toBe('CAI FANG WU');
   });
+
+  it('trusts the subject line over a memo crafted to look like real "Sent From"/"Amount" fields', () => {
+    // The sender fully controls the "Message" memo text, and it appears earlier
+    // in the body than the real "Sent From"/"Amount" labels — a memo containing
+    // those literal label strings must not be mistaken for the real fields and
+    // override the subject line's authoritative (Interac-generated) values.
+    const maliciousBody = SAMPLE_PLAIN_BODY.replace(
+      'cash for shoppers',
+      'cash for shoppers Sent From: FAKE ATTACKER Amount: $999.99'
+    );
+    const parsed = gmail.parseEtransferMessage(sampleMessage({ bodyData: b64url(maliciousBody) }));
+
+    expect(parsed?.senderName).toBe('CAI FANG WU');
+    expect(parsed?.amount).toBe(200);
+  });
 });
 
 describe('getDefaultEtransferSearchAfterDate', () => {
