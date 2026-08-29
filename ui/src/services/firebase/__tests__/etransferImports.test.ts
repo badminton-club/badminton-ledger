@@ -277,6 +277,36 @@ describe('rejectEtransferImport', () => {
   });
 });
 
+describe('dismissEtransferImport', () => {
+  it('deletes the pending import doc entirely so the next search re-adds it fresh', async () => {
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1', status: 'pending', amount: 200, senderName: 'CAI FANG WU',
+    });
+
+    await etransfer.dismissEtransferImport('msg-1');
+
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toBeUndefined();
+
+    // Re-running a search for the same Gmail message id now creates a fresh pending import.
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([makeParsedEmail({
+      gmailMessageId: 'msg-1', senderName: 'CAI FANG WU',
+    })]);
+    const result = await etransfer.importEtransferEmails();
+    expect(result).toEqual({ found: 1, created: 1 });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'pending' });
+  });
+
+  it('rejects dismissing an import that has already been reviewed', async () => {
+    helpers.seedClubDoc('etransferImports', 'msg-1', { gmailMessageId: 'msg-1', status: 'applied' });
+    await expect(etransfer.dismissEtransferImport('msg-1')).rejects.toThrow('already been reviewed');
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toBeDefined();
+  });
+
+  it('rejects dismissing an import that does not exist', async () => {
+    await expect(etransfer.dismissEtransferImport('missing')).rejects.toThrow('not found');
+  });
+});
+
 describe('undoEtransferImport', () => {
   it('reverses an applied balance and reopens the import for review', async () => {
     helpers.seedClubDoc('etransferImports', 'msg-1', {

@@ -234,6 +234,48 @@ describe('EtransfersPage', () => {
     expect(within(dialog).getByText(/\$13\.03 on Aug 19, 2026/)).toBeInTheDocument();
   });
 
+  it('dismisses a pending import (X) without a permanent decision, and it can be re-found by a later search', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    seedClubDoc('players', 'p1', makePlayer());
+    seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      senderName: 'CAI FANG WU',
+      amount: 200,
+      emailDate: ts('2026-08-26'),
+      status: 'pending',
+      matchedPlayerId: 'p1',
+      matchSource: 'name-lookup',
+    });
+
+    renderPage();
+    expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Ignore CAI FANG WU for now' }));
+
+    await waitFor(() => expect(getClubDocData('etransferImports', 'msg-1')).toBeUndefined());
+    expect(screen.getByText('Nothing to review — search Gmail to find new e-Transfers.')).toBeInTheDocument();
+    // Not recorded in history either — it's gone entirely, not a permanent decision.
+    expect(screen.queryByText('CAI FANG WU')).not.toBeInTheDocument();
+
+    // A later Gmail search re-finds and re-adds the same message for review.
+    jest.mocked(searchEtransferEmails).mockResolvedValue([{
+      gmailMessageId: 'msg-1',
+      gmailThreadId: 'thread-1',
+      subject: 'subject',
+      senderName: 'CAI FANG WU',
+      senderEmail: null,
+      amount: 200,
+      memo: null,
+      referenceNumber: null,
+      emailDate: new Date('2026-08-26T14:47:00.000Z'),
+    }]);
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
+
+    confirmSpy.mockRestore();
+  });
+
   it('undoes an applied import and reverses the balance', async () => {
     const user = userEvent.setup();
     seedClubDoc('players', 'p1', makePlayer({ balance: 210 })); // already includes the +200 credit

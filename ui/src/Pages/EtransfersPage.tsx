@@ -9,6 +9,7 @@ import {
   previewEtransferApprovalBatch,
   applyEtransferApprovalBatch,
   rejectEtransferImport,
+  dismissEtransferImport,
   undoEtransferImport,
   fetchEtransferSenderMappings,
   saveEtransferSenderMapping,
@@ -85,6 +86,9 @@ export default function EtransfersPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [rejecting, setRejecting] = useState(false);
   const [rejectError, setRejectError] = useState('');
+
+  const [dismissingId, setDismissingId] = useState<string | null>(null);
+  const [dismissError, setDismissError] = useState<Record<string, string>>({});
 
   const [undoTarget, setUndoTarget] = useState<EtransferImport | null>(null);
   const [undoReason, setUndoReason] = useState('');
@@ -253,6 +257,25 @@ export default function EtransfersPage() {
       setRejectError(err instanceof Error ? err.message : 'Failed to reject.');
     } finally {
       setRejecting(false);
+    }
+  };
+
+  const handleDismiss = async (imp: EtransferImport) => {
+    if (!window.confirm(
+      `Ignore this e-Transfer from ${imp.senderName} for now? It will be picked up again next time you search Gmail.`
+    )) return;
+    setDismissError((prev) => ({ ...prev, [imp.id]: '' }));
+    setDismissingId(imp.id);
+    try {
+      await dismissEtransferImport(imp.id);
+      await load();
+    } catch (err) {
+      setDismissError((prev) => ({
+        ...prev,
+        [imp.id]: err instanceof Error ? err.message : 'Failed to dismiss.',
+      }));
+    } finally {
+      setDismissingId(null);
     }
   };
 
@@ -503,8 +526,22 @@ export default function EtransfersPage() {
                         >
                           Reject
                         </Button>
+                        <Button
+                          size="sm"
+                          variant="outline-secondary"
+                          className="ms-2"
+                          disabled={batchApplying || batchPreviewing || dismissingId === imp.id}
+                          onClick={() => handleDismiss(imp)}
+                          title="Ignore this time — it'll be picked up again on the next Gmail search"
+                          aria-label={`Ignore ${imp.senderName} for now`}
+                        >
+                          {dismissingId === imp.id ? <Spinner size="sm" animation="border" /> : '×'}
+                        </Button>
                         {applyError[imp.id] && (
                           <div className="text-danger small mt-1">{applyError[imp.id]}</div>
+                        )}
+                        {dismissError[imp.id] && (
+                          <div className="text-danger small mt-1">{dismissError[imp.id]}</div>
                         )}
                       </td>
                     </tr>

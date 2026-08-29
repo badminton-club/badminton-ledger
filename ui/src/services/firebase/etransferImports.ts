@@ -710,6 +710,25 @@ export async function rejectEtransferImport(importId: string, reason: string): P
 }
 
 /**
+ * Dismisses a pending import for now without recording a permanent decision:
+ * unlike reject/apply, this deletes the Firestore doc entirely (rather than
+ * marking it reviewed), so the next Gmail search — which dedupes purely by
+ * the Gmail message id already existing as a doc — will find and re-add it
+ * fresh for review. No balance is touched since only pending imports can be
+ * dismissed this way.
+ */
+export async function dismissEtransferImport(importId: string): Promise<void> {
+  return serviceCall('dismissEtransferImport', async () => {
+    const importRef = doc(refs.etransferImports, importId);
+    const importSnap = await getDoc(importRef);
+    if (!importSnap.exists()) throw new Error('Import record not found.');
+    if (importSnap.data().status !== 'pending') throw new Error('This import has already been reviewed.');
+
+    await deleteDoc(importRef);
+  });
+}
+
+/**
  * Reopens an applied, rejected, or legacy-undone import for review. Applied
  * imports first reverse the balance with a new offsetting ledger entry; rejected
  * and already-undone imports do not touch balances. Audit fields and original
