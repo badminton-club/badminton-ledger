@@ -659,6 +659,7 @@ export default function PlayersPage() {
                           </th>
                           <th style={{ whiteSpace: 'nowrap' }}>Type</th>
                           <th>Note</th>
+                          <th style={{ whiteSpace: 'nowrap' }}>Session</th>
                           <th className="text-end">Change</th>
                           <th className="text-end">Balance</th>
                         </tr>
@@ -695,12 +696,12 @@ export default function PlayersPage() {
                             </td>
                             <td className="text-muted" style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
                               {entry.note}
+                            </td>
+                            <td className="text-nowrap">
                               {entry.sessionId && sessionDatesById[entry.sessionId] && (
-                                <div className="small">
-                                  <Link to={`/?date=${format(sessionDatesById[entry.sessionId], 'yyyy-MM-dd')}`}>
-                                    {format(sessionDatesById[entry.sessionId], 'MMM d, yyyy')}
-                                  </Link>
-                                </div>
+                                <Link to={`/?date=${format(sessionDatesById[entry.sessionId], 'yyyy-MM-dd')}`}>
+                                  {format(sessionDatesById[entry.sessionId], 'MMM d, yyyy')}
+                                </Link>
                               )}
                             </td>
                             <td className={`text-end text-nowrap ${entry.delta >= 0 ? 'text-success' : 'text-danger'}`}>
