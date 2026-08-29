@@ -94,6 +94,21 @@ describe('ExistingSessionView', () => {
     expect(screen.getByRole('button', { name: 'e-Transfer' })).toBeInTheDocument();
   });
 
+  it('warns before a Balance settlement would overdraw the player', async () => {
+    const user = userEvent.setup();
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+    const { onSessionUpdate } = renderView(
+      [makePlayer({ id: 'p1', balance: 10 })],
+      [makeSessionPlayer({ id: 'p1', cost: 20, paid: false, paidVia: null })]
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Balance' }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('will go to $-10.00 (negative)'));
+    expect(onSessionUpdate).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
   it('hides admin-only controls for non-admins', () => {
     const players = [makePlayer({ id: 'p1' })];
     renderView(players, [makeSessionPlayer()], { isAdmin: false });

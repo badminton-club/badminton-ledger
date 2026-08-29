@@ -794,9 +794,10 @@ export default function PlayersPage() {
                                   // e-Transfer.
                                   const settledViaEtransferBalance =
                                     via === 'balance' && !!playerInSession.settledByEtransferImportId;
-                                  const settledCredit =
-                                    via === 'etransfer' || via === 'comp' ? playerInSession.cost : 0;
-                                  const balanceIfDrawn = (selectedPlayer?.balance ?? 0) - settledCredit;
+                                  // Switching any non-balance settlement to Balance draws the
+                                  // full session cost from this player's current prepaid wallet.
+                                  const balanceIfDrawn =
+                                    (selectedPlayer?.balance ?? 0) - playerInSession.cost;
                                   const settleOptions: { method: PaidVia; label: string; activeVariant: string }[] = [
                                     { method: null,        label: 'Unpaid',  activeVariant: 'danger'  },
                                     { method: 'comp',      label: 'Comp',    activeVariant: 'info'    },

@@ -374,6 +374,26 @@ describe('PlayersPage', () => {
     expect(screen.queryByRole('button', { name: 'Balance' })).not.toBeInTheDocument();
   });
 
+  it('warns before a Balance settlement would overdraw the selected player', async () => {
+    const user = userEvent.setup();
+    const sessionDate = new Date(new Date().getFullYear(), new Date().getMonth(), 14, 19, 30);
+    const players = [makePlayer({ id: 'p1', balance: 10, owed: 15 })];
+    seedSession('s1', {
+      date: ts(sessionDate),
+      players: [makeSessionPlayer({ id: 'p1', cost: 15, paid: false, paidVia: null })],
+    });
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await user.click(await screen.findByRole('button', { name: 'Balance' }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('will go to $-5.00 (negative)'));
+    expect(getClubDocData('sessions', 's1')?.players).toEqual([
+      expect.objectContaining({ paid: false, paidVia: null }),
+    ]);
+    confirm.mockRestore();
+  });
+
   it('validates manual balance adjustments before submitting', async () => {
     const user = userEvent.setup();
     const players = [makePlayer({ id: 'p1', balance: 20 })];
