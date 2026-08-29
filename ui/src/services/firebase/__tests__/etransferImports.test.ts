@@ -719,6 +719,38 @@ describe('e-Transfer approval batches', () => {
       expect.objectContaining({ paid: true, paidVia: 'balance' }),
     ]);
   });
+
+  it('stamps every import applied together with the same batchId, and a different batchId on a later approval', async () => {
+    seedPlayer('p1', { balance: 0, owed: 0 });
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1', status: 'pending', senderName: 'CAI FANG WU', amount: 10,
+    });
+    helpers.seedClubDoc('etransferImports', 'msg-2', {
+      gmailMessageId: 'msg-2', status: 'pending', senderName: 'PAT SMITH', amount: 5,
+    });
+    const firstPreview = await etransfer.previewEtransferApprovalBatch([
+      { importId: 'msg-1', playerId: 'p1', amount: 10, rememberMapping: false },
+      { importId: 'msg-2', playerId: 'p1', amount: 5, rememberMapping: false },
+    ]);
+    await etransfer.applyEtransferApprovalBatch(firstPreview);
+
+    const msg1 = helpers.getClubDocData('etransferImports', 'msg-1');
+    const msg2 = helpers.getClubDocData('etransferImports', 'msg-2');
+    expect(msg1?.batchId).toEqual(expect.any(String));
+    expect(msg1?.batchId).toBe(msg2?.batchId);
+
+    helpers.seedClubDoc('etransferImports', 'msg-3', {
+      gmailMessageId: 'msg-3', status: 'pending', senderName: 'ALEX LEE', amount: 3,
+    });
+    const secondPreview = await etransfer.previewEtransferApprovalBatch([
+      { importId: 'msg-3', playerId: 'p1', amount: 3, rememberMapping: false },
+    ]);
+    await etransfer.applyEtransferApprovalBatch(secondPreview);
+
+    const msg3 = helpers.getClubDocData('etransferImports', 'msg-3');
+    expect(msg3?.batchId).toEqual(expect.any(String));
+    expect(msg3?.batchId).not.toBe(msg1?.batchId);
+  });
 });
 
 describe('sender mappings', () => {

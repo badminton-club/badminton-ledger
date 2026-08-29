@@ -232,6 +232,54 @@ describe('EtransfersPage', () => {
     ]);
   });
 
+  it('groups a multi-import batch approval into one expandable history entry', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 0 }));
+    seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'sender1@example.com',
+      amount: 5,
+      emailDate: ts('2026-08-20'),
+      status: 'pending',
+      matchedPlayerId: 'p1',
+      matchSource: 'name-lookup',
+    });
+    seedClubDoc('etransferImports', 'msg-2', {
+      gmailMessageId: 'msg-2',
+      senderName: 'PAT SMITH',
+      senderEmail: 'sender2@example.com',
+      amount: 3,
+      emailDate: ts('2026-08-21'),
+      status: 'pending',
+      matchedPlayerId: 'p1',
+      matchSource: 'name-lookup',
+    });
+
+    renderPage();
+    await screen.findByText('CAI FANG WU');
+    await screen.findByText('PAT SMITH');
+    await user.click(screen.getByRole('button', { name: 'Review batch (2)' }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Approve batch (2)' }));
+
+    await waitFor(() => expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 8 }));
+
+    const historyCard = screen.getByText('History').closest('.card') as HTMLElement;
+    // Collapsed: one summary row for the batch, not two individual rows.
+    expect(within(historyCard).queryByText('CAI FANG WU')).not.toBeInTheDocument();
+    expect(within(historyCard).queryByText('PAT SMITH')).not.toBeInTheDocument();
+    const expandButton = within(historyCard).getByRole('button', { name: /2 e-transfers/ });
+    expect(within(historyCard).getByText('$8.00')).toBeInTheDocument();
+
+    await user.click(expandButton);
+
+    expect(within(historyCard).getByText('CAI FANG WU')).toBeInTheDocument();
+    expect(within(historyCard).getByText('PAT SMITH')).toBeInTheDocument();
+    expect(within(historyCard).getAllByRole('button', { name: 'Undo' })).toHaveLength(2);
+  });
+
   it('does not skip an older, larger unpaid session to settle a smaller newer one, and explains why in the preview', async () => {
     const user = userEvent.setup();
     seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 13.04 }));

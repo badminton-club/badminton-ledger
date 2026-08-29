@@ -394,6 +394,64 @@ export default function EtransfersPage() {
     [history]
   );
 
+  // Group history rows sharing a batchId (i.e. approved together in one batch
+  // review) back into one expandable entry, in the order each group's newest
+  // item first appears in the (already date-desc) sorted list.
+  const historyGroups = useMemo(() => {
+    const groups = new Map<string, EtransferImport[]>();
+    for (const imp of sortedHistory) {
+      const key = imp.batchId || `single:${imp.id}`;
+      const list = groups.get(key);
+      if (list) list.push(imp);
+      else groups.set(key, [imp]);
+    }
+    return [...groups.entries()].map(([key, items]) => ({ key, items }));
+  }, [sortedHistory]);
+
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
+  const toggleBatch = (key: string) => {
+    setExpandedBatches((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const renderHistoryRow = (imp: EtransferImport, opts?: { indented?: boolean }) => {
+    const emailDate = toJSDate(imp.emailDate);
+    return (
+      <tr key={imp.id} className={opts?.indented ? 'table-active' : undefined}>
+        <td className={opts?.indented ? 'ps-4' : undefined}>
+          {emailDate ? format(emailDate, 'MMM d, yyyy') : '—'}
+        </td>
+        <td>
+          {imp.senderName}
+          {imp.referenceNumber && (
+            <div className="text-muted small">Ref: {imp.referenceNumber}</div>
+          )}
+        </td>
+        <td>{playerName(imp.matchedPlayerId)}</td>
+        <td>{money(imp.appliedAmount ?? imp.amount)}</td>
+        <td>{statusBadge(imp.status)}</td>
+        <td className="text-muted small">
+          {imp.status === 'rejected' && imp.rejectionReason}
+          {imp.status === 'undone' && imp.undoneReason}
+        </td>
+        <td>
+          {['applied', 'rejected', 'undone'].includes(imp.status) && (
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              onClick={() => { setUndoTarget(imp); setUndoReason(''); setUndoError(''); }}
+            >
+              Undo
+            </Button>
+          )}
+        </td>
+      </tr>
+    );
+  };
+
   if (!isAdmin) {
     return (
       <Container className="py-4">
@@ -671,36 +729,53 @@ export default function EtransfersPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedHistory.map((imp) => {
-                  const emailDate = toJSDate(imp.emailDate);
+                {historyGroups.map(({ key, items }) => {
+                  if (items.length === 1) {
+                    return renderHistoryRow(items[0]);
+                  }
+
+                  const isExpanded = expandedBatches.has(key);
+                  const totalAmount = items.reduce((sum, imp) => sum + (imp.appliedAmount ?? imp.amount), 0);
+                  const senderCount = new Set(items.map((imp) => imp.senderName)).size;
+                  const playerCount = new Set(items.map((imp) => imp.matchedPlayerId).filter(Boolean)).size;
+                  const settledCount = items.reduce((sum, imp) => sum + (imp.autoSettledSessionIds?.length ?? 0), 0);
+                  const approvedAt = items
+                    .map((imp) => toJSDate(imp.reviewedAt))
+                    .filter((d): d is Date => !!d)
+                    .sort((a, b) => b.getTime() - a.getTime())[0];
+
                   return (
-                    <tr key={imp.id}>
-                      <td>{emailDate ? format(emailDate, 'MMM d, yyyy') : '—'}</td>
-                      <td>
-                        {imp.senderName}
-                        {imp.referenceNumber && (
-                          <div className="text-muted small">Ref: {imp.referenceNumber}</div>
-                        )}
-                      </td>
-                      <td>{playerName(imp.matchedPlayerId)}</td>
-                      <td>{money(imp.appliedAmount ?? imp.amount)}</td>
-                      <td>{statusBadge(imp.status)}</td>
-                      <td className="text-muted small">
-                        {imp.status === 'rejected' && imp.rejectionReason}
-                        {imp.status === 'undone' && imp.undoneReason}
-                      </td>
-                      <td>
-                        {['applied', 'rejected', 'undone'].includes(imp.status) && (
+                    <React.Fragment key={key}>
+                      <tr
+                        className="table-light"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => toggleBatch(key)}
+                      >
+                        <td>{approvedAt ? format(approvedAt, 'MMM d, yyyy') : '—'}</td>
+                        <td>{senderCount} sender{senderCount === 1 ? '' : 's'}</td>
+                        <td>{playerCount} player{playerCount === 1 ? '' : 's'}</td>
+                        <td>{money(totalAmount)}</td>
+                        <td>
+                          {/* Undoing an item takes it back to "pending" (not "undone") and
+                              out of this history query entirely, so every import still
+                              grouped under a batchId here is always still applied. */}
+                          {statusBadge('applied')}
+                        </td>
+                        <td className="text-muted small">
+                          {settledCount > 0 && `${settledCount} session${settledCount === 1 ? '' : 's'} settled`}
+                        </td>
+                        <td>
                           <Button
                             size="sm"
                             variant="outline-secondary"
-                            onClick={() => { setUndoTarget(imp); setUndoReason(''); setUndoError(''); }}
+                            onClick={(e) => { e.stopPropagation(); toggleBatch(key); }}
                           >
-                            Undo
+                            {isExpanded ? '▲ Hide' : `▼ ${items.length} e-transfers`}
                           </Button>
-                        )}
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+                      {isExpanded && items.map((imp) => renderHistoryRow(imp, { indented: true }))}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

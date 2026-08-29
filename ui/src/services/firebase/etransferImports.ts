@@ -185,6 +185,7 @@ function toEtransferImport(id: string, data: Record<string, unknown>): Etransfer
     appliedAmount: (data.appliedAmount as number | null) ?? null,
     balanceLedgerEntryId: (data.balanceLedgerEntryId as string | null) ?? null,
     autoSettledSessionIds: (data.autoSettledSessionIds as string[] | undefined) ?? [],
+    batchId: (data.batchId as string | null) ?? null,
     rejectionReason: (data.rejectionReason as string | null) ?? null,
     undoneByUid: (data.undoneByUid as string | null) ?? null,
     undoneAt: (data.undoneAt as EtransferImport['undoneAt']) ?? null,
@@ -454,6 +455,9 @@ export async function applyEtransferApprovalBatch(
       throw new Error('The batch changed since it was reviewed. Review it again before approving.');
     }
 
+    // Stamped on every import applied in this call so the review history can
+    // group them back into one expandable batch entry.
+    const batchId = doc(refs.balanceLedger).id;
     const importRefs = fresh.inputs.map((input) => doc(refs.etransferImports, input.importId));
     const playerIds = [...new Set(fresh.inputs.map((input) => input.playerId))];
     const playerRefs = playerIds.map((playerId) => doc(refs.players, playerId));
@@ -550,6 +554,7 @@ export async function applyEtransferApprovalBatch(
           appliedAmount: input.amount,
           balanceLedgerEntryId: ledgerRef.id,
           autoSettledSessionIds: settledSessionIds,
+          batchId,
           reviewedByUid,
           reviewedAt: serverTimestamp(),
         });

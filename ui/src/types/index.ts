@@ -325,6 +325,10 @@ export interface EtransferImport {
   appliedAmount?: number | null;         // amount actually credited (may differ if edited)
   balanceLedgerEntryId?: string | null;  // the balanceLedger entry this created, for undo
   autoSettledSessionIds?: string[];       // sessions automatically paid from this import's credited balance
+  // Shared by every import approved together in the same batch-approval call, so
+  // the review history can group them back into one expandable entry. Null/absent
+  // for imports that were only ever rejected/dismissed (never part of an apply batch).
+  batchId?: string | null;
   rejectionReason?: string | null;
   undoneByUid?: string | null;
   undoneAt?: Timestamp | null;
