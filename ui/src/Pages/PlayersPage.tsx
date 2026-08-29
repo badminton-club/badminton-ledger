@@ -364,10 +364,17 @@ export default function PlayersPage() {
     if (!selectedPlayer) return;
     const first = edFirst.trim();
     if (!first) { setDetailsError('First name is required.'); return; }
+    const email = edEmail.trim();
+    if (email && playersList.some(
+      p => p.id !== selectedPlayer.id && (p.email ?? '').toLowerCase() === email.toLowerCase()
+    )) {
+      setDetailsError(`Another player already uses "${email}". Use a different email, or leave it blank.`);
+      return;
+    }
     setDetailsError('');
     setSavingDetails(true);
     try {
-      await updatePlayerProfile(selectedPlayer.id, { firstName: first, lastName: edLast.trim() || null, email: edEmail.trim() || null });
+      await updatePlayerProfile(selectedPlayer.id, { firstName: first, lastName: edLast.trim() || null, email: email || null });
       setEditingDetails(false);
     } catch (err) {
       setDetailsError(err instanceof Error ? err.message : 'Failed to save details.');

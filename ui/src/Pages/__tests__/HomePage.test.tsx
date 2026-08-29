@@ -143,4 +143,24 @@ describe('HomePage', () => {
     await user.click(screen.getByRole('button', { name: 'Mock calendar' }));
     await waitFor(() => expect(fetchSessions).toHaveBeenCalledTimes(2));
   });
+
+  it('shows a visible error with a Retry button when loading sessions fails, instead of silently showing nothing', async () => {
+    const user = userEvent.setup();
+    jest.mocked(fetchSessions).mockRejectedValueOnce(new Error('network down'));
+
+    renderWithProviders(<HomePage />, {
+      preloadedState: {
+        club: makeClubState(),
+        players: makePlayersState([]),
+      },
+    });
+
+    expect(await screen.findByText('Failed to load recent sessions.')).toBeInTheDocument();
+
+    jest.mocked(fetchSessions).mockResolvedValueOnce([makeSession({ id: 'latest' })]);
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText('Latest Session')).toBeInTheDocument();
+    expect(screen.queryByText('Failed to load recent sessions.')).not.toBeInTheDocument();
+  });
 });

@@ -177,6 +177,31 @@ describe('PlayersPage', () => {
     ).toBeInTheDocument();
   });
 
+  it('rejects an edited email already used by another player, without touching this one\'s own unchanged email', async () => {
+    const user = userEvent.setup();
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada', lastName: 'Lovelace', email: 'ada@example.com' }),
+      makePlayer({ id: 'p2', firstName: 'Bea', firstNameLower: 'bea', lastName: null, lastNameLower: null, email: 'bea@example.com' }),
+    ];
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    // Re-saving the player's own unchanged email must not flag itself as a duplicate.
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const emailInput = screen.getByLabelText('Email');
+    await user.clear(emailInput);
+    await user.type(emailInput, 'BEA@example.com');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText(/Another player already uses "BEA@example.com"/)).toBeInTheDocument();
+    expect(getClubDocData('players', 'p1')).toMatchObject({ email: 'ada@example.com' });
+  });
+
   it('sorts players by owed and overdrawn status', async () => {
     const user = userEvent.setup();
     const players = [

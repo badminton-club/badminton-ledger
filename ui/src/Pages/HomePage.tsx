@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Container, Row, Col, Button } from "react-bootstrap";
+import { Container, Row, Col, Button, Alert } from "react-bootstrap";
 import { format } from "date-fns";
 import { Link } from "react-router-dom";
 // import "./HomePage.css";
@@ -13,12 +13,17 @@ import type { RootState } from "../store";
 export default function HomePage() {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [sessionIndex, setSessionIndex] = useState(0);
+    const [sessionsError, setSessionsError] = useState('');
     const players = useAppSelector(selectAllPlayers);
 
     const loadSessions = useCallback(() => {
+        setSessionsError('');
         fetchSessions({ orderDirection: "desc", limitCount: 60 })
             .then((s) => { setSessions(s); setSessionIndex(0); })
-            .catch(console.error);
+            .catch((err) => {
+                console.error(err);
+                setSessionsError('Failed to load recent sessions.');
+            });
     }, []);
 
     useEffect(() => { loadSessions(); }, [loadSessions]);
@@ -33,6 +38,12 @@ export default function HomePage() {
                 <Row className="mb-3">
                     {/* ── Latest session summary ── */}
                     <Col md={6}>
+                        {sessionsError && (
+                            <Alert variant="danger" className="d-flex justify-content-between align-items-center">
+                                <span>{sessionsError}</span>
+                                <Button size="sm" variant="outline-danger" onClick={loadSessions}>Retry</Button>
+                            </Alert>
+                        )}
                         {currentSession && (
                             <div className="session-card">
                                 <div className="d-flex align-items-center justify-content-between">
