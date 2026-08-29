@@ -458,11 +458,27 @@ export default function BirdiesPage() {
           {!isLoadingHistory && history.length > 0 && (() => {
             // Remaining birds after each event, reconstructed from current stock by
             // walking newest → oldest and adding back usage (history is newest-first).
+            // Manual adjustments can also directly change unopenedTubesRemaining/
+            // birdsInOpenTube (e.g. a recount) — those must be reversed too, or
+            // every row OLDER than such an adjustment shows an inflated/incorrect
+            // remaining count that ignores the correction.
+            const birdsPerTube = selectedBatch.birdsPerTube || 1;
             const remainingByRow = new Map<HistoryItem, number>();
             let remaining = totalRemainingBirds(selectedBatch);
             for (const item of history) {
               remainingByRow.set(item, remaining);
-              if (item.type === 'sessionUsage') remaining += (item.quantityUsed as number) ?? 0;
+              if (item.type === 'sessionUsage') {
+                remaining += (item.quantityUsed as number) ?? 0;
+              } else if (item.type === 'adjustment') {
+                const changes = item.changes as { field: string; oldValue: unknown; newValue: unknown }[] | undefined;
+                for (const c of changes ?? []) {
+                  if (c.field === 'unopenedTubesRemaining') {
+                    remaining += ((Number(c.oldValue) || 0) - (Number(c.newValue) || 0)) * birdsPerTube;
+                  } else if (c.field === 'birdsInOpenTube') {
+                    remaining += (Number(c.oldValue) || 0) - (Number(c.newValue) || 0);
+                  }
+                }
+              }
             }
             return (
               <Table striped borderless hover responsive size="sm">

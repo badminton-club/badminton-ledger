@@ -105,6 +105,49 @@ describe('CourtCreditsPage', () => {
     expect(screen.getByRole('link', { name: 'View on calendar' })).toHaveAttribute('href', '/?date=2026-03-03');
   });
 
+  it('reverses a manual adjustment\'s own stock change when reconstructing "Remaining" for older history rows', async () => {
+    seedClubDoc('courtCredits', 'c2', {
+      name: 'Winter block',
+      totalCost: 200,
+      costPerHour: 20,
+      hoursPurchased: 20,
+      remainingHours: 10, // current
+      purchaserName: 'Sam',
+      purchaseDate: ts('2026-02-01T12:00:00Z'),
+      createdAt: ts('2026-02-01T12:00:00Z'),
+    });
+    // Newest: used 2 hrs.
+    seedClubDoc('transactions', 'tx-newest', {
+      resourceType: 'court', batchId: 'c2', hoursUsed: 2, cost: 40, sessionId: 's-newest',
+      date: ts('2026-03-10T12:00:00Z'), createdAt: ts('2026-03-10T12:00:00Z'),
+    });
+    // Middle: a recount that corrected remainingHours upward by 5 hrs — this
+    // itself must be reversed for older rows.
+    seedClubDoc('inventoryAdjustments', 'adj-2', {
+      adjustmentDate: ts('2026-03-05T12:00:00Z'),
+      userId: currentUser.uid, userName: currentUser.displayName,
+      resourceType: 'courtCreditBatch', batchId: 'c2', batchNameSnapshot: 'Winter block',
+      reason: 'Recount',
+      changes: [{ field: 'remainingHours', oldValue: 2, newValue: 7 }],
+    });
+    // Oldest: used 3 hrs.
+    seedClubDoc('transactions', 'tx-oldest', {
+      resourceType: 'court', batchId: 'c2', hoursUsed: 3, cost: 60, sessionId: 's-oldest',
+      date: ts('2026-03-01T12:00:00Z'), createdAt: ts('2026-03-01T12:00:00Z'),
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    const batchToggle = await screen.findByRole('button', { name: /Winter block/ });
+    await user.click(batchToggle);
+
+    const rows = (await screen.findAllByText(/^\d+(\.\d+)? hrs$/)).map((el) => el.textContent);
+    // Newest-first: 10 (current) → undo -2 usage → 12 → undo the adjustment's
+    // own +5 → 7 → (oldest row's usage isn't reversed further, nothing older).
+    expect(rows).toEqual(['10 hrs', '12 hrs', '7 hrs']);
+  });
+
   it('validates edits, saves them, logs an adjustment, and keeps the batch open after reload', async () => {
     const user = userEvent.setup();
 

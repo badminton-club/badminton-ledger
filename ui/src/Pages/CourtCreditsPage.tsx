@@ -384,11 +384,22 @@ export default function CourtCreditsPage() {
                       {!isLoadingHistory && !historyError && history.length > 0 && activeKey === batch.id && (() => {
                         // Remaining hours after each event, reconstructed from current
                         // remaining by walking newest → oldest and adding back usage.
+                        // A manual adjustment can also directly change remainingHours
+                        // (e.g. a recount) — reverse that too, or every row OLDER than
+                        // such an adjustment shows an incorrect remaining total.
                         const remainingByRow = new Map<HistoryItem, number>();
                         let remaining = batch.remainingHours ?? 0;
                         for (const item of history) {
                           remainingByRow.set(item, remaining);
-                          if (item.type === 'sessionUsage') remaining += (item.hoursUsed as number) ?? 0;
+                          if (item.type === 'sessionUsage') {
+                            remaining += (item.hoursUsed as number) ?? 0;
+                          } else if (item.type === 'adjustment') {
+                            const changes = item.changes as { field: string; oldValue: unknown; newValue: unknown }[] | undefined;
+                            const remainingChange = changes?.find((c) => c.field === 'remainingHours');
+                            if (remainingChange) {
+                              remaining += (Number(remainingChange.oldValue) || 0) - (Number(remainingChange.newValue) || 0);
+                            }
+                          }
                         }
                         return (
                         <Table striped bordered hover responsive size="sm">
