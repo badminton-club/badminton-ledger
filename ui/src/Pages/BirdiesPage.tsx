@@ -256,6 +256,7 @@ export default function BirdiesPage() {
     if (isNaN(tubes)    || tubes < 0)       { setPageError('Valid tubes purchased required.');              return; }
     if (isNaN(birds)    || birds <= 0)      { setPageError('Valid birds per tube required.');               return; }
     if (isNaN(unopened) || unopened < 0)    { setPageError('Valid unopened tubes required.');               return; }
+    if (unopened > tubes)                   { setPageError(`Unopened tubes can't exceed the ${tubes} tubes purchased.`); return; }
     if (isNaN(open)     || open < 0 || open > birds) { setPageError(`Birds in open tube must be 0–${birds}.`); return; }
     if (!editForm.purchaserName.trim())     { setPageError('Purchaser name is required.');                  return; }
     if (!editReason.trim())                 { setPageError('Reason for edit is required.');                 return; }

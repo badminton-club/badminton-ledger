@@ -160,6 +160,16 @@ describe('BirdiesPage', () => {
     expect(await screen.findByText('Birds in open tube must be 0–12.')).toBeInTheDocument();
     expect(adjustmentDocIds()).toEqual([]);
 
+    // Unopened tubes remaining can't exceed what was ever purchased (4).
+    await user.clear(screen.getAllByRole('spinbutton')[4]);
+    await user.type(screen.getAllByRole('spinbutton')[4], '0');
+    await user.clear(screen.getAllByRole('spinbutton')[3]);
+    await user.type(screen.getAllByRole('spinbutton')[3], '5');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    expect(await screen.findByText("Unopened tubes can't exceed the 4 tubes purchased.")).toBeInTheDocument();
+    expect(adjustmentDocIds()).toEqual([]);
+
     await user.clear(screen.getAllByRole('textbox')[0]);
     await user.type(screen.getAllByRole('textbox')[0], 'AS-30 Updated');
     await user.clear(screen.getAllByRole('spinbutton')[3]);

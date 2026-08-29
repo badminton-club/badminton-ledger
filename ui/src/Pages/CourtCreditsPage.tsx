@@ -199,6 +199,7 @@ export default function CourtCreditsPage() {
     if (isNaN(hours)     || hours <= 0)     { setFormError('Valid hours purchased required.');   return; }
     if (isNaN(cost)      || cost < 0)       { setFormError('Valid total cost required.');        return; }
     if (isNaN(remaining) || remaining < 0)  { setFormError('Valid remaining hours required.');   return; }
+    if (remaining > hours)                  { setFormError(`Remaining hours can't exceed the ${hours} hours purchased.`); return; }
     if (!editReason.trim())                  { setFormError('Reason for edit is required.');      return; }
 
     setIsSaving(true);

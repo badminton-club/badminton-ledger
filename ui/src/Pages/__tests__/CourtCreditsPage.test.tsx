@@ -131,6 +131,16 @@ describe('CourtCreditsPage', () => {
     expect(await screen.findByText('Valid hours purchased required.')).toBeInTheDocument();
     expect(adjustmentDocIds()).toEqual([]);
 
+    // Remaining hours can't exceed hours purchased.
+    await user.clear(screen.getAllByRole('spinbutton')[0]);
+    await user.type(screen.getAllByRole('spinbutton')[0], '10');
+    await user.clear(screen.getAllByRole('spinbutton')[2]);
+    await user.type(screen.getAllByRole('spinbutton')[2], '15');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    expect(await screen.findByText("Remaining hours can't exceed the 10 hours purchased.")).toBeInTheDocument();
+    expect(adjustmentDocIds()).toEqual([]);
+
     await user.clear(screen.getAllByRole('textbox')[0]);
     await user.type(screen.getAllByRole('textbox')[0], '  Richmond Winter Block  ');
     await user.clear(screen.getAllByRole('spinbutton')[0]);
