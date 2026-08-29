@@ -350,18 +350,31 @@ describe('undoEtransferImport', () => {
     helpers.seedClubDoc('etransferImports', 'msg-1', {
       gmailMessageId: 'msg-1',
       status: 'rejected',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'sender@example.com',
+      matchedPlayerId: 'p2',
       rejectionReason: 'not a payment',
     });
     seedPlayer('p1', { balance: 10 });
+    seedPlayer('p2', {
+      firstName: 'Jordan',
+      firstNameLower: 'jordan',
+      lastName: 'Lee',
+      lastNameLower: 'lee',
+      balance: 20,
+    });
 
     await etransfer.undoEtransferImport('msg-1', 'reconsidering');
 
     expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
       status: 'pending',
+      matchedPlayerId: 'p1',
+      matchSource: 'name-lookup',
       rejectionReason: 'not a payment',
       undoneReason: 'reconsidering',
     });
     expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
+    expect(helpers.getClubDocData('players', 'p2')).toMatchObject({ balance: 20 });
     expect(gmailMock.removeEtransferEmailRejectedLabel).toHaveBeenCalledWith('msg-1');
     expect(gmailMock.removeEtransferEmailProcessedLabel).not.toHaveBeenCalled();
   });

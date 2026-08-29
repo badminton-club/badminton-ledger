@@ -596,7 +596,8 @@ export default function EtransfersPage() {
                   ? `${money(undoTarget.appliedAmount ?? undoTarget.amount)} will be reversed from ${playerName(undoTarget.matchedPlayerId)}'s balance. `
                   : 'No player balance will be changed. '}
                 The import will return to pending review and its Gmail label will be removed. The
-                original decision and ledger entries are kept for the audit record.
+                player suggestion will be matched again. The original decision and ledger entries
+                are kept for the audit record.
               </p>
             )}
             <Form.Group className="mb-3" controlId="etransfer-undo-reason">

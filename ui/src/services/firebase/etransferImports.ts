@@ -88,6 +88,27 @@ function findUniqueBestPlayerMatch(senderName: string, players: Player[]): Playe
   return best.length === 1 ? best[0] : null;
 }
 
+async function resolveSenderMatch(
+  senderEmail: string | null,
+  senderName: string,
+  players: Player[]
+): Promise<{ playerId: string | null; source: EtransferImport['matchSource'] }> {
+  const mappedPlayerId = await lookupSenderMapping(senderEmail, senderName);
+  if (mappedPlayerId && players.some((player) => player.id === mappedPlayerId)) {
+    return { playerId: mappedPlayerId, source: 'mapping' };
+  }
+
+  const candidate = findUniqueBestPlayerMatch(senderName, players);
+  return candidate
+    ? { playerId: candidate.id, source: 'name-lookup' }
+    : { playerId: null, source: null };
+}
+
+async function fetchPlayersForMatching(): Promise<Player[]> {
+  const snap = await getDocs(refs.players);
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Player, 'id'>) }));
+}
+
 function toEtransferImport(id: string, data: Record<string, unknown>): EtransferImport {
   return {
     id,
@@ -186,10 +207,7 @@ export async function importEtransferEmails(
       parsed.map((p) => getDoc(doc(refs.etransferImports, p.gmailMessageId)))
     );
     const toCreate = parsed.filter((_, i) => !existsChecks[i].exists());
-    const playerSnap = toCreate.length > 0 ? await getDocs(refs.players) : null;
-    const players = playerSnap
-      ? playerSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Player, 'id'>) }))
-      : [];
+    const players = toCreate.length > 0 ? await fetchPlayersForMatching() : [];
 
     for (const email of toCreate) {
       await createPendingImport(email, players);
@@ -200,17 +218,7 @@ export async function importEtransferEmails(
 }
 
 async function createPendingImport(email: ParsedEtransferEmail, players: Player[]): Promise<void> {
-  const mappedPlayerId = await lookupSenderMapping(email.senderEmail, email.senderName);
-  let matchedPlayerId: string | null = mappedPlayerId;
-  let matchSource: EtransferImport['matchSource'] = mappedPlayerId ? 'mapping' : null;
-
-  if (!matchedPlayerId) {
-    const candidate = findUniqueBestPlayerMatch(email.senderName, players);
-    if (candidate) {
-      matchedPlayerId = candidate.id;
-      matchSource = 'name-lookup';
-    }
-  }
+  const match = await resolveSenderMatch(email.senderEmail, email.senderName, players);
 
   await setDoc(doc(refs.etransferImports, email.gmailMessageId), {
     gmailMessageId: email.gmailMessageId,
@@ -223,8 +231,8 @@ async function createPendingImport(email: ParsedEtransferEmail, players: Player[
     referenceNumber: email.referenceNumber,
     emailDate: email.emailDate,
     status: 'pending',
-    matchedPlayerId,
-    matchSource,
+    matchedPlayerId: match.playerId,
+    matchSource: match.source,
     createdAt: serverTimestamp(),
   });
 }
@@ -377,6 +385,14 @@ export async function undoEtransferImport(importId: string, reason: string): Pro
     if (!reason.trim()) throw new Error('A reason for undoing this is required.');
 
     const importRef = doc(refs.etransferImports, importId);
+    const importBeforeUndo = await getDoc(importRef);
+    if (!importBeforeUndo.exists()) throw new Error('Import record not found.');
+    const beforeData = importBeforeUndo.data();
+    const rematch = await resolveSenderMatch(
+      (beforeData.senderEmail as string | null) ?? null,
+      (beforeData.senderName as string) ?? '',
+      await fetchPlayersForMatching()
+    );
 
     const { previousStatus, gmailMessageId } = await runTransaction(db, async (tx) => {
       const importSnap = await tx.get(importRef);
@@ -408,6 +424,8 @@ export async function undoEtransferImport(importId: string, reason: string): Pro
         undoneByUid: auth.currentUser?.uid ?? null,
         undoneAt: serverTimestamp(),
         undoneReason: reason.trim(),
+        matchedPlayerId: rematch.playerId,
+        matchSource: rematch.source,
       });
 
       if (playerRef && playerSnap?.exists()) {
