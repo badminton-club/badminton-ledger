@@ -287,6 +287,24 @@ describe('PlayersPage', () => {
     expect(screen.queryByText(format(previousMonthSession, 'MMM d, yyyy'))).not.toBeInTheDocument();
   });
 
+  it('labels a session auto-settled from a Gmail e-Transfer as "Gmail e-Transfer" instead of plain "Balance"', async () => {
+    const now = new Date();
+    const currentMonthSession = new Date(now.getFullYear(), now.getMonth(), 14, 19, 30);
+    const players = [makePlayer({ id: 'p1', balance: 30 })];
+
+    seedSession('s1', {
+      date: ts(currentMonthSession),
+      players: [makeSessionPlayer({
+        id: 'p1', cost: 15, paid: true, paidVia: 'balance', settledByEtransferImportId: 'msg-1',
+      })],
+    });
+
+    renderPage({ players, route: '/?playerId=p1' });
+
+    expect(await screen.findByRole('button', { name: 'Gmail e-Transfer' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Balance' })).not.toBeInTheDocument();
+  });
+
   it('validates manual balance adjustments before submitting', async () => {
     const user = userEvent.setup();
     const players = [makePlayer({ id: 'p1', balance: 20 })];

@@ -694,6 +694,12 @@ export default function PlayersPage() {
                                   const via: PaidVia =
                                     playerInSession.paidVia ??
                                     (playerInSession.comped ? 'comp' : playerInSession.paid ? 'etransfer' : null);
+                                  // A 'balance' settlement auto-applied from a Gmail e-Transfer batch
+                                  // (see etransferImports.ts) is called out distinctly from a manually
+                                  // chosen balance draw, since the money ultimately came from that
+                                  // e-Transfer.
+                                  const settledViaEtransferBalance =
+                                    via === 'balance' && !!playerInSession.settledByEtransferImportId;
                                   const settledCredit =
                                     via === 'etransfer' || via === 'comp' ? playerInSession.cost : 0;
                                   const balanceIfDrawn = (selectedPlayer?.balance ?? 0) - settledCredit;
@@ -738,14 +744,24 @@ export default function PlayersPage() {
                                   return (
                                     <>
                                       <ButtonGroup size="sm" className="mt-1">
-                                        {settleOptions.map(o => (
+                                        {settleOptions.map(o => {
+                                          const isActive = via === o.method;
+                                          const displayLabel = o.method === 'balance' && isActive && settledViaEtransferBalance
+                                            ? 'Gmail e-Transfer'
+                                            : o.label;
+                                          return (
                                           <React.Fragment key={o.label}>
                                             <Button
-                                              variant={via === o.method ? o.activeVariant : 'outline-secondary'}
+                                              variant={isActive ? o.activeVariant : 'outline-secondary'}
                                               style={{ fontSize: 11, padding: '1px 8px' }}
                                               onClick={() => pick(o.method)}
+                                              title={
+                                                o.method === 'balance' && isActive && settledViaEtransferBalance
+                                                  ? 'Automatically settled from balance funded by a Gmail e-Transfer'
+                                                  : undefined
+                                              }
                                             >
-                                              {o.label}
+                                              {displayLabel}
                                             </Button>
                                             {o.method === null && otherPlayers.length > 0 && (
                                               <Dropdown as={ButtonGroup} align="end">
@@ -777,7 +793,8 @@ export default function PlayersPage() {
                                               </Dropdown>
                                             )}
                                           </React.Fragment>
-                                        ))}
+                                          );
+                                        })}
                                       </ButtonGroup>
                                       {playerInSession.settledAt && (via === 'comp' || playerInSession.paid) && (
                                         <div className="text-muted" style={{ fontSize: 11 }}>
