@@ -498,11 +498,20 @@ describe('PlayersPage', () => {
 
     const reasonInput = screen.getByPlaceholderText(/Reason \(e\.g\., Cash Payment\)/) as HTMLInputElement;
 
-    await user.click(screen.getByRole('button', { name: 'Cash Payment' }));
-    expect(reasonInput.value).toBe('Cash Payment');
+    const cashButton = screen.getByRole('button', { name: 'Cash Payment' });
+    const etransferButton = screen.getByRole('button', { name: 'E-Transfer Payment' });
+    expect(cashButton).toHaveClass('btn-outline-success');
+    expect(etransferButton).toHaveClass('btn-outline-success');
 
-    await user.click(screen.getByRole('button', { name: 'E-Transfer Payment' }));
+    await user.click(cashButton);
+    expect(reasonInput.value).toBe('Cash Payment');
+    expect(cashButton).toHaveClass('btn-success');
+    expect(etransferButton).toHaveClass('btn-outline-success');
+
+    await user.click(etransferButton);
     expect(reasonInput.value).toBe('E-Transfer Payment');
+    expect(cashButton).toHaveClass('btn-outline-success');
+    expect(etransferButton).toHaveClass('btn-success');
 
     await user.type(screen.getByPlaceholderText('Amount'), '15');
     await user.click(screen.getByRole('button', { name: 'Update Balance' }));

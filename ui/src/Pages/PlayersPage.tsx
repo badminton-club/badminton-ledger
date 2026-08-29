@@ -624,7 +624,7 @@ export default function PlayersPage() {
                               key={quickReason}
                               type="button"
                               size="sm"
-                              variant="outline-secondary"
+                              variant={balanceAdjustment.reason === quickReason ? 'success' : 'outline-success'}
                               onClick={() => setBalanceAdjustment(p => ({ ...p, reason: quickReason }))}
                             >
                               {quickReason}
