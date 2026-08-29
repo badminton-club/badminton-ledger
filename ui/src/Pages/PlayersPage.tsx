@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container, Row, Col, Card, Form, Button, ButtonGroup,
   ListGroup, Spinner, Alert, InputGroup,
-  Dropdown, DropdownButton, Table, Badge,
+  Dropdown, DropdownButton, Table, Badge, Modal,
 } from 'react-bootstrap';
 import {
   format, startOfMonth, endOfMonth, addMonths, subMonths, startOfYear, endOfYear,
@@ -14,10 +14,12 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { getMonthYear } from '../utils/dateUtils';
 import AddPlayerModal from '../components/AddPlayerModal';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { db, refs, setPlayerSettlement, setPlayerPaidBy } from '../services/firebase';
+import {
+  db, refs, fetchSessionById, setPlayerSettlement, setPlayerPaidBy,
+} from '../services/firebase';
 import { addPlayer, updatePlayerProfile, deletePlayer } from '../services/firebase/players';
 import {
-  query, where, getDocs, getDoc, orderBy,
+  query, where, getDocs, orderBy,
   doc, runTransaction, increment, serverTimestamp,
 } from 'firebase/firestore';
 import { useAppSelector } from '../hooks';
@@ -25,6 +27,7 @@ import {
   selectAllPlayers, selectPlayerById,
   selectPlayersStatus, selectPlayersError,
 } from '../features/players/playersSlice';
+import { selectDisabledTabs } from '../features/club/clubSlice';
 import type { NewPlayerInput, PaidVia, Player, Session } from '../types';
 import type { RootState } from '../store';
 
@@ -93,6 +96,7 @@ export default function PlayersPage() {
   const playersList   = useAppSelector(selectAllPlayers);
   const playersStatus = useAppSelector(selectPlayersStatus);
   const playersError  = useAppSelector(selectPlayersError);
+  const disabledTabs  = useAppSelector(selectDisabledTabs);
   const selectedPlayer = useAppSelector((s: RootState) =>
     searchParams.get('playerId') ? selectPlayerById(s, searchParams.get('playerId')!) : null
 );
@@ -109,10 +113,8 @@ export default function PlayersPage() {
   const [ledger,             setLedger]              = useState<LedgerEntry[]>([]);
   const [isLoadingLedger,    setIsLoadingLedger]     = useState(false);
   const [ledgerError,        setLedgerError]         = useState('');
-  // Real session dates for ledger entries that reference a session, keyed by
-  // sessionId — fetched separately from (and best-effort relative to) the
-  // ledger itself, so a linked entry can show a "view on calendar" link.
-  const [sessionDatesById,   setSessionDatesById]    = useState<Record<string, Date>>({});
+  const [linkedSessionsById, setLinkedSessionsById] = useState<Record<string, Session>>({});
+  const [selectedLedgerSessionId, setSelectedLedgerSessionId] = useState<string | null>(null);
   const [balanceAdjustment,  setBalanceAdjustment]   = useState<BalanceAdjustment>({ ...INIT_BALANCE });
   const [isUpdatingBalance,  setIsUpdatingBalance]   = useState(false);
   const [balanceError,       setBalanceError]        = useState('');
@@ -154,32 +156,20 @@ export default function PlayersPage() {
       entries.sort((a, b) => (b.createdAt?.toDate().getTime() ?? 0) - (a.createdAt?.toDate().getTime() ?? 0));
       setLedger(entries);
 
-      // Best-effort: look up the real date for every session a ledger entry
-      // references, so it can link to that session on the calendar. Failure
-      // here shouldn't block the ledger itself from showing.
+      // Session details are supplementary to the ledger, so a deleted linked
+      // session must not prevent the balance history itself from loading.
       const sessionIds = [...new Set(
         entries.map(e => e.sessionId).filter((id): id is string => !!id)
       )];
       if (sessionIds.length > 0) {
-        try {
-          const sessionSnaps = await Promise.all(
-            sessionIds.map(id => getDoc(doc(refs.sessions, id)))
-          );
-          const dates: Record<string, Date> = {};
-          sessionSnaps.forEach((sessionSnap, i) => {
-            if (!sessionSnap.exists()) return;
-            const rawDate = sessionSnap.data().date as { toDate?: () => Date } | string | undefined;
-            const date = rawDate && typeof rawDate === 'object' && rawDate.toDate
-              ? rawDate.toDate()
-              : rawDate && typeof rawDate === 'string' ? new Date(rawDate) : null;
-            if (date) dates[sessionIds[i]] = date;
-          });
-          setSessionDatesById(dates);
-        } catch {
-          setSessionDatesById({});
-        }
+        const results = await Promise.allSettled(sessionIds.map(fetchSessionById));
+        const sessions: Record<string, Session> = {};
+        results.forEach((result) => {
+          if (result.status === 'fulfilled') sessions[result.value.id] = result.value;
+        });
+        setLinkedSessionsById(sessions);
       } else {
-        setSessionDatesById({});
+        setLinkedSessionsById({});
       }
     } catch {
       setLedgerError('Failed to load balance history.');
@@ -396,6 +386,12 @@ export default function PlayersPage() {
   // record-keeping (walletAdjustment === false), since it never moves their balance.
   const walletLedger = ledger.filter(e =>
     e.reason !== 'payment' && e.reason !== 'comp' && e.walletAdjustment !== false
+  );
+  const selectedLedgerSession = selectedLedgerSessionId
+    ? linkedSessionsById[selectedLedgerSessionId] ?? null
+    : null;
+  const selectedLedgerSessionPlayer = selectedLedgerSession?.players.find(
+    player => player.id === selectedPlayerId
   );
 
   return (
@@ -631,14 +627,16 @@ export default function PlayersPage() {
                             </Button>
                           ))}
                         </div>
-                        <Form.Check
-                          type="checkbox"
-                          id="balance-include-in-payout"
-                          label="Include in owner payout"
-                          checked={balanceAdjustment.includeInPayout}
-                          onChange={e => setBalanceAdjustment(p => ({ ...p, includeInPayout: e.target.checked }))}
-                          className="mb-2"
-                        />
+                        {!disabledTabs.includes('payout') && (
+                          <Form.Check
+                            type="checkbox"
+                            id="balance-include-in-payout"
+                            label="Include in owner payout"
+                            checked={balanceAdjustment.includeInPayout}
+                            onChange={e => setBalanceAdjustment(p => ({ ...p, includeInPayout: e.target.checked }))}
+                            className="mb-2"
+                          />
+                        )}
                         <Button type="submit" variant="primary" size="sm" disabled={isUpdatingBalance}>
                           {isUpdatingBalance
                             ? <Spinner as="span" size="sm" animation="border" />
@@ -709,10 +707,15 @@ export default function PlayersPage() {
                               {entry.note}
                             </td>
                             <td className="text-nowrap">
-                              {entry.sessionId && sessionDatesById[entry.sessionId] && (
-                                <Link to={`/?date=${format(sessionDatesById[entry.sessionId], 'yyyy-MM-dd')}`}>
-                                  {format(sessionDatesById[entry.sessionId], 'MMM d, yyyy')}
-                                </Link>
+                              {entry.sessionId && linkedSessionsById[entry.sessionId] && (
+                                <Button
+                                  variant="link"
+                                  className="p-0 align-baseline"
+                                  style={{ fontSize: 'inherit' }}
+                                  onClick={() => setSelectedLedgerSessionId(entry.sessionId!)}
+                                >
+                                  {format(linkedSessionsById[entry.sessionId].date, 'MMM d, yyyy')}
+                                </Button>
                               )}
                             </td>
                             <td className={`text-end text-nowrap ${entry.delta >= 0 ? 'text-success' : 'text-danger'}`}>
@@ -919,6 +922,81 @@ export default function PlayersPage() {
         onAddPlayer={handleAddPlayer}
         existingPlayers={playersList}
       />
+
+      <Modal
+        show={!!selectedLedgerSession}
+        onHide={() => setSelectedLedgerSessionId(null)}
+        centered
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>
+            {selectedLedgerSession
+              ? `Session — ${format(selectedLedgerSession.date, 'MMMM d, yyyy')}`
+              : 'Session'}
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {selectedLedgerSession && (
+            <ListGroup variant="flush">
+              {selectedLedgerSession.location && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span>Location</span>
+                  <span>{selectedLedgerSession.location}</span>
+                </ListGroup.Item>
+              )}
+              <ListGroup.Item className="d-flex justify-content-between">
+                <span>Courts</span>
+                <span>{selectedLedgerSession.courtCount}</span>
+              </ListGroup.Item>
+              <ListGroup.Item className="d-flex justify-content-between">
+                <span>Players</span>
+                <span>{selectedLedgerSession.players.length}</span>
+              </ListGroup.Item>
+              <ListGroup.Item className="d-flex justify-content-between">
+                <span>Court cost</span>
+                <span>${selectedLedgerSession.totalCourtCost.toFixed(2)}</span>
+              </ListGroup.Item>
+              {selectedLedgerSession.totalBirdieCost > 0 && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span>Birdie cost</span>
+                  <span>${selectedLedgerSession.totalBirdieCost.toFixed(2)}</span>
+                </ListGroup.Item>
+              )}
+              <ListGroup.Item className="d-flex justify-content-between fw-bold">
+                <span>Total session cost</span>
+                <span>${selectedLedgerSession.totalSessionCost.toFixed(2)}</span>
+              </ListGroup.Item>
+              {selectedLedgerSessionPlayer && (
+                <ListGroup.Item className="d-flex justify-content-between fw-bold">
+                  <span>{selectedPlayer ? formatPlayerName(selectedPlayer) : 'Player'} cost</span>
+                  <span>
+                    ${selectedLedgerSessionPlayer.cost.toFixed(2)}{' '}
+                    {selectedLedgerSessionPlayer.comped || selectedLedgerSessionPlayer.paidVia === 'comp'
+                      ? <Badge bg="warning">Comped</Badge>
+                      : selectedLedgerSessionPlayer.paid
+                        ? <Badge bg="success">Paid</Badge>
+                        : <Badge bg="danger">Unpaid</Badge>}
+                  </span>
+                </ListGroup.Item>
+              )}
+            </ListGroup>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setSelectedLedgerSessionId(null)}>
+            Close
+          </Button>
+          {selectedLedgerSession && (
+            <Link
+              to={`/?date=${format(selectedLedgerSession.date, 'yyyy-MM-dd')}`}
+              className="btn btn-primary"
+              onClick={() => setSelectedLedgerSessionId(null)}
+            >
+              Open in calendar
+            </Link>
+          )}
+        </Modal.Footer>
+      </Modal>
 
       <ConfirmDialog
         show={showDeleteConfirm}

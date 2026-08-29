@@ -331,12 +331,14 @@ describe('PlayersPage', () => {
     expect(screen.queryByText(format(previousMonthSession, 'MMM d, yyyy'))).not.toBeInTheDocument();
   });
 
-  it('links a balance history entry to its session\'s real date on the calendar', async () => {
+  it('opens linked balance-history sessions in a read-only popup', async () => {
+    const user = userEvent.setup();
     const sessionDate = new Date(2026, 2, 10, 19, 30);
     const players = [makePlayer({ id: 'p1', balance: 30 })];
 
     seedSession('s1', {
       date: ts(sessionDate),
+      location: 'Community Centre',
       players: [makeSessionPlayer({ id: 'p1', cost: 15 })],
     });
     seedLedgerEntry('l1', {
@@ -352,8 +354,26 @@ describe('PlayersPage', () => {
 
     renderPage({ players, route: '/?playerId=p1' });
 
-    const sessionLink = await screen.findByRole('link', { name: format(sessionDate, 'MMM d, yyyy') });
-    expect(sessionLink).toHaveAttribute('href', `/?date=${format(sessionDate, 'yyyy-MM-dd')}`);
+    await user.click(await screen.findByRole('button', {
+      name: format(sessionDate, 'MMM d, yyyy'),
+    }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByText(`Session — ${format(sessionDate, 'MMMM d, yyyy')}`)).toBeInTheDocument();
+    expect(within(dialog).getByText('Community Centre')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Duration')).not.toBeInTheDocument();
+    expect(within(dialog).getByText('Ada Lovelace cost')).toBeInTheDocument();
+    expect(within(dialog).getByText('$15.00')).toBeInTheDocument();
+    expect(within(dialog).getByText('Unpaid')).toBeInTheDocument();
+    expect(within(dialog).getByRole('link', { name: 'Open in calendar' })).toHaveAttribute(
+      'href',
+      `/?date=${format(sessionDate, 'yyyy-MM-dd')}`
+    );
+
+    await user.click(within(dialog).getByText('Close'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('(Prepaid credit)')).toBeInTheDocument();
   });
 
   it('labels a session auto-settled from a Gmail e-Transfer as "Gmail e-Transfer" instead of plain "Balance"', async () => {
@@ -540,7 +560,16 @@ describe('PlayersPage', () => {
     expect(getClubDocData('balanceLedger', 'auto-id-1')).toMatchObject({ note: 'E-Transfer Payment' });
   });
 
-  it('always shows the include-in-payout checkbox, regardless of whether the Payout tab itself is enabled', async () => {
+  it('shows the include-in-payout checkbox only when the Payout tab is enabled', async () => {
+    const { unmount } = renderPage({
+      players: [makePlayer({ id: 'p1' })],
+      route: '/?playerId=p1',
+    });
+
+    expect(await screen.findByText('No balance history yet.')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Include in owner payout' })).toBeInTheDocument();
+    unmount();
+
     renderPage({
       players: [makePlayer({ id: 'p1' })],
       route: '/?playerId=p1',
@@ -548,7 +577,7 @@ describe('PlayersPage', () => {
     });
 
     expect(await screen.findByText('No balance history yet.')).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: 'Include in owner payout' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Include in owner payout' })).not.toBeInTheDocument();
   });
 
   it('adds a player through the modal and shows them once the players slice refreshes', async () => {
