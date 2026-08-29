@@ -314,6 +314,14 @@ function gmailAfterEpochSeconds(date: string): number {
   return Math.floor(timestamp / 1000);
 }
 
+// Gmail caps a single list call at 500 results even when a larger maxResults is
+// requested, and the API can return more messages than fit on one page — so a
+// club with a long custom search window or a backlog could silently miss older
+// e-Transfers if only the first page were read. This bounds the total number of
+// *pages* fetched (not messages) so a runaway search-window setting can't spin
+// forever, while still covering realistic backlogs.
+const GMAIL_LIST_MAX_PAGES = 20;
+
 export async function searchEtransferEmails(
   senderAddress: string,
   searchAfterDate: string = getDefaultEtransferSearchAfterDate()
@@ -324,11 +332,21 @@ export async function searchEtransferEmails(
     const after = gmailAfterEpochSeconds(searchAfterDate);
     const accessToken = await getGmailAccessToken();
     const q = `from:${senderAddress} subject:"automatically deposited" after:${after}`;
-    const { messages } = await gmailFetch<{ messages?: { id: string; threadId: string }[] }>(
-      accessToken,
-      `${GMAIL_API}/messages?q=${encodeURIComponent(q)}&maxResults=100`
-    );
-    if (!messages?.length) return [];
+
+    const messages: { id: string; threadId: string }[] = [];
+    let pageToken: string | undefined;
+    for (let page = 0; page < GMAIL_LIST_MAX_PAGES; page++) {
+      const listUrl = `${GMAIL_API}/messages?q=${encodeURIComponent(q)}&maxResults=100`
+        + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
+      const { messages: pageMessages, nextPageToken } = await gmailFetch<{
+        messages?: { id: string; threadId: string }[];
+        nextPageToken?: string;
+      }>(accessToken, listUrl);
+      if (pageMessages?.length) messages.push(...pageMessages);
+      if (!nextPageToken) break;
+      pageToken = nextPageToken;
+    }
+    if (!messages.length) return [];
 
     const fullMessages = await Promise.all(
       messages.map((m) => gmailFetch<Parameters<typeof parseEtransferMessage>[0]>(

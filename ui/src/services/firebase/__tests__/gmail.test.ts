@@ -292,6 +292,27 @@ describe('searchEtransferEmails', () => {
     const results = await gmail.searchEtransferEmails('notify@payments.interac.ca');
     expect(results).toEqual([]);
   });
+
+  it('follows nextPageToken so a backlog past the first 100 results is not silently dropped', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+
+    const messageOne = sampleMessage({ id: 'msg-1' });
+    const messageTwo = sampleMessage({ id: 'msg-2' });
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ messages: [{ id: 'msg-1', threadId: 'thread-1' }], nextPageToken: 'page-2' }))
+      .mockResolvedValueOnce(jsonResponse({ messages: [{ id: 'msg-2', threadId: 'thread-2' }] }))
+      .mockResolvedValueOnce(jsonResponse(messageOne))
+      .mockResolvedValueOnce(jsonResponse(messageTwo));
+
+    const results = await gmail.searchEtransferEmails('notify@payments.interac.ca');
+
+    expect(results).toHaveLength(2);
+    // The first list call has no pageToken; the second one carries the token
+    // returned by the first page.
+    expect(fetchMock().mock.calls[0][0] as string).not.toContain('pageToken=');
+    expect(fetchMock().mock.calls[1][0] as string).toContain('pageToken=page-2');
+  });
 });
 
 describe('Gmail authorization reuse', () => {

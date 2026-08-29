@@ -396,6 +396,56 @@ describe('undoEtransferImport', () => {
     helpers.seedClubDoc('etransferImports', 'msg-1', { gmailMessageId: 'msg-1', status: 'applied', matchedPlayerId: 'p1', appliedAmount: 5 });
     await expect(etransfer.undoEtransferImport('msg-1', '')).rejects.toThrow('reason for undoing this is required');
   });
+
+  it('blocks undoing an applied import when the credit has already been spent elsewhere, instead of driving the balance negative', async () => {
+    // The $200 credit was applied, then the player spent $195 of it some OTHER
+    // way (a manual debit unrelated to any auto-settled session), leaving only
+    // $5 — nowhere near enough to reverse the original $200 credit, and there
+    // are no auto-settled sessions to reopen to claw back the difference.
+    seedPlayer('p1', { balance: 5 });
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      status: 'applied',
+      matchedPlayerId: 'p1',
+      appliedAmount: 200,
+      batchId: 'batch-1',
+    });
+
+    await expect(etransfer.undoEtransferImport('msg-1', 'wrong player matched'))
+      .rejects.toThrow('already been spent elsewhere');
+
+    // Nothing changed — not the balance, and not the import's status/metadata.
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 5 });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
+      status: 'applied',
+      appliedAmount: 200,
+      batchId: 'batch-1',
+    });
+  });
+
+  it('clears batchId/appliedAmount/balanceLedgerEntryId on undo, so a later reject does not get grouped back into the old applied batch', async () => {
+    seedPlayer('p1', { balance: 210 }); // already includes the +200 credit
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      status: 'applied',
+      senderName: 'CAI FANG WU',
+      matchedPlayerId: 'p1',
+      appliedAmount: 200,
+      batchId: 'batch-1',
+      balanceLedgerEntryId: 'original-entry',
+    });
+
+    await etransfer.undoEtransferImport('msg-1', 'wrong player matched');
+
+    const reopened = helpers.getClubDocData('etransferImports', 'msg-1');
+    expect(reopened).toMatchObject({ status: 'pending', batchId: null, appliedAmount: null, balanceLedgerEntryId: null });
+
+    // Rejecting the reopened import must not resurrect the old batch grouping —
+    // it should stand alone in history, not show the stale $200 applied amount.
+    await etransfer.rejectEtransferImport('msg-1', 'not actually badminton');
+    const rejected = helpers.getClubDocData('etransferImports', 'msg-1');
+    expect(rejected).toMatchObject({ status: 'rejected', batchId: null, appliedAmount: null });
+  });
 });
 
 describe('e-Transfer approval batches', () => {

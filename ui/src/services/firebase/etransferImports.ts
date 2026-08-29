@@ -14,6 +14,7 @@ import {
 import { db, refs, auth } from './client';
 import { serviceCall, toJSDate } from './utils';
 import { fetchSessions } from './sessions';
+import { formatPlayerName } from './players';
 import {
   searchEtransferEmails,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
@@ -869,6 +870,19 @@ export async function undoEtransferImport(importId: string, reason: string): Pro
           if (balanceAfterUndoCents >= 0) break;
         }
       }
+      // Even after reopening every session this import auto-settled, the credited
+      // money may have already been spent some OTHER way (a manual debit, a
+      // different session paid from balance, etc.) since it was applied. Undoing
+      // must never silently drive the player's prepaid balance negative — block
+      // with a clear explanation instead, so the admin can resolve it first.
+      if (previousStatus === 'applied' && balanceAfterUndoCents < 0) {
+        throw new Error(
+          'This e-Transfer credit has already been spent elsewhere, so undoing it would leave '
+          + `${matchedPlayerBeforeUndo ? formatPlayerName(matchedPlayerBeforeUndo) : 'the player'} `
+          + `at $${fromCents(balanceAfterUndoCents).toFixed(2)} (negative). Reverse whatever used that `
+          + 'balance first, then undo this import.'
+        );
+      }
 
       tx.update(importRef, {
         status: 'pending',
@@ -878,6 +892,14 @@ export async function undoEtransferImport(importId: string, reason: string): Pro
         matchedPlayerId: rematch.playerId,
         matchSource: rematch.source,
         autoSettledSessionIds: [],
+        // Clear apply-only bookkeeping so a reopened import that's later
+        // rejected (rather than re-applied) doesn't keep looking like it's
+        // still part of its old approval batch in history — see the history
+        // grouping in EtransfersPage.tsx, which assumes batchId only appears
+        // on imports that are still genuinely applied.
+        batchId: null,
+        appliedAmount: null,
+        balanceLedgerEntryId: null,
       });
 
       if (playerRef && playerSnap?.exists()) {
