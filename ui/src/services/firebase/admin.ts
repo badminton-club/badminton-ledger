@@ -169,10 +169,17 @@ export async function restoreAllData(backup: BackupData): Promise<ClearSummary> 
 export type MigrationSummary = Record<ClearableCollection, number>;
 
 /**
- * One-time setup for multi-club: creates the club, makes the given user its admin,
- * and copies the existing top-level (pre-club) data into `clubs/{clubId}/...`.
- * The original flat collections are left in place, so this is non-destructive and
- * can be re-run. Returns a per-collection copied-doc count.
+ * One-time setup for multi-club: creates the club, makes the given user its
+ * superAdmin, and copies the existing top-level (pre-club) data into
+ * `clubs/{clubId}/...`. The original flat collections are left in place, so
+ * this is non-destructive and can be re-run.
+ *
+ * NOTE: this is a legacy, manually-invoked utility from before firestore.rules
+ * locked reads/writes to `clubs/**`/`users/**` only — it isn't wired into any
+ * page, and step 3's reads of the old top-level collections will themselves
+ * be denied by the current rules. Kept for reference/one-off manual use (e.g.
+ * temporarily relaxing the rules to run it once), not routine operation.
+ * Returns a per-collection copied-doc count.
  */
 export async function setUpClubFromExistingData(
   clubId: string,
@@ -180,10 +187,13 @@ export async function setUpClubFromExistingData(
   adminUid: string
 ): Promise<MigrationSummary> {
   return serviceCall('setUpClubFromExistingData', async () => {
-    // 1. Club + admin membership. ownerUid lets Firestore rules bootstrap the first
-    //    admin (no one is an admin of a brand-new club yet).
+    // 1. Club + superAdmin membership — matching createClub's bootstrap role,
+    //    so a migrated club has the same governance capabilities (granting
+    //    other admins, deleting the club, etc.) as a freshly created one.
+    //    ownerUid lets Firestore rules bootstrap the first admin (no one is
+    //    an admin of a brand-new club yet).
     await setDoc(clubDoc(clubId), { name: clubName, ownerUid: adminUid, createdAt: serverTimestamp() }, { merge: true });
-    await setDoc(memberDoc(clubId, adminUid), { role: 'admin', addedAt: serverTimestamp() }, { merge: true });
+    await setDoc(memberDoc(clubId, adminUid), { role: 'superAdmin', addedAt: serverTimestamp() }, { merge: true });
 
     // 2. Save the club onto the admin's profile and make it their default
     await setDoc(

@@ -13,6 +13,7 @@ import {
   setCurrentUser,
 } from '../../../test-utils/firebaseTestHelpers';
 import { getCurrentClubId } from '../../../services/firebase/client';
+import { __getDocData } from '../../../test-utils/fakeFirestore';
 
 const currentUser = { uid: 'user-1', displayName: 'Ada Lovelace', email: 'ada@example.com' };
 
@@ -112,6 +113,30 @@ describe('useClubBootstrap', () => {
 
     await waitFor(() => expect(store.getState().club.disabledTabs).toEqual(['payout']));
     expect(getCurrentClubId()).toBe('club-a');
+  });
+
+  it('self-heals a stale club reference — one whose membership no longer exists (removed member, or a deleted club) — instead of showing or auto-selecting it', async () => {
+    // 'dead-club' is saved on the profile, but there's no member doc for the
+    // user there (as if they were removed, or the club itself was deleted),
+    // so fetchMemberRole/fetchClub will both resolve to null/denied for it.
+    seedUserDoc(currentUser.uid, { clubs: ['dead-club', 'club-a'], lastVisitedClub: 'dead-club' });
+    seedClubMetaDoc('club-a', { name: 'Club A' });
+    seedMemberDoc(currentUser.uid, { role: 'admin' }, 'club-a');
+
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    renderBootstrap(store);
+
+    // Falls through past the (now-invalid) lastVisitedClub straight to the
+    // one real club, rather than getting stuck on/selecting the dead one.
+    await waitFor(() => expect(store.getState().club.currentClubId).toBe('club-a'));
+    expect(store.getState().club.clubs.map((c) => c.id)).toEqual(['club-a']);
+
+    // The dead reference is scrubbed from the user's own saved profile too,
+    // so it doesn't linger forever and keep reappearing on future sign-ins.
+    await waitFor(() => expect(__getDocData(`users/${currentUser.uid}`)).toMatchObject({
+      clubs: ['club-a'],
+    }));
   });
 
   it('marks ready with no current club when the user has no clubs at all', async () => {

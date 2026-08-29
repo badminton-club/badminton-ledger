@@ -213,7 +213,7 @@ describe('setUpClubFromExistingData', () => {
       createdAt: expect.any(Timestamp),
     });
     expect(__getDocData('clubs/club-a/members/owner-1')).toMatchObject({
-      role: 'admin',
+      role: 'superAdmin',
       addedAt: expect.any(Timestamp),
     });
     expect(__getDocData('users/owner-1')).toEqual({
