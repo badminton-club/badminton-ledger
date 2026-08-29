@@ -194,6 +194,31 @@ describe('listGoogleDriveBackups', () => {
     expect(decodeURIComponent(fetchMock().mock.calls[1][0] as string)).toContain("'folder-1' in parents and trashed=false");
   });
 
+  it('follows nextPageToken so a folder with more backups than fit on one page returns them all', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async user => ({ user, __credential: { accessToken: 'drive-token' } }));
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ files: [{ id: 'folder-1' }] }))
+      .mockResolvedValueOnce(jsonResponse({
+        files: [{ id: 'b2', name: 'backup-2.json', createdTime: '2026-07-02T12:00:00Z' }],
+        nextPageToken: 'page-2',
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        files: [{ id: 'b1', name: 'backup-1.json', createdTime: '2026-07-01T12:00:00Z' }],
+      }));
+
+    const results = await drive.listGoogleDriveBackups('Club Backups');
+
+    expect(results).toEqual([
+      { id: 'b2', name: 'backup-2.json', createdTime: '2026-07-02T12:00:00Z' },
+      { id: 'b1', name: 'backup-1.json', createdTime: '2026-07-01T12:00:00Z' },
+    ]);
+    // The first file-list call has no pageToken; the second carries the token
+    // returned by the first page.
+    expect(fetchMock().mock.calls[1][0] as string).not.toContain('pageToken=');
+    expect(fetchMock().mock.calls[2][0] as string).toContain('pageToken=page-2');
+  });
+
   it('maps auth/user-mismatch into a friendly account-selection error', async () => {
     const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     helpers.setCurrentUser(userOne);

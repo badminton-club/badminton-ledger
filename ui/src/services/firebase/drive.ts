@@ -181,6 +181,12 @@ export async function backupToGoogleDrive(options?: {
   });
 }
 
+// Drive returns at most 1000 files per page (100 by default without an
+// explicit pageSize) and can paginate further via nextPageToken — without
+// following it, a club with more backups than fit on one page would only
+// ever see/restore from the newest page, with older backups invisible.
+const DRIVE_LIST_MAX_PAGES = 20;
+
 /**
  * Lists the JSON backups in the given Drive folder (the standard
  * "Badminton Ledger Backups" folder by default), newest first. Returns an empty
@@ -193,12 +199,21 @@ export async function listGoogleDriveBackups(folderName?: string): Promise<Drive
     if (!folderId) return [];
 
     const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
-    const { files } = await driveFetch<{ files: DriveBackupFile[] }>(
-      accessToken,
-      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,createdTime,webViewLink)` +
-        `&orderBy=createdTime desc&spaces=drive`
-    );
-    return files ?? [];
+    const files: DriveBackupFile[] = [];
+    let pageToken: string | undefined;
+    for (let page = 0; page < DRIVE_LIST_MAX_PAGES; page++) {
+      const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,createdTime,webViewLink),nextPageToken` +
+        `&orderBy=createdTime desc&spaces=drive&pageSize=100`
+        + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
+      const { files: pageFiles, nextPageToken } = await driveFetch<{ files: DriveBackupFile[]; nextPageToken?: string }>(
+        accessToken,
+        url
+      );
+      if (pageFiles?.length) files.push(...pageFiles);
+      if (!nextPageToken) break;
+      pageToken = nextPageToken;
+    }
+    return files;
   });
 }
 
