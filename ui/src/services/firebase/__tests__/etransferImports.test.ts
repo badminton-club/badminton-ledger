@@ -13,10 +13,6 @@ let fakeFirestore: FakeFirestoreModule;
 
 jest.mock('../gmail', () => ({
   searchEtransferEmails: jest.fn(),
-  labelEtransferEmailProcessed: jest.fn(),
-  labelEtransferEmailRejected: jest.fn(),
-  removeEtransferEmailProcessedLabel: jest.fn(),
-  removeEtransferEmailRejectedLabel: jest.fn(),
   DEFAULT_ETRANSFER_SENDER_ADDRESS: 'notify@payments.interac.ca',
   DEFAULT_ETRANSFER_SEARCH_AFTER_DATE: '2026-08-27',
 }));
@@ -61,10 +57,6 @@ beforeEach(() => {
   helpers.resetFirebaseTestState();
   helpers.setCurrentUser({ uid: 'admin-1', displayName: 'Admin', email: 'admin@example.com' });
   jest.mocked(gmailMock.searchEtransferEmails).mockReset();
-  jest.mocked(gmailMock.labelEtransferEmailProcessed).mockReset().mockResolvedValue(undefined);
-  jest.mocked(gmailMock.labelEtransferEmailRejected).mockReset().mockResolvedValue(undefined);
-  jest.mocked(gmailMock.removeEtransferEmailProcessedLabel).mockReset().mockResolvedValue(undefined);
-  jest.mocked(gmailMock.removeEtransferEmailRejectedLabel).mockReset().mockResolvedValue(undefined);
 });
 
 describe('importEtransferEmails', () => {
@@ -193,13 +185,12 @@ describe('applyEtransferImport', () => {
     });
   }
 
-  it('credits the selected player, logs a balanceLedger entry, marks the import applied, and labels the Gmail message', async () => {
+  it('credits the selected player, logs a balanceLedger entry, and marks the import applied', async () => {
     seedPendingImport();
     seedPlayer('p1', { balance: 10 });
 
-    const result = await etransfer.applyEtransferImport('msg-1', { playerId: 'p1', amount: 200, rememberMapping: true });
+    await etransfer.applyEtransferImport('msg-1', { playerId: 'p1', amount: 200, rememberMapping: true });
 
-    expect(result).toEqual({ labelFailed: false });
     expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 210 });
 
     const importDoc = helpers.getClubDocData('etransferImports', 'msg-1');
@@ -223,8 +214,6 @@ describe('applyEtransferImport', () => {
 
     const mapping = helpers.getClubDocData('etransferSenderMappings', 'caifang1966@gmail.com');
     expect(mapping).toMatchObject({ playerId: 'p1', senderName: 'CAI FANG WU' });
-
-    expect(gmailMock.labelEtransferEmailProcessed).toHaveBeenCalledWith('msg-1');
   });
 
   it('does not save a sender mapping when rememberMapping is false', async () => {
@@ -234,19 +223,6 @@ describe('applyEtransferImport', () => {
     await etransfer.applyEtransferImport('msg-1', { playerId: 'p1', amount: 200, rememberMapping: false });
 
     expect(helpers.getClubDocData('etransferSenderMappings', 'caifang1966@gmail.com')).toBeUndefined();
-  });
-
-  it('reports labelFailed but keeps the applied balance change when Gmail labelling fails', async () => {
-    seedPendingImport();
-    seedPlayer('p1');
-    jest.mocked(gmailMock.labelEtransferEmailProcessed).mockRejectedValue(new Error('token expired'));
-    jest.spyOn(console, 'error').mockImplementation(() => {});
-
-    const result = await etransfer.applyEtransferImport('msg-1', { playerId: 'p1', amount: 200, rememberMapping: false });
-
-    expect(result).toEqual({ labelFailed: true });
-    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 210 });
-    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'applied' });
   });
 
   it('uses the admin-edited amount rather than the originally parsed amount', async () => {
@@ -279,23 +255,20 @@ describe('applyEtransferImport', () => {
 });
 
 describe('rejectEtransferImport', () => {
-  it('marks the import rejected without touching any balance, and labels the Gmail message "Rejected" (distinct from "Processed")', async () => {
+  it('marks the import rejected without touching any balance', async () => {
     helpers.seedClubDoc('etransferImports', 'msg-1', {
       gmailMessageId: 'msg-1', status: 'pending', amount: 200, matchedPlayerId: null,
     });
     seedPlayer('p1', { balance: 10 });
 
-    const result = await etransfer.rejectEtransferImport('msg-1', 'not a club payment');
+    await etransfer.rejectEtransferImport('msg-1', 'not a club payment');
 
-    expect(result).toEqual({ labelFailed: false });
     expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
       status: 'rejected',
       rejectionReason: 'not a club payment',
       reviewedByUid: 'admin-1',
     });
     expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
-    expect(gmailMock.labelEtransferEmailRejected).toHaveBeenCalledWith('msg-1');
-    expect(gmailMock.labelEtransferEmailProcessed).not.toHaveBeenCalled();
   });
 
   it('requires a reason', async () => {
@@ -305,7 +278,7 @@ describe('rejectEtransferImport', () => {
 });
 
 describe('undoEtransferImport', () => {
-  it('reverses an applied balance, reopens the import, and removes the Processed label', async () => {
+  it('reverses an applied balance and reopens the import for review', async () => {
     helpers.seedClubDoc('etransferImports', 'msg-1', {
       gmailMessageId: 'msg-1',
       status: 'applied',
@@ -315,9 +288,7 @@ describe('undoEtransferImport', () => {
     });
     seedPlayer('p1', { balance: 210 }); // already includes the +200 credit
 
-    await expect(etransfer.undoEtransferImport('msg-1', 'wrong player matched')).resolves.toEqual({
-      labelFailed: false,
-    });
+    await etransfer.undoEtransferImport('msg-1', 'wrong player matched');
 
     expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
 
@@ -343,10 +314,9 @@ describe('undoEtransferImport', () => {
       reason: 'etransfer-import-undo',
       walletAdjustment: true,
     });
-    expect(gmailMock.removeEtransferEmailProcessedLabel).toHaveBeenCalledWith('msg-1');
   });
 
-  it('reopens a rejected import without changing balances and removes the Rejected label', async () => {
+  it('reopens a rejected import without changing balances', async () => {
     helpers.seedClubDoc('etransferImports', 'msg-1', {
       gmailMessageId: 'msg-1',
       status: 'rejected',
@@ -375,8 +345,6 @@ describe('undoEtransferImport', () => {
     });
     expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
     expect(helpers.getClubDocData('players', 'p2')).toMatchObject({ balance: 20 });
-    expect(gmailMock.removeEtransferEmailRejectedLabel).toHaveBeenCalledWith('msg-1');
-    expect(gmailMock.removeEtransferEmailProcessedLabel).not.toHaveBeenCalled();
   });
 
   it('only allows undoing a reviewed import', async () => {
@@ -432,7 +400,6 @@ describe('e-Transfer approval batches', () => {
     await expect(etransfer.applyEtransferApprovalBatch(preview)).resolves.toEqual({
       approved: 1,
       settled: 1,
-      labelFailures: 0,
     });
 
     expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 15, owed: 25 });
@@ -459,6 +426,68 @@ describe('e-Transfer approval batches', () => {
         paidVia: null,
         settledByEtransferImportId: null,
       }),
+    ]);
+  });
+
+  it('settles an exact one-cent oldest session when the credited amount is also one cent', async () => {
+    seedPlayer('p1', { balance: 0, owed: 20.01 });
+    seedOwedSession('oldest', '2026-08-01', 0.01);
+    seedOwedSession('newest', '2026-08-08', 20);
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      status: 'pending',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'sender@example.com',
+      amount: 0.01,
+    });
+
+    const preview = await etransfer.previewEtransferApprovalBatch([{
+      importId: 'msg-1',
+      playerId: 'p1',
+      amount: 0.01,
+      rememberMapping: false,
+    }]);
+
+    expect(preview.settlements.map((item) => item.sessionId)).toEqual(['oldest']);
+    expect(preview.endingBalances).toEqual({ p1: 0 });
+
+    await etransfer.applyEtransferApprovalBatch(preview);
+
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 20 });
+    expect(helpers.getClubDocData('sessions', 'oldest')?.players).toEqual([
+      expect.objectContaining({ paid: true, paidVia: 'balance' }),
+    ]);
+  });
+
+  it('settles an owed session even when a starting balance plus credit is only exactly reachable through floating-point-prone cents (e.g. $0.01 + $0.06 covering a $0.07 debt)', async () => {
+    // 0.01 + 0.06 === 0.06999999999999999 in IEEE754 doubles — a naive dollar-float
+    // comparison (`cost > available`) would incorrectly treat this as unaffordable
+    // and skip a session that is, in whole cents, exactly covered.
+    seedPlayer('p1', { balance: 0.01, owed: 0.07 });
+    seedOwedSession('oldest', '2026-08-01', 0.07);
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      status: 'pending',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'sender@example.com',
+      amount: 0.06,
+    });
+
+    const preview = await etransfer.previewEtransferApprovalBatch([{
+      importId: 'msg-1',
+      playerId: 'p1',
+      amount: 0.06,
+      rememberMapping: false,
+    }]);
+
+    expect(preview.settlements.map((item) => item.sessionId)).toEqual(['oldest']);
+    expect(preview.endingBalances).toEqual({ p1: 0 });
+
+    await etransfer.applyEtransferApprovalBatch(preview);
+
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
+    expect(helpers.getClubDocData('sessions', 'oldest')?.players).toEqual([
+      expect.objectContaining({ paid: true, paidVia: 'balance' }),
     ]);
   });
 

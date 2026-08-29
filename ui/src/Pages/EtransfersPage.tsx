@@ -90,7 +90,6 @@ export default function EtransfersPage() {
   const [undoReason, setUndoReason] = useState('');
   const [undoing, setUndoing] = useState(false);
   const [undoError, setUndoError] = useState('');
-  const [undoWarning, setUndoWarning] = useState('');
 
   const [mappings, setMappings] = useState<EtransferSenderMapping[]>([]);
   const [mappingSavingId, setMappingSavingId] = useState<string | null>(null);
@@ -230,9 +229,6 @@ export default function EtransfersPage() {
         `Approved ${result.approved} transfer${result.approved === 1 ? '' : 's'} and settled `
         + `${result.settled} owed session${result.settled === 1 ? '' : 's'} from oldest to newest.`
       );
-      if (result.labelFailures > 0) {
-        setBatchMessage((message) => `${message} ${result.labelFailures} Gmail label update(s) failed.`);
-      }
       await load();
     } catch (err) {
       setBatchError(err instanceof Error ? err.message : 'Failed to approve the batch.');
@@ -266,12 +262,8 @@ export default function EtransfersPage() {
     if (!undoReason.trim()) { setUndoError('Enter a reason for undoing this.'); return; }
     setUndoing(true);
     setUndoError('');
-    setUndoWarning('');
     try {
-      const { labelFailed } = await undoEtransferImport(undoTarget.id, undoReason);
-      if (labelFailed) {
-        setUndoWarning('The import was reopened, but its Gmail label could not be removed. Remove the label manually in Gmail.');
-      }
+      await undoEtransferImport(undoTarget.id, undoReason);
       setUndoTarget(null);
       setUndoReason('');
       await load();
@@ -336,7 +328,7 @@ export default function EtransfersPage() {
       <p className="text-muted">
         Search Gmail for Interac e-Transfer autodeposit notifications, review the suggested player
         match and amount, then apply to credit their balance. Nothing is written to a player's
-        balance — or labelled in Gmail — until you approve or reject each one below.
+        balance until you approve or reject each one below.
       </p>
 
       <Card className="mb-3">
@@ -377,7 +369,6 @@ export default function EtransfersPage() {
       </Card>
 
       {loadError && <Alert variant="danger">{loadError}</Alert>}
-      {undoWarning && <Alert variant="warning">{undoWarning}</Alert>}
       {batchMessage && <Alert variant="success">{batchMessage}</Alert>}
       {batchError && !batchPreview && <Alert variant="danger">{batchError}</Alert>}
 
@@ -451,7 +442,12 @@ export default function EtransfersPage() {
                           <Badge bg="info" className="ms-2">remembered match</Badge>
                         )}
                       </td>
-                      <td className="text-muted">{imp.memo || '—'}</td>
+                      <td className="text-muted">
+                        {imp.memo || '—'}
+                        {imp.referenceNumber && (
+                          <div className="small">Ref: {imp.referenceNumber}</div>
+                        )}
+                      </td>
                       <td>
                         <Form.Select
                           size="sm"
@@ -544,7 +540,12 @@ export default function EtransfersPage() {
                   return (
                     <tr key={imp.id}>
                       <td>{emailDate ? format(emailDate, 'MMM d, yyyy') : '—'}</td>
-                      <td>{imp.senderName}</td>
+                      <td>
+                        {imp.senderName}
+                        {imp.referenceNumber && (
+                          <div className="text-muted small">Ref: {imp.referenceNumber}</div>
+                        )}
+                      </td>
                       <td>{playerName(imp.matchedPlayerId)}</td>
                       <td>{money(imp.appliedAmount ?? imp.amount)}</td>
                       <td>{statusBadge(imp.status)}</td>
@@ -706,7 +707,7 @@ export default function EtransfersPage() {
             {rejectTarget && (
               <p className="text-muted">
                 This email ({money(rejectTarget.amount)} from {rejectTarget.senderName}) will be marked
-                rejected and labelled "Rejected" in Gmail so it isn't found again. No balance is changed.
+                rejected. No balance is changed.
               </p>
             )}
             <Form.Group className="mb-3" controlId="etransfer-reject-reason">
@@ -743,9 +744,8 @@ export default function EtransfersPage() {
                 {undoTarget.status === 'applied'
                   ? `${money(undoTarget.appliedAmount ?? undoTarget.amount)} will be reversed from ${playerName(undoTarget.matchedPlayerId)}'s balance. `
                   : 'No player balance will be changed. '}
-                The import will return to pending review and its Gmail label will be removed. The
-                player suggestion will be matched again. The original decision and ledger entries
-                are kept for the audit record.
+                The import will return to pending review. The player suggestion will be matched
+                again. The original decision and ledger entries are kept for the audit record.
               </p>
             )}
             <Form.Group className="mb-3" controlId="etransfer-undo-reason">

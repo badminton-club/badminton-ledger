@@ -9,14 +9,12 @@ import { serviceCall } from './utils';
 // Google Drive backup feature (see drive.ts) — no separate Google Cloud
 // project/credentials need to be configured for this feature.
 //
-// `gmail.modify` (rather than the narrower `gmail.readonly`) is required because,
-// beyond searching/reading messages, this feature also applies a "Processed" or
-// "Rejected" label so already-reviewed emails aren't found again on the next
-// search. It does not grant permanent deletion or sending mail.
-const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
+// Read-only is all this feature needs: it only searches/reads messages, never
+// writes to Gmail. Already-reviewed emails are excluded from future searches by
+// checking Firestore (the Gmail message id is the doc id — see
+// etransferImports.ts), not by mutating labels, so no write scope is required.
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const TOKEN_TTL_MS = 55 * 60 * 1000;
-const PROCESSED_LABEL_NAME = 'Processed';
-const REJECTED_LABEL_NAME = 'Rejected';
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
 // Scoped to the signed-in uid it was issued for — see the identical comment in
@@ -43,9 +41,8 @@ export interface ParsedEtransferEmail {
 
 /**
  * Re-authenticates the current user with the Gmail scope added and returns a
- * fresh OAuth access token, cached briefly so a search followed by several
- * "apply" actions (each of which labels a message) doesn't re-prompt for
- * every single request.
+ * fresh OAuth access token, cached for the session so repeated searches don't
+ * re-prompt for every single request.
  */
 async function getGmailAccessToken(): Promise<string> {
   const user = auth.currentUser;
@@ -105,46 +102,6 @@ async function gmailFetch<T>(accessToken: string, url: string, init: RequestInit
     throw new Error(`Gmail request failed (${res.status}): ${body || res.statusText}`);
   }
   return res.json();
-}
-
-/** Finds a label by name, creating it if it doesn't exist yet. Returns its id. */
-async function getOrCreateLabelId(accessToken: string, labelName: string): Promise<string> {
-  const { labels } = await gmailFetch<{ labels?: { id: string; name: string }[] }>(
-    accessToken,
-    `${GMAIL_API}/labels`
-  );
-  const existing = labels?.find((l) => l.name === labelName);
-  if (existing) return existing.id;
-
-  const created = await gmailFetch<{ id: string }>(accessToken, `${GMAIL_API}/labels`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: labelName,
-      labelListVisibility: 'labelShow',
-      messageListVisibility: 'show',
-    }),
-  });
-  return created.id;
-}
-
-async function removeLabelByName(
-  accessToken: string,
-  gmailMessageId: string,
-  labelName: string
-): Promise<void> {
-  const { labels } = await gmailFetch<{ labels?: { id: string; name: string }[] }>(
-    accessToken,
-    `${GMAIL_API}/labels`
-  );
-  const labelId = labels?.find((label) => label.name === labelName)?.id;
-  if (!labelId) return;
-
-  await gmailFetch(accessToken, `${GMAIL_API}/messages/${gmailMessageId}/modify`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ removeLabelIds: [labelId] }),
-  });
 }
 
 /** Base64url-decodes a Gmail message body part into a UTF-8 string. */
@@ -276,10 +233,11 @@ export function parseEtransferMessage(message: {
 
 /**
  * Searches Gmail for Interac e-Transfer autodeposit notifications from the given
- * sender address that haven't already been reviewed (labelled "Processed" when
- * applied, or "Rejected" when rejected), and returns them parsed. Nothing is
- * written to Gmail by this call — labelling happens only once an admin has
- * reviewed and applied or rejected an import.
+ * sender address on or after `searchAfterDate`. This is purely a read — nothing
+ * is ever written back to Gmail. Deduplication of already-reviewed emails is
+ * handled entirely in Firestore (the Gmail message id is the doc id — see
+ * `importEtransferEmails` in etransferImports.ts), so a message already
+ * recorded there is simply skipped rather than excluded from Gmail's results.
  */
 function gmailAfterEpochSeconds(date: string): number {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
@@ -306,7 +264,7 @@ export async function searchEtransferEmails(
     // interpretation of calendar dates and makes the lower bound unambiguous.
     const after = gmailAfterEpochSeconds(searchAfterDate);
     const accessToken = await getGmailAccessToken();
-    const q = `from:${senderAddress} subject:"automatically deposited" after:${after} -label:${PROCESSED_LABEL_NAME} -label:${REJECTED_LABEL_NAME}`;
+    const q = `from:${senderAddress} subject:"automatically deposited" after:${after}`;
     const { messages } = await gmailFetch<{ messages?: { id: string; threadId: string }[] }>(
       accessToken,
       `${GMAIL_API}/messages?q=${encodeURIComponent(q)}&maxResults=100`
@@ -323,51 +281,5 @@ export async function searchEtransferEmails(
     return fullMessages
       .map(parseEtransferMessage)
       .filter((e): e is ParsedEtransferEmail => e !== null);
-  });
-}
-
-/** Applies the "Processed" label to a Gmail message so it's excluded from future searches. */
-export async function labelEtransferEmailProcessed(gmailMessageId: string): Promise<void> {
-  return serviceCall('labelEtransferEmailProcessed', async () => {
-    const accessToken = await getGmailAccessToken();
-    const labelId = await getOrCreateLabelId(accessToken, PROCESSED_LABEL_NAME);
-    await gmailFetch(accessToken, `${GMAIL_API}/messages/${gmailMessageId}/modify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ addLabelIds: [labelId] }),
-    });
-  });
-}
-
-/**
- * Applies the "Rejected" label to a Gmail message — distinct from "Processed"
- * so it's clear in Gmail itself that this one was reviewed and declined rather
- * than credited, while still being excluded from future searches.
- */
-export async function labelEtransferEmailRejected(gmailMessageId: string): Promise<void> {
-  return serviceCall('labelEtransferEmailRejected', async () => {
-    const accessToken = await getGmailAccessToken();
-    const labelId = await getOrCreateLabelId(accessToken, REJECTED_LABEL_NAME);
-    await gmailFetch(accessToken, `${GMAIL_API}/messages/${gmailMessageId}/modify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ addLabelIds: [labelId] }),
-    });
-  });
-}
-
-/** Removes the app's "Processed" label when an applied import is reopened. */
-export async function removeEtransferEmailProcessedLabel(gmailMessageId: string): Promise<void> {
-  return serviceCall('removeEtransferEmailProcessedLabel', async () => {
-    const accessToken = await getGmailAccessToken();
-    await removeLabelByName(accessToken, gmailMessageId, PROCESSED_LABEL_NAME);
-  });
-}
-
-/** Removes the app's "Rejected" label when a rejected import is reopened. */
-export async function removeEtransferEmailRejectedLabel(gmailMessageId: string): Promise<void> {
-  return serviceCall('removeEtransferEmailRejectedLabel', async () => {
-    const accessToken = await getGmailAccessToken();
-    await removeLabelByName(accessToken, gmailMessageId, REJECTED_LABEL_NAME);
   });
 }

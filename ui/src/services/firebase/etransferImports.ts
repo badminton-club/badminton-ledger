@@ -17,10 +17,6 @@ import { serviceCall, toJSDate } from './utils';
 import { fetchSessions } from './sessions';
 import {
   searchEtransferEmails,
-  labelEtransferEmailProcessed,
-  labelEtransferEmailRejected,
-  removeEtransferEmailProcessedLabel,
-  removeEtransferEmailRejectedLabel,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
   DEFAULT_ETRANSFER_SEARCH_AFTER_DATE,
   type ParsedEtransferEmail,
@@ -59,7 +55,21 @@ export interface EtransferBatchPreview {
 export interface EtransferBatchResult {
   approved: number;
   settled: number;
-  labelFailures: number;
+}
+
+/**
+ * Converts a dollar amount to whole cents, rounding away any floating-point
+ * noise (e.g. 0.07 + 0.01 in IEEE754 doubles). All settlement comparisons and
+ * running-balance arithmetic use cents internally so amounts like $0.01 are
+ * compared exactly, never through direct dollar-float comparison.
+ */
+function toCents(amount: number): number {
+  return Math.round(amount * 100);
+}
+
+/** Converts whole cents back to a dollar amount for display/storage. */
+function fromCents(cents: number): number {
+  return cents / 100;
 }
 
 /** Normalizes a sender identity to the doc id used for its remembered mapping. */
@@ -339,13 +349,15 @@ export async function previewEtransferApprovalBatch(
     const selectedPlayerIds = [...new Set(inputs.map((input) => input.playerId))];
     const startingBalances: Record<string, number> = {};
     const startingOwed: Record<string, number> = {};
-    const endingBalances: Record<string, number> = {};
+    const endingBalanceCents: Record<string, number> = {};
     for (const playerId of selectedPlayerIds) {
       const player = playerById.get(playerId)!;
       startingBalances[playerId] = player.balance ?? 0;
       startingOwed[playerId] = player.owed ?? 0;
-      endingBalances[playerId] = startingBalances[playerId]
-        + inputs.filter((input) => input.playerId === playerId).reduce((sum, input) => sum + input.amount, 0);
+      const creditCents = inputs
+        .filter((input) => input.playerId === playerId)
+        .reduce((sum, input) => sum + toCents(input.amount), 0);
+      endingBalanceCents[playerId] = toCents(startingBalances[playerId]) + creditCents;
     }
 
     const settlements: EtransferBatchSettlement[] = [];
@@ -358,9 +370,10 @@ export async function previewEtransferApprovalBatch(
         const paidVia = participant.paidVia
           ?? (participant.comped ? 'comp' : participant.paid ? 'etransfer' : null);
         if (paidVia !== null) continue;
-        if (participant.cost > endingBalances[playerId]) break;
+        const costCents = toCents(participant.cost);
+        if (costCents > endingBalanceCents[playerId]) break;
 
-        endingBalances[playerId] -= participant.cost;
+        endingBalanceCents[playerId] -= costCents;
         settlements.push({
           importId: fundingImportId,
           sessionId: session.id,
@@ -369,6 +382,11 @@ export async function previewEtransferApprovalBatch(
           cost: participant.cost,
         });
       }
+    }
+
+    const endingBalances: Record<string, number> = {};
+    for (const playerId of selectedPlayerIds) {
+      endingBalances[playerId] = fromCents(endingBalanceCents[playerId]);
     }
 
     return {
@@ -415,7 +433,7 @@ export async function applyEtransferApprovalBatch(
     const estimatedWrites = fresh.inputs.length * 3 + fresh.settlements.length * 2 + playerIds.length;
     if (estimatedWrites > 450) throw new Error('This batch is too large. Select fewer imports and review again.');
 
-    const gmailMessageIds = await runTransaction(db, async (tx) => {
+    await runTransaction(db, async (tx) => {
       const [importSnaps, playerSnaps, sessionSnaps] = await Promise.all([
         Promise.all(importRefs.map((ref) => tx.get(ref))),
         Promise.all(playerRefs.map((ref) => tx.get(ref))),
@@ -445,10 +463,10 @@ export async function applyEtransferApprovalBatch(
       );
       const transactionSettlements: { sessionId: string; playerId: string; cost: number }[] = [];
       for (const playerId of playerIds) {
-        let available = ((playerSnapById.get(playerId)!.data().balance as number) ?? 0)
+        let availableCents = toCents(((playerSnapById.get(playerId)!.data().balance as number) ?? 0))
           + fresh.inputs
             .filter((input) => input.playerId === playerId)
-            .reduce((sum, input) => sum + input.amount, 0);
+            .reduce((sum, input) => sum + toCents(input.amount), 0);
         for (const sessionSnap of orderedSessionSnaps) {
           const participant = (sessionSnap.data().players as SessionPlayer[])
             .find((entry) => entry.id === playerId);
@@ -456,8 +474,9 @@ export async function applyEtransferApprovalBatch(
           const paidVia = participant.paidVia
             ?? (participant.comped ? 'comp' : participant.paid ? 'etransfer' : null);
           if (paidVia !== null) continue;
-          if (participant.cost > available) break;
-          available -= participant.cost;
+          const costCents = toCents(participant.cost);
+          if (costCents > availableCents) break;
+          availableCents -= costCents;
           transactionSettlements.push({
             sessionId: sessionSnap.id,
             playerId,
@@ -474,14 +493,14 @@ export async function applyEtransferApprovalBatch(
         throw new Error('An owed session changed. Review the batch again.');
       }
 
-      const runningBalances = { ...fresh.startingBalances };
+      const runningBalanceCents: Record<string, number> = {};
+      for (const playerId of playerIds) runningBalanceCents[playerId] = toCents(fresh.startingBalances[playerId]);
       const reviewedByUid = auth.currentUser?.uid ?? null;
-      const messageIds: string[] = [];
       fresh.inputs.forEach((input, index) => {
         const importData = importSnaps[index].data();
         const ledgerRef = doc(refs.balanceLedger);
-        const before = runningBalances[input.playerId];
-        runningBalances[input.playerId] += input.amount;
+        const beforeCents = runningBalanceCents[input.playerId];
+        runningBalanceCents[input.playerId] += toCents(input.amount);
         const settledSessionIds = fresh.settlements
           .filter((settlement) => settlement.importId === input.importId)
           .map((settlement) => settlement.sessionId);
@@ -490,8 +509,8 @@ export async function applyEtransferApprovalBatch(
           playerId: input.playerId,
           sessionId: null,
           delta: input.amount,
-          balanceBefore: before,
-          balanceAfter: runningBalances[input.playerId],
+          balanceBefore: fromCents(beforeCents),
+          balanceAfter: fromCents(runningBalanceCents[input.playerId]),
           reason: 'etransfer-import',
           note: `Gmail e-Transfer from ${(importData.senderName as string) ?? 'unknown sender'}`,
           walletAdjustment: true,
@@ -516,7 +535,6 @@ export async function applyEtransferApprovalBatch(
             updatedAt: serverTimestamp(),
           });
         }
-        messageIds.push((importData.gmailMessageId as string) ?? input.importId);
       });
 
       const updatedSessionPlayers = new Map<string, SessionPlayer[]>();
@@ -539,14 +557,14 @@ export async function applyEtransferApprovalBatch(
             : entry)
         );
 
-        const before = runningBalances[settlement.playerId];
-        runningBalances[settlement.playerId] -= settlement.cost;
+        const beforeCents = runningBalanceCents[settlement.playerId];
+        runningBalanceCents[settlement.playerId] -= toCents(settlement.cost);
         tx.set(doc(refs.balanceLedger), {
           playerId: settlement.playerId,
           sessionId: settlement.sessionId,
           delta: -settlement.cost,
-          balanceBefore: before,
-          balanceAfter: runningBalances[settlement.playerId],
+          balanceBefore: fromCents(beforeCents),
+          balanceAfter: fromCents(runningBalanceCents[settlement.playerId]),
           reason: 'settlement',
           note: `Settled from prepaid balance — session on ${settlement.sessionDate.toLocaleDateString()}`,
           walletAdjustment: true,
@@ -557,31 +575,19 @@ export async function applyEtransferApprovalBatch(
         tx.update(doc(refs.sessions, sessionId), { players });
       });
       for (const playerId of playerIds) {
-        const settledCost = fresh.settlements
+        const settledCostCents = fresh.settlements
           .filter((settlement) => settlement.playerId === playerId)
-          .reduce((sum, settlement) => sum + settlement.cost, 0);
+          .reduce((sum, settlement) => sum + toCents(settlement.cost), 0);
         tx.update(doc(refs.players, playerId), {
-          balance: runningBalances[playerId],
-          ...(settledCost > 0 ? { owed: increment(-settledCost) } : {}),
+          balance: fromCents(runningBalanceCents[playerId]),
+          ...(settledCostCents > 0 ? { owed: increment(-fromCents(settledCostCents)) } : {}),
         });
       }
-      return messageIds;
     });
-
-    let labelFailures = 0;
-    for (const gmailMessageId of gmailMessageIds) {
-      try {
-        await labelEtransferEmailProcessed(gmailMessageId);
-      } catch (err) {
-        console.error('[applyEtransferApprovalBatch] labeling failed', err);
-        labelFailures += 1;
-      }
-    }
 
     return {
       approved: fresh.inputs.length,
       settled: fresh.settlements.length,
-      labelFailures,
     };
   });
 }
@@ -591,15 +597,14 @@ export async function applyEtransferApprovalBatch(
  * `balanceLedger` entry (reason `'etransfer-import'`, undoable later), and marks
  * the import `applied`. `playerId`/`amount` are whatever the admin confirmed in
  * the review UI — not necessarily the original match/parsed amount, since both
- * are editable before applying. Best-effort labels the Gmail message
- * "Processed" afterwards; if that call fails the balance change still stands
- * (the label is just to avoid re-finding it on the next search) and the caller
- * gets `labelFailed: true` so it can surface a soft warning.
+ * are editable before applying. Note: unlike `applyEtransferApprovalBatch`,
+ * this single-import path does not auto-settle owed sessions from the new
+ * balance; it exists for direct/API use and isn't wired into the review UI.
  */
 export async function applyEtransferImport(
   importId: string,
   options: { playerId: string; amount: number; rememberMapping: boolean }
-): Promise<{ labelFailed: boolean }> {
+): Promise<void> {
   return serviceCall('applyEtransferImport', async () => {
     if (!Number.isFinite(options.amount) || options.amount <= 0) {
       throw new Error('Enter a valid positive amount.');
@@ -608,7 +613,7 @@ export async function applyEtransferImport(
     const importRef = doc(refs.etransferImports, importId);
     const uid = auth.currentUser?.uid ?? null;
 
-    const { gmailMessageId, senderEmail, senderName } = await runTransaction(db, async (tx) => {
+    const { senderEmail, senderName } = await runTransaction(db, async (tx) => {
       const importSnap = await tx.get(importRef);
       if (!importSnap.exists()) throw new Error('Import record not found.');
       const importData = importSnap.data();
@@ -644,7 +649,6 @@ export async function applyEtransferImport(
       });
 
       return {
-        gmailMessageId: (importData.gmailMessageId as string) ?? importId,
         senderEmail: (importData.senderEmail as string | null) ?? null,
         senderName: (importData.senderName as string) ?? '',
       };
@@ -653,26 +657,16 @@ export async function applyEtransferImport(
     if (options.rememberMapping) {
       await saveEtransferSenderMapping(senderEmail, senderName, options.playerId);
     }
-
-    let labelFailed = false;
-    try {
-      await labelEtransferEmailProcessed(gmailMessageId);
-    } catch (err) {
-      console.error('[applyEtransferImport] labeling failed', err);
-      labelFailed = true;
-    }
-    return { labelFailed };
   });
 }
 
 /**
  * Rejects a reviewed import (e.g. it's not actually a club payment, or the
- * amount/sender couldn't be resolved) without touching any balance. Labels the
- * Gmail message "Rejected" (distinct from "Processed", which is reserved for
- * applied imports) so it's clear in Gmail itself why it was skipped, and so it
- * isn't found again on the next search.
+ * amount/sender couldn't be resolved) without touching any balance. Already
+ * rejected (or otherwise reviewed) imports are excluded from future searches
+ * purely because their Gmail message id is already recorded in Firestore.
  */
-export async function rejectEtransferImport(importId: string, reason: string): Promise<{ labelFailed: boolean }> {
+export async function rejectEtransferImport(importId: string, reason: string): Promise<void> {
   return serviceCall('rejectEtransferImport', async () => {
     if (!reason.trim()) throw new Error('A reason is required.');
 
@@ -688,15 +682,6 @@ export async function rejectEtransferImport(importId: string, reason: string): P
       reviewedByUid: auth.currentUser?.uid ?? null,
       reviewedAt: serverTimestamp(),
     });
-
-    let labelFailed = false;
-    try {
-      await labelEtransferEmailRejected((importData.gmailMessageId as string) ?? importId);
-    } catch (err) {
-      console.error('[rejectEtransferImport] labeling failed', err);
-      labelFailed = true;
-    }
-    return { labelFailed };
   });
 }
 
@@ -704,10 +689,9 @@ export async function rejectEtransferImport(importId: string, reason: string): P
  * Reopens an applied, rejected, or legacy-undone import for review. Applied
  * imports first reverse the balance with a new offsetting ledger entry; rejected
  * and already-undone imports do not touch balances. Audit fields and original
- * ledger entries are retained. The corresponding Gmail label is removed so the
- * message no longer appears Processed/Rejected outside the app.
+ * ledger entries are retained.
  */
-export async function undoEtransferImport(importId: string, reason: string): Promise<{ labelFailed: boolean }> {
+export async function undoEtransferImport(importId: string, reason: string): Promise<void> {
   return serviceCall('undoEtransferImport', async () => {
     if (!reason.trim()) throw new Error('A reason for undoing this is required.');
 
@@ -737,7 +721,7 @@ export async function undoEtransferImport(importId: string, reason: string): Pro
       )))
       .map((session) => session.id);
 
-    const { previousStatus, gmailMessageId } = await runTransaction(db, async (tx) => {
+    await runTransaction(db, async (tx) => {
       const importSnap = await tx.get(importRef);
       if (!importSnap.exists()) throw new Error('Import record not found.');
       const importData = importSnap.data();
@@ -811,16 +795,16 @@ export async function undoEtransferImport(importId: string, reason: string): Pro
       }
       const playerBalance = playerSnap?.exists() ? ((playerSnap.data().balance as number) ?? 0) : 0;
       const sessionsToReopen: typeof reversibleSessions = [];
-      let settlementRefund = 0;
-      let balanceAfterUndo = playerBalance + delta;
-      if (balanceAfterUndo < 0) {
+      let settlementRefundCents = 0;
+      let balanceAfterUndoCents = toCents(playerBalance) + toCents(delta);
+      if (balanceAfterUndoCents < 0) {
         for (const sessionId of [...sessionIdsToInspect].reverse()) {
           const session = reversibleSessions.find((candidate) => candidate.ref.id === sessionId);
           if (!session) continue;
           sessionsToReopen.push(session);
-          settlementRefund += session.cost;
-          balanceAfterUndo += session.cost;
-          if (balanceAfterUndo >= 0) break;
+          settlementRefundCents += toCents(session.cost);
+          balanceAfterUndoCents += toCents(session.cost);
+          if (balanceAfterUndoCents >= 0) break;
         }
       }
 
@@ -836,56 +820,39 @@ export async function undoEtransferImport(importId: string, reason: string): Pro
 
       if (playerRef && playerSnap?.exists()) {
         const before = (playerSnap.data().balance as number) ?? 0;
-        let runningBalance = before;
+        let runningBalanceCents = toCents(before);
         for (const session of sessionsToReopen) {
           tx.update(session.ref, { players: session.players });
           tx.set(doc(refs.balanceLedger), {
             playerId,
             sessionId: session.ref.id,
             delta: session.cost,
-            balanceBefore: runningBalance,
-            balanceAfter: runningBalance + session.cost,
+            balanceBefore: fromCents(runningBalanceCents),
+            balanceAfter: fromCents(runningBalanceCents + toCents(session.cost)),
             reason: 'settlement-undo',
             note: `Refunded automatic settlement — undoing e-Transfer import: ${reason.trim()}`,
             walletAdjustment: true,
             createdAt: serverTimestamp(),
           });
-          runningBalance += session.cost;
+          runningBalanceCents += toCents(session.cost);
         }
+        const netDelta = fromCents(toCents(delta) + settlementRefundCents);
         tx.update(playerRef, {
-          balance: increment(delta + settlementRefund),
-          ...(settlementRefund > 0 ? { owed: increment(settlementRefund) } : {}),
+          balance: increment(netDelta),
+          ...(settlementRefundCents > 0 ? { owed: increment(fromCents(settlementRefundCents)) } : {}),
         });
         tx.set(doc(refs.balanceLedger), {
           playerId,
           sessionId: null,
           delta,
-          balanceBefore: runningBalance,
-          balanceAfter: runningBalance + delta,
+          balanceBefore: fromCents(runningBalanceCents),
+          balanceAfter: fromCents(runningBalanceCents + toCents(delta)),
           reason: 'etransfer-import-undo',
           note: `Reversed — undoing e-Transfer import: ${reason.trim()}`,
           walletAdjustment: true,
           createdAt: serverTimestamp(),
         });
       }
-
-      return {
-        previousStatus,
-        gmailMessageId: (importData.gmailMessageId as string) ?? importId,
-      };
     });
-
-    let labelFailed = false;
-    try {
-      if (previousStatus === 'rejected') {
-        await removeEtransferEmailRejectedLabel(gmailMessageId);
-      } else {
-        await removeEtransferEmailProcessedLabel(gmailMessageId);
-      }
-    } catch (err) {
-      console.error('[undoEtransferImport] removing Gmail label failed', err);
-      labelFailed = true;
-    }
-    return { labelFailed };
   });
 }

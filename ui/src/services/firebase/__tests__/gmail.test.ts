@@ -183,10 +183,10 @@ describe('parseEtransferMessage', () => {
 });
 
 describe('searchEtransferEmails', () => {
-  it('re-authenticates with the Gmail scope, searches excluding Processed, and parses full messages', async () => {
+  it('re-authenticates with the read-only Gmail scope and parses full messages', async () => {
     helpers.setCurrentUser(userOne);
     const reauth = jest.fn(async (user, provider) => {
-      expect(provider.getScopes()).toEqual(['https://www.googleapis.com/auth/gmail.modify']);
+      expect(provider.getScopes()).toEqual(['https://www.googleapis.com/auth/gmail.readonly']);
       expect(provider.getCustomParameters()).toEqual({});
       return { user, __credential: { accessToken: 'gmail-token' } };
     });
@@ -206,8 +206,6 @@ describe('searchEtransferEmails', () => {
     const searchUrl = fetchMock().mock.calls[0][0] as string;
     expect(searchUrl).toContain(encodeURIComponent('from:notify@payments.interac.ca'));
     expect(searchUrl).toContain(encodeURIComponent(`after:${Date.UTC(2026, 7, 27) / 1000}`));
-    expect(searchUrl).toContain(encodeURIComponent('-label:Processed'));
-    expect(searchUrl).toContain(encodeURIComponent('-label:Rejected'));
     expectBearerToken(0, 'gmail-token');
     expectBearerToken(1, 'gmail-token');
   });
@@ -236,105 +234,6 @@ describe('searchEtransferEmails', () => {
   });
 });
 
-describe('labelEtransferEmailProcessed', () => {
-  it('reuses an existing "Processed" label if one exists', async () => {
-    helpers.setCurrentUser(userOne);
-    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
-
-    fetchMock()
-      .mockResolvedValueOnce(jsonResponse({ labels: [{ id: 'Label_1', name: 'Processed' }] }))
-      .mockResolvedValueOnce(jsonResponse({}));
-
-    await gmail.labelEtransferEmailProcessed('msg-1');
-
-    expect(fetchMock()).toHaveBeenCalledTimes(2);
-    const modifyUrl = fetchMock().mock.calls[1][0] as string;
-    expect(modifyUrl).toContain('/messages/msg-1/modify');
-    const modifyBody = JSON.parse((fetchMock().mock.calls[1][1] as RequestInit).body as string);
-    expect(modifyBody).toEqual({ addLabelIds: ['Label_1'] });
-  });
-
-  it('creates the "Processed" label when it does not exist yet', async () => {
-    helpers.setCurrentUser(userOne);
-    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
-
-    fetchMock()
-      .mockResolvedValueOnce(jsonResponse({ labels: [] }))
-      .mockResolvedValueOnce(jsonResponse({ id: 'Label_new' }))
-      .mockResolvedValueOnce(jsonResponse({}));
-
-    await gmail.labelEtransferEmailProcessed('msg-1');
-
-    expect(fetchMock()).toHaveBeenCalledTimes(3);
-    const createBody = JSON.parse((fetchMock().mock.calls[1][1] as RequestInit).body as string);
-    expect(createBody).toMatchObject({ name: 'Processed' });
-    const modifyBody = JSON.parse((fetchMock().mock.calls[2][1] as RequestInit).body as string);
-    expect(modifyBody).toEqual({ addLabelIds: ['Label_new'] });
-  });
-});
-
-describe('labelEtransferEmailRejected', () => {
-  it('applies a distinct "Rejected" label (not "Processed") so rejections are visibly different in Gmail', async () => {
-    helpers.setCurrentUser(userOne);
-    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
-
-    fetchMock()
-      .mockResolvedValueOnce(jsonResponse({ labels: [{ id: 'Label_2', name: 'Rejected' }] }))
-      .mockResolvedValueOnce(jsonResponse({}));
-
-    await gmail.labelEtransferEmailRejected('msg-1');
-
-    expect(fetchMock()).toHaveBeenCalledTimes(2);
-    const modifyUrl = fetchMock().mock.calls[1][0] as string;
-    expect(modifyUrl).toContain('/messages/msg-1/modify');
-    const modifyBody = JSON.parse((fetchMock().mock.calls[1][1] as RequestInit).body as string);
-    expect(modifyBody).toEqual({ addLabelIds: ['Label_2'] });
-  });
-
-  it('creates the "Rejected" label when it does not exist yet', async () => {
-    helpers.setCurrentUser(userOne);
-    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
-
-    fetchMock()
-      .mockResolvedValueOnce(jsonResponse({ labels: [] }))
-      .mockResolvedValueOnce(jsonResponse({ id: 'Label_new_rejected' }))
-      .mockResolvedValueOnce(jsonResponse({}));
-
-    await gmail.labelEtransferEmailRejected('msg-1');
-
-    expect(fetchMock()).toHaveBeenCalledTimes(3);
-    const createBody = JSON.parse((fetchMock().mock.calls[1][1] as RequestInit).body as string);
-    expect(createBody).toMatchObject({ name: 'Rejected' });
-    const modifyBody = JSON.parse((fetchMock().mock.calls[2][1] as RequestInit).body as string);
-    expect(modifyBody).toEqual({ addLabelIds: ['Label_new_rejected'] });
-  });
-});
-
-describe('remove e-Transfer decision labels', () => {
-  it('removes an existing Processed label from the message', async () => {
-    helpers.setCurrentUser(userOne);
-    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
-    fetchMock()
-      .mockResolvedValueOnce(jsonResponse({ labels: [{ id: 'Label_1', name: 'Processed' }] }))
-      .mockResolvedValueOnce(jsonResponse({}));
-
-    await gmail.removeEtransferEmailProcessedLabel('msg-1');
-
-    const modifyBody = JSON.parse((fetchMock().mock.calls[1][1] as RequestInit).body as string);
-    expect(modifyBody).toEqual({ removeLabelIds: ['Label_1'] });
-  });
-
-  it('does nothing when the Rejected label does not exist', async () => {
-    helpers.setCurrentUser(userOne);
-    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
-    fetchMock().mockResolvedValueOnce(jsonResponse({ labels: [] }));
-
-    await gmail.removeEtransferEmailRejectedLabel('msg-1');
-
-    expect(fetchMock()).toHaveBeenCalledTimes(1);
-  });
-});
-
 describe('Gmail authorization reuse', () => {
   it('shares one authorization popup across concurrent Gmail operations', async () => {
     helpers.setCurrentUser(userOne);
@@ -349,16 +248,16 @@ describe('Gmail authorization reuse', () => {
     const reauth = jest.fn(() => authorization);
     fakeAuth.__setReauthImplementation(reauth);
 
-    const processed = gmail.removeEtransferEmailProcessedLabel('msg-1');
-    const rejected = gmail.removeEtransferEmailRejectedLabel('msg-2');
+    const first = gmail.searchEtransferEmails('notify@payments.interac.ca');
+    const second = gmail.searchEtransferEmails('other@example.com');
     expect(reauth).toHaveBeenCalledTimes(1);
 
     fetchMock()
-      .mockResolvedValueOnce(jsonResponse({ labels: [] }))
-      .mockResolvedValueOnce(jsonResponse({ labels: [] }));
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(jsonResponse({}));
     finishAuthorization?.({ user: userOne, __credential: { accessToken: 'gmail-token' } });
 
-    await expect(Promise.all([processed, rejected])).resolves.toEqual([undefined, undefined]);
+    await expect(Promise.all([first, second])).resolves.toEqual([[], []]);
     expect(reauth).toHaveBeenCalledTimes(1);
   });
 });
