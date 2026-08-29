@@ -177,6 +177,50 @@ describe('PlayersPage', () => {
     ).toBeInTheDocument();
   });
 
+  it('sorts players by owed and overdrawn status', async () => {
+    const user = userEvent.setup();
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada', lastName: null, balance: 10 }),
+      makePlayer({
+        id: 'p2',
+        firstName: 'Bea',
+        firstNameLower: 'bea',
+        lastName: null,
+        balance: -4,
+      }),
+      makePlayer({
+        id: 'p3',
+        firstName: 'Cora',
+        firstNameLower: 'cora',
+        lastName: null,
+        owed: 8,
+      }),
+      makePlayer({
+        id: 'p4',
+        firstName: 'Dina',
+        firstNameLower: 'dina',
+        lastName: null,
+        balance: -12,
+        owed: 3,
+      }),
+    ];
+
+    renderPage({ players });
+
+    const playerList = screen.getByText('Ada').closest('.list-group');
+    expect(playerList).not.toBeNull();
+    const listedNames = () =>
+      within(playerList as HTMLElement).getAllByRole('button').map(item => item.textContent);
+
+    expect(listedNames()).toEqual(['Ada', 'BeaOverdrawn $4.00', 'Cora$8.00 owed', 'DinaOverdrawn $12.00$3.00 owed']);
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Sort players' }), 'owed');
+    expect(listedNames()).toEqual(['Cora$8.00 owed', 'DinaOverdrawn $12.00$3.00 owed', 'BeaOverdrawn $4.00', 'Ada']);
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Sort players' }), 'overdrawn');
+    expect(listedNames()).toEqual(['DinaOverdrawn $12.00$3.00 owed', 'BeaOverdrawn $4.00', 'Cora$8.00 owed', 'Ada']);
+  });
+
   it('loads wallet-only balance history and the selected player’s sessions', async () => {
     const now = new Date();
     const currentMonthSession = new Date(now.getFullYear(), now.getMonth(), 14, 19, 30);

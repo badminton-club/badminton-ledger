@@ -112,6 +112,12 @@ body {
     padding: 20px;
     width: 100%;
     max-width: 500px;
+    /* Fills the full height of its Bootstrap column (which the Row's default
+     * flex `align-items: stretch` already sizes to match the taller sibling
+     * card), so the shorter card visually stretches instead of leaving a gap. */
+    height: 100%;
+    display: flex;
+    flex-direction: column;
 }
 
 .session-title {
@@ -158,9 +164,14 @@ body {
     margin-bottom: 4px;
 }
 
-.more-players-info {
-    font-size: 13px;
-    color: var(--color-text-secondary);
+/* Lets the Player Balances list grow to fill whatever vertical space the
+ * card has (rather than a hard-coded item cap), while clipping — instead of
+ * pushing the card taller than its sibling — if there are enough players
+ * with outstanding balances to exceed the available height. */
+.balances-list-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .no-players {
@@ -210,6 +221,10 @@ body {
 .bg-light {
     background-color: var(--color-background-secondary) !important;
     color: var(--color-text-primary);
+}
+
+:root[data-bs-theme="dark"] .badge.bg-light.text-dark {
+    color: var(--color-text-primary) !important;
 }
 
 .table-light,

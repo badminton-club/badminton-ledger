@@ -25,10 +25,7 @@ export default function HomePage() {
 
     const currentSession = sessions[sessionIndex] ?? null;
 
-    const maxDisplay = 5;
     const negativeBalancePlayers = players.filter((p) => (p.owed ?? 0) > 0);
-    const displayedPlayers = negativeBalancePlayers.slice(0, maxDisplay);
-    const remainingCount = negativeBalancePlayers.length - displayedPlayers.length;
 
     return (
         <div className="home-page">
@@ -98,9 +95,9 @@ export default function HomePage() {
                         <div className="session-card" style={{ marginTop:4 }}>
                             <h2 className="session-title">Player Balances</h2>
                             {negativeBalancePlayers.length > 0 ?
-                                <>
-                                    <ul className="list-disc list-inside">
-                                        {displayedPlayers.map((player) => (
+                                <div className="balances-list-wrap">
+                                    <ul className="list-disc list-inside mb-0">
+                                        {negativeBalancePlayers.map((player) => (
                                             <li key={player.id} className="player-balance">
                                                 <Link to={`/players?playerId=${player.id}`}>
                                                     {player.firstName} {player.lastName ?? ""}
@@ -110,12 +107,7 @@ export default function HomePage() {
                                             </li>
                                         ))}
                                     </ul>
-                                    {remainingCount > 0 && (
-                                        <p className="more-players-info">
-                                            + {remainingCount} more with outstanding balances.
-                                        </p>
-                                    )}
-                                </>
+                                </div>
                             :   <p className="no-players">No players with outstanding balances.</p>}
                         </div>
                     </Col>

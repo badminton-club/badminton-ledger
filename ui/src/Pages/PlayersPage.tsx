@@ -50,6 +50,8 @@ interface LedgerEntry {
   voidedNote?:   string;
 }
 
+type PlayerSort = 'name' | 'owed' | 'overdrawn';
+
 const INIT_BALANCE: BalanceAdjustment = { amount: '', reason: '', type: 'credit', includeInPayout: true };
 
 // Common top-up amounts shown as one-tap shortcuts in the Adjust Balance form.
@@ -57,6 +59,30 @@ const QUICK_ADD_AMOUNTS = [10, 20, 50, 100];
 
 function formatPlayerName(player: Pick<Player, 'firstName' | 'lastName'>): string {
   return [player.firstName, player.lastName].filter(Boolean).join(' ');
+}
+
+function comparePlayerNames(a: Player, b: Player): number {
+  return formatPlayerName(a).localeCompare(formatPlayerName(b), undefined, { sensitivity: 'base' });
+}
+
+function comparePlayers(a: Player, b: Player, sort: PlayerSort): number {
+  if (sort === 'owed') {
+    const aOwed = a.owed ?? 0;
+    const bOwed = b.owed ?? 0;
+    if ((aOwed > 0) !== (bOwed > 0)) return aOwed > 0 ? -1 : 1;
+    if (aOwed > 0 && aOwed !== bOwed) return bOwed - aOwed;
+    if ((a.balance < 0) !== (b.balance < 0)) return a.balance < 0 ? -1 : 1;
+  }
+
+  if (sort === 'overdrawn') {
+    if ((a.balance < 0) !== (b.balance < 0)) return a.balance < 0 ? -1 : 1;
+    if (a.balance < 0 && a.balance !== b.balance) return a.balance - b.balance;
+    const aOwed = a.owed ?? 0;
+    const bOwed = b.owed ?? 0;
+    if ((aOwed > 0) !== (bOwed > 0)) return aOwed > 0 ? -1 : 1;
+  }
+
+  return comparePlayerNames(a, b);
 }
 
 export default function PlayersPage() {
@@ -73,6 +99,7 @@ export default function PlayersPage() {
   const selectedPlayerId = searchParams.get('playerId');
 
   const [searchTerm,         setSearchTerm]         = useState('');
+  const [playerSort,         setPlayerSort]         = useState<PlayerSort>('name');
   const [filteredPlayers,    setFilteredPlayers]     = useState<Player[]>(playersList);
   const [currentMonth,       setCurrentMonth]        = useState(new Date());
   const [attendedSessions,   setAttendedSessions]    = useState<Session[]>([]);
@@ -96,15 +123,17 @@ export default function PlayersPage() {
     setSearchParams(next);
   };
 
-  // Filter
+  // Filter and sort
   useEffect(() => {
-    if (!searchTerm.trim()) { setFilteredPlayers(playersList); return; }
     const term = searchTerm.toLowerCase();
-    setFilteredPlayers(playersList.filter(p =>
-      p.firstName.toLowerCase().includes(term) ||
-      (p.lastName ?? '').toLowerCase().includes(term)
-    ));
-  }, [searchTerm, playersList]);
+    const matchingPlayers = searchTerm.trim()
+      ? playersList.filter(p =>
+          p.firstName.toLowerCase().includes(term) ||
+          (p.lastName ?? '').toLowerCase().includes(term)
+        )
+      : playersList;
+    setFilteredPlayers([...matchingPlayers].sort((a, b) => comparePlayers(a, b, playerSort)));
+  }, [searchTerm, playerSort, playersList]);
 
   // Balance ledger
   const fetchLedger = useCallback(async (playerId: string, opts?: { silent?: boolean }) => {
@@ -350,13 +379,27 @@ export default function PlayersPage() {
           <Card>
             <Card.Header>Players</Card.Header>
             <Card.Body>
-              <Form.Control
-                type="text"
-                placeholder="Search by name…"
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                className="mb-2"
-              />
+              <Row className="g-2 mb-2">
+                <Col>
+                  <Form.Control
+                    type="text"
+                    placeholder="Search by name…"
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                  />
+                </Col>
+                <Col xs="auto">
+                  <Form.Select
+                    aria-label="Sort players"
+                    value={playerSort}
+                    onChange={e => setPlayerSort(e.target.value as PlayerSort)}
+                  >
+                    <option value="name">Name</option>
+                    <option value="owed">Owed first</option>
+                    <option value="overdrawn">Overdrawn first</option>
+                  </Form.Select>
+                </Col>
+              </Row>
               {playersStatus === 'loading' && playersList.length === 0 && (
                 <div className="text-center"><Spinner animation="border" size="sm" /></div>
               )}
