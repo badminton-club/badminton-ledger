@@ -69,14 +69,14 @@ export default function AppNavbar() {
                         <Nav.Link as={Link} to="/">
                             Home
                         </Nav.Link>
-                        {currentClubId && (
+                        {currentClubId && !disabledTabs.includes("attendance") && (
                             <Nav.Link as={Link} to="/attendance">
                                 Attendance
                             </Nav.Link>
                         )}
                         {isAdmin && (
                             <>
-                                {TOGGLEABLE_TABS.filter((t) => !disabledTabs.includes(t.key)).map((t) => (
+                                {TOGGLEABLE_TABS.filter((t) => t.key !== "attendance" && !disabledTabs.includes(t.key)).map((t) => (
                                     <Nav.Link key={t.key} as={Link} to={t.path}>
                                         {t.label}
                                     </Nav.Link>

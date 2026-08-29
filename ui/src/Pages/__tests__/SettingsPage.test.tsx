@@ -158,6 +158,24 @@ describe('SettingsPage', () => {
     });
   });
 
+  it('shows a toggle for the Attendance tab, so it can be hidden from every club member, not just admins', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club' });
+    const { store } = renderPage({ role: 'admin' });
+
+    const attendanceToggle = screen.getByRole('checkbox', { name: 'Show the Attendance tab' });
+    expect(attendanceToggle).toBeChecked();
+
+    await user.click(attendanceToggle);
+
+    await waitFor(() => {
+      expect(store.getState().club.disabledTabs).toEqual(['attendance']);
+      expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+        disabledTabs: ['attendance'],
+      });
+    });
+  });
+
   it('lets a super admin link members to players and add another admin member', async () => {
     const user = userEvent.setup();
     const players = [

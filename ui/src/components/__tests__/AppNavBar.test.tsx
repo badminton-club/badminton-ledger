@@ -52,6 +52,36 @@ describe('AppNavBar', () => {
     expect(screen.queryByRole('link', { name: 'Payout' })).not.toBeInTheDocument();
   });
 
+  it('hides Attendance for a non-admin member when disabled for the club', () => {
+    renderWithProviders(<AppNavBar />, {
+      preloadedState: {
+        club: makeClubState({
+          role: 'member',
+          currentClubId: 'club-a',
+          disabledTabs: ['attendance'],
+          clubs: [{ id: 'club-a', name: 'Alpha Club', role: 'member' }],
+        }),
+      },
+    });
+    expect(screen.queryByRole('link', { name: 'Attendance' })).not.toBeInTheDocument();
+  });
+
+  it('hides Attendance for an admin when disabled, without a leftover duplicate in the admin tab list', () => {
+    renderWithProviders(<AppNavBar />, {
+      preloadedState: {
+        club: makeClubState({
+          role: 'admin',
+          currentClubId: 'club-a',
+          disabledTabs: ['attendance'],
+          clubs: [{ id: 'club-a', name: 'Alpha Club', role: 'admin' }],
+        }),
+      },
+    });
+    expect(screen.queryByRole('link', { name: 'Attendance' })).not.toBeInTheDocument();
+    // Other admin-only tabs are unaffected.
+    expect(screen.getByRole('link', { name: 'Birdies' })).toBeInTheDocument();
+  });
+
   it('places the Account link under the account-name dropdown', async () => {
     const user = userEvent.setup();
     renderWithProviders(<AppNavBar />, {
