@@ -58,6 +58,7 @@ export interface SessionPlayer {
   comped?: boolean; // player settled directly with the owner — excluded from owner payout
   highlighted: boolean;
   settledAt?: Timestamp | null; // when paid/comped status was last changed
+  settledByEtransferImportId?: string | null; // automatic batch settlement attribution for safe undo
 }
 
 export interface BirdieUsage {
@@ -317,6 +318,7 @@ export interface EtransferImport {
   reviewedAt?: Timestamp | null;
   appliedAmount?: number | null;         // amount actually credited (may differ if edited)
   balanceLedgerEntryId?: string | null;  // the balanceLedger entry this created, for undo
+  autoSettledSessionIds?: string[];       // sessions automatically paid from this import's credited balance
   rejectionReason?: string | null;
   undoneByUid?: string | null;
   undoneAt?: Timestamp | null;

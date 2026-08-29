@@ -148,6 +148,8 @@ describe('EtransfersPage', () => {
     expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /approve/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Approve batch (1)' }));
 
     await waitFor(() => expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 210 }));
     expect(labelEtransferEmailProcessed).toHaveBeenCalledWith('msg-1');
@@ -156,6 +158,55 @@ describe('EtransfersPage', () => {
     const historyCard = screen.getByText('History').closest('.card') as HTMLElement;
     expect(within(historyCard).getByText('Applied')).toBeInTheDocument();
     expect(within(historyCard).getByRole('button', { name: /undo/i })).toBeInTheDocument();
+  });
+
+  it('previews and approves selected imports as a batch with oldest-first balance settlement', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 30 }));
+    seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'sender@example.com',
+      amount: 25,
+      emailDate: ts('2026-08-26'),
+      status: 'pending',
+      matchedPlayerId: 'p1',
+      matchSource: 'name-lookup',
+    });
+    seedClubDoc('sessions', 'oldest', {
+      date: ts('2026-08-01T12:00:00'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 10, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    seedClubDoc('sessions', 'newer', {
+      date: ts('2026-08-08T12:00:00'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 20, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+
+    renderPage();
+    await screen.findByText('CAI FANG WU');
+    await user.click(screen.getByRole('button', { name: 'Review batch (1)' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Aug 1, 2026')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Aug 8, 2026')).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Approve batch (1)' }));
+
+    await waitFor(() => expect(getClubDocData('players', 'p1')).toMatchObject({
+      balance: 15,
+      owed: 20,
+    }));
+    expect(getClubDocData('sessions', 'oldest')?.players).toEqual([
+      expect.objectContaining({ paid: true, paidVia: 'balance' }),
+    ]);
+    expect(getClubDocData('sessions', 'newer')?.players).toEqual([
+      expect.objectContaining({ paid: false, paidVia: null }),
+    ]);
   });
 
   it('undoes an applied import and reverses the balance', async () => {

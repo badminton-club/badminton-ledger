@@ -699,6 +699,7 @@ export async function setPlayerSettlement(
               comped:    method === 'comp',
               paidVia:   method,
               paidBy:    null,
+              settledByEtransferImportId: null,
               settledAt: Timestamp.now(),
             }
           : p

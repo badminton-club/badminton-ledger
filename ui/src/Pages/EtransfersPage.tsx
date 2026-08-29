@@ -6,7 +6,8 @@ import {
   fetchPendingEtransferImports,
   fetchEtransferImportHistory,
   importEtransferEmails,
-  applyEtransferImport,
+  previewEtransferApprovalBatch,
+  applyEtransferApprovalBatch,
   rejectEtransferImport,
   undoEtransferImport,
   fetchEtransferSenderMappings,
@@ -16,6 +17,7 @@ import {
   formatPlayerName,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
   DEFAULT_ETRANSFER_SEARCH_AFTER_DATE,
+  type EtransferBatchPreview,
 } from '../services/firebase';
 import { toJSDate } from '../services/firebase/utils';
 import { useAppSelector } from '../hooks';
@@ -29,6 +31,7 @@ interface RowEdit {
   playerId: string;
   amount: string;
   remember: boolean;
+  selected: boolean;
 }
 
 function initialRowEdit(imp: EtransferImport): RowEdit {
@@ -39,6 +42,7 @@ function initialRowEdit(imp: EtransferImport): RowEdit {
     // at all) — a mapping that was already used to find this player doesn't need
     // to be re-saved every time.
     remember: imp.matchSource !== 'mapping',
+    selected: !!imp.matchedPlayerId,
   };
 }
 
@@ -70,9 +74,12 @@ export default function EtransfersPage() {
   const [searchError, setSearchError] = useState('');
   const [searchMessage, setSearchMessage] = useState('');
 
-  const [applyingId, setApplyingId] = useState<string | null>(null);
   const [applyError, setApplyError] = useState<Record<string, string>>({});
-  const [applyWarning, setApplyWarning] = useState<Record<string, string>>({});
+  const [batchPreview, setBatchPreview] = useState<EtransferBatchPreview | null>(null);
+  const [batchPreviewing, setBatchPreviewing] = useState(false);
+  const [batchApplying, setBatchApplying] = useState(false);
+  const [batchError, setBatchError] = useState('');
+  const [batchMessage, setBatchMessage] = useState('');
 
   const [rejectTarget, setRejectTarget] = useState<EtransferImport | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -168,37 +175,70 @@ export default function EtransfersPage() {
     setRowEdits((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
   };
 
-  const handleApply = async (imp: EtransferImport) => {
-    const edit = rowEdits[imp.id] ?? initialRowEdit(imp);
-    const amount = parseFloat(edit.amount);
-    setApplyError((prev) => ({ ...prev, [imp.id]: '' }));
-    if (!edit.playerId) {
-      setApplyError((prev) => ({ ...prev, [imp.id]: 'Select which player this payment belongs to.' }));
-      return;
-    }
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setApplyError((prev) => ({ ...prev, [imp.id]: 'Enter a valid positive amount.' }));
-      return;
-    }
+  const selectedCount = useMemo(
+    () => pending.filter((imp) => (rowEdits[imp.id] ?? initialRowEdit(imp)).selected).length,
+    [pending, rowEdits]
+  );
 
-    setApplyingId(imp.id);
-    try {
-      const { labelFailed } = await applyEtransferImport(imp.id, {
+  const handlePreviewBatch = async (only?: EtransferImport[]) => {
+    const selected = only
+      ?? pending.filter((imp) => (rowEdits[imp.id] ?? initialRowEdit(imp)).selected);
+    setBatchError('');
+    setBatchMessage('');
+    setApplyError({});
+    const inputs = selected.flatMap((imp) => {
+      const edit = rowEdits[imp.id] ?? initialRowEdit(imp);
+      const amount = parseFloat(edit.amount);
+      if (!edit.playerId) {
+        setApplyError((prev) => ({ ...prev, [imp.id]: 'Select which player this payment belongs to.' }));
+        return [];
+      }
+      if (!Number.isFinite(amount) || amount <= 0) {
+        setApplyError((prev) => ({ ...prev, [imp.id]: 'Enter a valid positive amount.' }));
+        return [];
+      }
+      return [{
+        importId: imp.id,
         playerId: edit.playerId,
         amount,
         rememberMapping: edit.remember,
-      });
-      if (labelFailed) {
-        setApplyWarning((prev) => ({
-          ...prev,
-          [imp.id]: 'Balance updated, but labelling the Gmail message "Processed" failed — you may want to label it manually so it isn\'t found again.',
-        }));
+      }];
+    });
+    if (inputs.length !== selected.length || inputs.length === 0) {
+      if (selected.length === 0) setBatchError('Select at least one pending import.');
+      return;
+    }
+
+    setBatchPreviewing(true);
+    try {
+      setBatchPreview(await previewEtransferApprovalBatch(inputs));
+    } catch (err) {
+      setBatchError(err instanceof Error ? err.message : 'Failed to prepare the batch review.');
+    } finally {
+      setBatchPreviewing(false);
+    }
+  };
+
+  const handleApproveBatch = async () => {
+    if (!batchPreview) return;
+    setBatchApplying(true);
+    setBatchError('');
+    try {
+      const result = await applyEtransferApprovalBatch(batchPreview);
+      setBatchPreview(null);
+      setBatchMessage(
+        `Approved ${result.approved} transfer${result.approved === 1 ? '' : 's'} and settled `
+        + `${result.settled} owed session${result.settled === 1 ? '' : 's'} from oldest to newest.`
+      );
+      if (result.labelFailures > 0) {
+        setBatchMessage((message) => `${message} ${result.labelFailures} Gmail label update(s) failed.`);
       }
       await load();
     } catch (err) {
-      setApplyError((prev) => ({ ...prev, [imp.id]: err instanceof Error ? err.message : 'Failed to apply.' }));
+      setBatchError(err instanceof Error ? err.message : 'Failed to approve the batch.');
+      await load();
     } finally {
-      setApplyingId(null);
+      setBatchApplying(false);
     }
   };
 
@@ -338,9 +378,25 @@ export default function EtransfersPage() {
 
       {loadError && <Alert variant="danger">{loadError}</Alert>}
       {undoWarning && <Alert variant="warning">{undoWarning}</Alert>}
+      {batchMessage && <Alert variant="success">{batchMessage}</Alert>}
+      {batchError && !batchPreview && <Alert variant="danger">{batchError}</Alert>}
 
       <Card className="mb-4">
-        <Card.Header>Pending review ({pending.length})</Card.Header>
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span>Pending review ({pending.length})</span>
+          {pending.length > 0 && (
+            <Button
+              size="sm"
+              variant="success"
+              onClick={() => handlePreviewBatch()}
+              disabled={batchPreviewing || selectedCount === 0}
+            >
+              {batchPreviewing
+                ? <Spinner size="sm" animation="border" />
+                : `Review batch (${selectedCount})`}
+            </Button>
+          )}
+        </Card.Header>
         <Card.Body className="p-0">
           {pending.length === 0 ? (
             <p className="text-muted p-3 mb-0">Nothing to review — search Gmail to find new e-Transfers.</p>
@@ -348,6 +404,23 @@ export default function EtransfersPage() {
             <Table responsive hover className="mb-0 align-middle">
               <thead>
                 <tr>
+                  <th>
+                    <Form.Check
+                      aria-label="Select all matched imports"
+                      checked={selectedCount === pending.length && pending.length > 0}
+                      onChange={(e) => {
+                        const selected = e.target.checked;
+                        setRowEdits((prev) => {
+                          const next = { ...prev };
+                          for (const imp of pending) {
+                            const edit = next[imp.id] ?? initialRowEdit(imp);
+                            next[imp.id] = { ...edit, selected: selected && !!edit.playerId };
+                          }
+                          return next;
+                        });
+                      }}
+                    />
+                  </th>
                   <th>Date</th>
                   <th>Sender</th>
                   <th>Memo</th>
@@ -363,6 +436,14 @@ export default function EtransfersPage() {
                   const emailDate = toJSDate(imp.emailDate);
                   return (
                     <tr key={imp.id}>
+                      <td>
+                        <Form.Check
+                          aria-label={`Include ${imp.senderName} in batch`}
+                          checked={edit.selected}
+                          disabled={!edit.playerId || batchApplying}
+                          onChange={(e) => updateRowEdit(imp.id, { selected: e.target.checked })}
+                        />
+                      </td>
                       <td>{emailDate ? format(emailDate, 'MMM d, yyyy') : '—'}</td>
                       <td>
                         {imp.senderName}
@@ -375,8 +456,11 @@ export default function EtransfersPage() {
                         <Form.Select
                           size="sm"
                           value={edit.playerId}
-                          onChange={(e) => updateRowEdit(imp.id, { playerId: e.target.value })}
-                          disabled={applyingId === imp.id}
+                          onChange={(e) => updateRowEdit(imp.id, {
+                            playerId: e.target.value,
+                            selected: !!e.target.value,
+                          })}
+                          disabled={batchApplying || batchPreviewing}
                         >
                           <option value="">— Select player —</option>
                           {players.map((p) => (
@@ -393,7 +477,7 @@ export default function EtransfersPage() {
                           style={{ width: 100 }}
                           value={edit.amount}
                           onChange={(e) => updateRowEdit(imp.id, { amount: e.target.value })}
-                          disabled={applyingId === imp.id}
+                          disabled={batchApplying || batchPreviewing}
                         />
                       </td>
                       <td>
@@ -401,7 +485,7 @@ export default function EtransfersPage() {
                           type="checkbox"
                           checked={edit.remember}
                           onChange={(e) => updateRowEdit(imp.id, { remember: e.target.checked })}
-                          disabled={applyingId === imp.id}
+                          disabled={batchApplying || batchPreviewing}
                           title={`Remember "${imp.senderName}" → this player for future imports`}
                         />
                       </td>
@@ -410,24 +494,21 @@ export default function EtransfersPage() {
                           size="sm"
                           variant="success"
                           className="me-2"
-                          disabled={applyingId === imp.id}
-                          onClick={() => handleApply(imp)}
+                          disabled={batchApplying || batchPreviewing}
+                          onClick={() => handlePreviewBatch([imp])}
                         >
-                          {applyingId === imp.id ? <Spinner size="sm" animation="border" /> : 'Approve'}
+                          Approve
                         </Button>
                         <Button
                           size="sm"
                           variant="outline-danger"
-                          disabled={applyingId === imp.id}
+                          disabled={batchApplying || batchPreviewing}
                           onClick={() => { setRejectTarget(imp); setRejectReason(''); setRejectError(''); }}
                         >
                           Reject
                         </Button>
                         {applyError[imp.id] && (
                           <div className="text-danger small mt-1">{applyError[imp.id]}</div>
-                        )}
-                        {applyWarning[imp.id] && (
-                          <div className="text-warning small mt-1">{applyWarning[imp.id]}</div>
                         )}
                       </td>
                     </tr>
@@ -548,6 +629,73 @@ export default function EtransfersPage() {
           )}
         </Card.Body>
       </Card>
+
+      <Modal
+        show={!!batchPreview}
+        onHide={() => { if (!batchApplying) setBatchPreview(null); }}
+        size="lg"
+        centered
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>Review e-Transfer batch</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {batchPreview && (
+            <>
+              <p>
+                Confirm the player and amount for every transfer. Covered unpaid sessions will be
+                settled from each player's balance in oldest-to-newest order.
+              </p>
+              <h6>Transfers to approve</h6>
+              <Table responsive size="sm">
+                <thead>
+                  <tr><th>Sender</th><th>Player</th><th>Amount</th></tr>
+                </thead>
+                <tbody>
+                  {batchPreview.approvals.map((approval) => (
+                    <tr key={approval.importId}>
+                      <td>{approval.senderName}</td>
+                      <td>{playerName(approval.playerId)}</td>
+                      <td>{money(approval.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <h6>Sessions to settle from balance</h6>
+              {batchPreview.settlements.length === 0 ? (
+                <p className="text-muted">No owed sessions are fully covered by the resulting balances.</p>
+              ) : (
+                <Table responsive size="sm">
+                  <thead>
+                    <tr><th>Date</th><th>Player</th><th>Cost</th></tr>
+                  </thead>
+                  <tbody>
+                    {batchPreview.settlements.map((settlement) => (
+                      <tr key={`${settlement.sessionId}-${settlement.playerId}`}>
+                        <td>{format(settlement.sessionDate, 'MMM d, yyyy')}</td>
+                        <td>{playerName(settlement.playerId)}</td>
+                        <td>{money(settlement.cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              )}
+              {batchError && <Alert variant="danger" className="mb-0">{batchError}</Alert>}
+            </>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setBatchPreview(null)} disabled={batchApplying}>
+            Cancel
+          </Button>
+          <Button variant="success" onClick={handleApproveBatch} disabled={batchApplying}>
+            {batchApplying
+              ? <><Spinner size="sm" animation="border" className="me-2" />Approving…</>
+              : `Approve batch (${batchPreview?.approvals.length ?? 0})`}
+          </Button>
+        </Modal.Footer>
+      </Modal>
 
       <Modal show={!!rejectTarget} onHide={() => setRejectTarget(null)} centered>
         <Modal.Header closeButton>

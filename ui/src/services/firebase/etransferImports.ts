@@ -10,9 +10,11 @@ import {
   serverTimestamp,
   runTransaction,
   increment,
+  Timestamp,
 } from 'firebase/firestore';
 import { db, refs, auth } from './client';
 import { serviceCall, toJSDate } from './utils';
+import { fetchSessions } from './sessions';
 import {
   searchEtransferEmails,
   labelEtransferEmailProcessed,
@@ -23,7 +25,42 @@ import {
   DEFAULT_ETRANSFER_SEARCH_AFTER_DATE,
   type ParsedEtransferEmail,
 } from './gmail';
-import type { EtransferImport, EtransferSenderMapping, Player } from 'types';
+import type { EtransferImport, EtransferSenderMapping, Player, SessionPlayer } from 'types';
+
+export interface EtransferBatchApprovalInput {
+  importId: string;
+  playerId: string;
+  amount: number;
+  rememberMapping: boolean;
+}
+
+export interface EtransferBatchSettlement {
+  importId: string;
+  sessionId: string;
+  sessionDate: Date;
+  playerId: string;
+  cost: number;
+}
+
+export interface EtransferBatchPreview {
+  inputs: EtransferBatchApprovalInput[];
+  approvals: {
+    importId: string;
+    senderName: string;
+    playerId: string;
+    amount: number;
+  }[];
+  settlements: EtransferBatchSettlement[];
+  startingBalances: Record<string, number>;
+  startingOwed: Record<string, number>;
+  endingBalances: Record<string, number>;
+}
+
+export interface EtransferBatchResult {
+  approved: number;
+  settled: number;
+  labelFailures: number;
+}
 
 /** Normalizes a sender identity to the doc id used for its remembered mapping. */
 function mappingKeyFor(senderEmail: string | null, senderName: string): string {
@@ -128,6 +165,7 @@ function toEtransferImport(id: string, data: Record<string, unknown>): Etransfer
     reviewedAt: (data.reviewedAt as EtransferImport['reviewedAt']) ?? null,
     appliedAmount: (data.appliedAmount as number | null) ?? null,
     balanceLedgerEntryId: (data.balanceLedgerEntryId as string | null) ?? null,
+    autoSettledSessionIds: (data.autoSettledSessionIds as string[] | undefined) ?? [],
     rejectionReason: (data.rejectionReason as string | null) ?? null,
     undoneByUid: (data.undoneByUid as string | null) ?? null,
     undoneAt: (data.undoneAt as EtransferImport['undoneAt']) ?? null,
@@ -260,6 +298,295 @@ export async function fetchEtransferImportHistory(): Promise<EtransferImport[]> 
 }
 
 /**
+ * Builds the human-review preview for a group of pending imports. Credits are
+ * pooled per player, then whole unpaid sessions are covered oldest-first. If
+ * the oldest remaining session is not affordable, newer sessions are not
+ * skipped.
+ */
+export async function previewEtransferApprovalBatch(
+  inputs: EtransferBatchApprovalInput[]
+): Promise<EtransferBatchPreview> {
+  return serviceCall('previewEtransferApprovalBatch', async () => {
+    if (inputs.length === 0) throw new Error('Select at least one pending import.');
+    if (new Set(inputs.map((input) => input.importId)).size !== inputs.length) {
+      throw new Error('The batch contains a duplicate import.');
+    }
+
+    const [importSnaps, players, sessions] = await Promise.all([
+      Promise.all(inputs.map((input) => getDoc(doc(refs.etransferImports, input.importId)))),
+      fetchPlayersForMatching(),
+      fetchSessions({ orderDirection: 'asc' }),
+    ]);
+    const playerById = new Map(players.map((player) => [player.id, player]));
+    const approvals = inputs.map((input, index) => {
+      const snap = importSnaps[index];
+      if (!snap.exists()) throw new Error(`Import ${input.importId} was not found.`);
+      if (snap.data().status !== 'pending') {
+        throw new Error(`Import ${input.importId} has already been reviewed.`);
+      }
+      if (!playerById.has(input.playerId)) throw new Error('A selected player no longer exists.');
+      if (!Number.isFinite(input.amount) || input.amount <= 0) {
+        throw new Error('Every selected import needs a valid positive amount.');
+      }
+      return {
+        importId: input.importId,
+        senderName: (snap.data().senderName as string) ?? '',
+        playerId: input.playerId,
+        amount: input.amount,
+      };
+    });
+
+    const selectedPlayerIds = [...new Set(inputs.map((input) => input.playerId))];
+    const startingBalances: Record<string, number> = {};
+    const startingOwed: Record<string, number> = {};
+    const endingBalances: Record<string, number> = {};
+    for (const playerId of selectedPlayerIds) {
+      const player = playerById.get(playerId)!;
+      startingBalances[playerId] = player.balance ?? 0;
+      startingOwed[playerId] = player.owed ?? 0;
+      endingBalances[playerId] = startingBalances[playerId]
+        + inputs.filter((input) => input.playerId === playerId).reduce((sum, input) => sum + input.amount, 0);
+    }
+
+    const settlements: EtransferBatchSettlement[] = [];
+    for (const playerId of selectedPlayerIds) {
+      const playerInputs = inputs.filter((input) => input.playerId === playerId);
+      const fundingImportId = playerInputs[playerInputs.length - 1].importId;
+      for (const session of sessions) {
+        const participant = session.players.find((entry) => entry.id === playerId);
+        if (!participant || participant.cost <= 0) continue;
+        const paidVia = participant.paidVia
+          ?? (participant.comped ? 'comp' : participant.paid ? 'etransfer' : null);
+        if (paidVia !== null) continue;
+        if (participant.cost > endingBalances[playerId]) break;
+
+        endingBalances[playerId] -= participant.cost;
+        settlements.push({
+          importId: fundingImportId,
+          sessionId: session.id,
+          sessionDate: session.date,
+          playerId,
+          cost: participant.cost,
+        });
+      }
+    }
+
+    return {
+      inputs: inputs.map((input) => ({ ...input })),
+      approvals,
+      settlements,
+      startingBalances,
+      startingOwed,
+      endingBalances,
+    };
+  });
+}
+
+/**
+ * Revalidates and applies a reviewed preview. Individual operations remain
+ * transactional and auditable; if anything changed since preview, no operation
+ * starts until the admin reviews a fresh plan.
+ */
+export async function applyEtransferApprovalBatch(
+  reviewed: EtransferBatchPreview
+): Promise<EtransferBatchResult> {
+  return serviceCall('applyEtransferApprovalBatch', async () => {
+    const fresh = await previewEtransferApprovalBatch(reviewed.inputs);
+    const signature = (preview: EtransferBatchPreview) => JSON.stringify({
+      approvals: preview.approvals,
+      settlements: preview.settlements.map((item) => ({
+        importId: item.importId,
+        sessionId: item.sessionId,
+        playerId: item.playerId,
+        cost: item.cost,
+      })),
+      startingBalances: preview.startingBalances,
+      startingOwed: preview.startingOwed,
+      endingBalances: preview.endingBalances,
+    });
+    if (signature(fresh) !== signature(reviewed)) {
+      throw new Error('The batch changed since it was reviewed. Review it again before approving.');
+    }
+
+    const importRefs = fresh.inputs.map((input) => doc(refs.etransferImports, input.importId));
+    const playerIds = [...new Set(fresh.inputs.map((input) => input.playerId))];
+    const playerRefs = playerIds.map((playerId) => doc(refs.players, playerId));
+    const allSessionRefs = (await getDocs(refs.sessions)).docs.map((snap) => snap.ref);
+    const estimatedWrites = fresh.inputs.length * 3 + fresh.settlements.length * 2 + playerIds.length;
+    if (estimatedWrites > 450) throw new Error('This batch is too large. Select fewer imports and review again.');
+
+    const gmailMessageIds = await runTransaction(db, async (tx) => {
+      const [importSnaps, playerSnaps, sessionSnaps] = await Promise.all([
+        Promise.all(importRefs.map((ref) => tx.get(ref))),
+        Promise.all(playerRefs.map((ref) => tx.get(ref))),
+        Promise.all(allSessionRefs.map((ref) => tx.get(ref))),
+      ]);
+      const playerSnapById = new Map(playerSnaps.map((snap) => [snap.id, snap]));
+      const sessionSnapById = new Map(sessionSnaps.map((snap) => [snap.id, snap]));
+
+      fresh.inputs.forEach((input, index) => {
+        const snap = importSnaps[index];
+        if (!snap.exists() || snap.data().status !== 'pending') {
+          throw new Error('A selected import changed. Review the batch again.');
+        }
+      });
+      for (const playerId of playerIds) {
+        const snap = playerSnapById.get(playerId);
+        if (!snap?.exists()) throw new Error('A selected player no longer exists.');
+        if (((snap.data().balance as number) ?? 0) !== fresh.startingBalances[playerId]) {
+          throw new Error('A player balance changed. Review the batch again.');
+        }
+        if (((snap.data().owed as number) ?? 0) !== fresh.startingOwed[playerId]) {
+          throw new Error('A player debt changed. Review the batch again.');
+        }
+      }
+      const orderedSessionSnaps = [...sessionSnaps].sort(
+        (a, b) => (toJSDate(a.data().date)?.getTime() ?? 0) - (toJSDate(b.data().date)?.getTime() ?? 0)
+      );
+      const transactionSettlements: { sessionId: string; playerId: string; cost: number }[] = [];
+      for (const playerId of playerIds) {
+        let available = ((playerSnapById.get(playerId)!.data().balance as number) ?? 0)
+          + fresh.inputs
+            .filter((input) => input.playerId === playerId)
+            .reduce((sum, input) => sum + input.amount, 0);
+        for (const sessionSnap of orderedSessionSnaps) {
+          const participant = (sessionSnap.data().players as SessionPlayer[])
+            .find((entry) => entry.id === playerId);
+          if (!participant || participant.cost <= 0) continue;
+          const paidVia = participant.paidVia
+            ?? (participant.comped ? 'comp' : participant.paid ? 'etransfer' : null);
+          if (paidVia !== null) continue;
+          if (participant.cost > available) break;
+          available -= participant.cost;
+          transactionSettlements.push({
+            sessionId: sessionSnap.id,
+            playerId,
+            cost: participant.cost,
+          });
+        }
+      }
+      const reviewedSettlements = fresh.settlements.map(({ sessionId, playerId, cost }) => ({
+        sessionId,
+        playerId,
+        cost,
+      }));
+      if (JSON.stringify(transactionSettlements) !== JSON.stringify(reviewedSettlements)) {
+        throw new Error('An owed session changed. Review the batch again.');
+      }
+
+      const runningBalances = { ...fresh.startingBalances };
+      const reviewedByUid = auth.currentUser?.uid ?? null;
+      const messageIds: string[] = [];
+      fresh.inputs.forEach((input, index) => {
+        const importData = importSnaps[index].data();
+        const ledgerRef = doc(refs.balanceLedger);
+        const before = runningBalances[input.playerId];
+        runningBalances[input.playerId] += input.amount;
+        const settledSessionIds = fresh.settlements
+          .filter((settlement) => settlement.importId === input.importId)
+          .map((settlement) => settlement.sessionId);
+
+        tx.set(ledgerRef, {
+          playerId: input.playerId,
+          sessionId: null,
+          delta: input.amount,
+          balanceBefore: before,
+          balanceAfter: runningBalances[input.playerId],
+          reason: 'etransfer-import',
+          note: `Gmail e-Transfer from ${(importData.senderName as string) ?? 'unknown sender'}`,
+          walletAdjustment: true,
+          createdAt: serverTimestamp(),
+        });
+        tx.update(importRefs[index], {
+          status: 'applied',
+          matchedPlayerId: input.playerId,
+          appliedAmount: input.amount,
+          balanceLedgerEntryId: ledgerRef.id,
+          autoSettledSessionIds: settledSessionIds,
+          reviewedByUid,
+          reviewedAt: serverTimestamp(),
+        });
+        if (input.rememberMapping) {
+          const senderName = (importData.senderName as string) ?? '';
+          const senderEmail = (importData.senderEmail as string | null) ?? null;
+          tx.set(doc(refs.etransferSenderMappings, mappingKeyFor(senderEmail, senderName)), {
+            senderName,
+            senderEmail,
+            playerId: input.playerId,
+            updatedAt: serverTimestamp(),
+          });
+        }
+        messageIds.push((importData.gmailMessageId as string) ?? input.importId);
+      });
+
+      const updatedSessionPlayers = new Map<string, SessionPlayer[]>();
+      for (const settlement of fresh.settlements) {
+        const snap = sessionSnapById.get(settlement.sessionId)!;
+        const players = updatedSessionPlayers.get(settlement.sessionId)
+          ?? (snap.data().players as SessionPlayer[]);
+        updatedSessionPlayers.set(
+          settlement.sessionId,
+          players.map((entry) => entry.id === settlement.playerId
+            ? {
+                ...entry,
+                paid: true,
+                comped: false,
+                paidVia: 'balance',
+                paidBy: null,
+                settledAt: Timestamp.now(),
+                settledByEtransferImportId: settlement.importId,
+              }
+            : entry)
+        );
+
+        const before = runningBalances[settlement.playerId];
+        runningBalances[settlement.playerId] -= settlement.cost;
+        tx.set(doc(refs.balanceLedger), {
+          playerId: settlement.playerId,
+          sessionId: settlement.sessionId,
+          delta: -settlement.cost,
+          balanceBefore: before,
+          balanceAfter: runningBalances[settlement.playerId],
+          reason: 'settlement',
+          note: `Settled from prepaid balance — session on ${settlement.sessionDate.toLocaleDateString()}`,
+          walletAdjustment: true,
+          createdAt: serverTimestamp(),
+        });
+      }
+      updatedSessionPlayers.forEach((players, sessionId) => {
+        tx.update(doc(refs.sessions, sessionId), { players });
+      });
+      for (const playerId of playerIds) {
+        const settledCost = fresh.settlements
+          .filter((settlement) => settlement.playerId === playerId)
+          .reduce((sum, settlement) => sum + settlement.cost, 0);
+        tx.update(doc(refs.players, playerId), {
+          balance: runningBalances[playerId],
+          ...(settledCost > 0 ? { owed: increment(-settledCost) } : {}),
+        });
+      }
+      return messageIds;
+    });
+
+    let labelFailures = 0;
+    for (const gmailMessageId of gmailMessageIds) {
+      try {
+        await labelEtransferEmailProcessed(gmailMessageId);
+      } catch (err) {
+        console.error('[applyEtransferApprovalBatch] labeling failed', err);
+        labelFailures += 1;
+      }
+    }
+
+    return {
+      approved: fresh.inputs.length,
+      settled: fresh.settlements.length,
+      labelFailures,
+    };
+  });
+}
+
+/**
  * Applies a reviewed import: credits the matched player's balance, logs a
  * `balanceLedger` entry (reason `'etransfer-import'`, undoable later), and marks
  * the import `applied`. `playerId`/`amount` are whatever the admin confirmed in
@@ -388,11 +715,27 @@ export async function undoEtransferImport(importId: string, reason: string): Pro
     const importBeforeUndo = await getDoc(importRef);
     if (!importBeforeUndo.exists()) throw new Error('Import record not found.');
     const beforeData = importBeforeUndo.data();
+    const [playersForMatching, sessionsBeforeUndo] = await Promise.all([
+      fetchPlayersForMatching(),
+      beforeData.status === 'applied'
+        ? fetchSessions({ orderDirection: 'asc' })
+        : Promise.resolve([]),
+    ]);
     const rematch = await resolveSenderMatch(
       (beforeData.senderEmail as string | null) ?? null,
       (beforeData.senderName as string) ?? '',
-      await fetchPlayersForMatching()
+      playersForMatching
     );
+    const matchedPlayerBeforeUndo = playersForMatching.find(
+      (player) => player.id === beforeData.matchedPlayerId
+    );
+    const automaticSessionIds = sessionsBeforeUndo
+      .filter((session) => session.players.some((entry) => (
+        entry.id === beforeData.matchedPlayerId
+        && entry.paidVia === 'balance'
+        && !!entry.settledByEtransferImportId
+      )))
+      .map((session) => session.id);
 
     const { previousStatus, gmailMessageId } = await runTransaction(db, async (tx) => {
       const importSnap = await tx.get(importRef);
@@ -414,9 +757,71 @@ export async function undoEtransferImport(importId: string, reason: string): Pro
       }
       const delta = previousStatus === 'applied' ? -(appliedAmount as number) : 0;
       const playerRef = playerId ? doc(refs.players, playerId) : null;
-      const playerSnap = playerRef ? await tx.get(playerRef) : null;
+      const sessionIdsToInspect = previousStatus === 'applied' ? automaticSessionIds : [];
+      const [playerSnap, settledSessionSnaps] = await Promise.all([
+        playerRef ? tx.get(playerRef) : Promise.resolve(null),
+        Promise.all(sessionIdsToInspect.map((sessionId) => tx.get(doc(refs.sessions, sessionId)))),
+      ]);
       if (previousStatus === 'applied' && (!playerRef || !playerSnap?.exists())) {
         throw new Error('The credited player no longer exists, so this import cannot be safely undone.');
+      }
+      if (
+        previousStatus === 'applied'
+        && (
+          ((playerSnap!.data().balance as number) ?? 0) !== matchedPlayerBeforeUndo?.balance
+          || ((playerSnap!.data().owed as number) ?? 0) !== matchedPlayerBeforeUndo?.owed
+        )
+      ) {
+        throw new Error('The player balance or debt changed. Try undo again with the latest data.');
+      }
+
+      const reversibleSessions: {
+        ref: ReturnType<typeof doc>;
+        players: SessionPlayer[];
+        cost: number;
+      }[] = [];
+      if (playerId) {
+        for (const sessionSnap of settledSessionSnaps) {
+          if (!sessionSnap.exists()) continue;
+          const players = sessionSnap.data().players as SessionPlayer[];
+          const participant = players.find((entry) => entry.id === playerId);
+          if (
+            !participant
+            || participant.paidVia !== 'balance'
+            || !participant.settledByEtransferImportId
+          ) {
+            continue;
+          }
+          reversibleSessions.push({
+            ref: sessionSnap.ref,
+            cost: participant.cost,
+            players: players.map((entry) => entry.id === playerId
+              ? {
+                  ...entry,
+                  paid: false,
+                  comped: false,
+                  paidVia: null,
+                  paidBy: null,
+                  settledAt: Timestamp.now(),
+                  settledByEtransferImportId: null,
+                }
+              : entry),
+          });
+        }
+      }
+      const playerBalance = playerSnap?.exists() ? ((playerSnap.data().balance as number) ?? 0) : 0;
+      const sessionsToReopen: typeof reversibleSessions = [];
+      let settlementRefund = 0;
+      let balanceAfterUndo = playerBalance + delta;
+      if (balanceAfterUndo < 0) {
+        for (const sessionId of [...sessionIdsToInspect].reverse()) {
+          const session = reversibleSessions.find((candidate) => candidate.ref.id === sessionId);
+          if (!session) continue;
+          sessionsToReopen.push(session);
+          settlementRefund += session.cost;
+          balanceAfterUndo += session.cost;
+          if (balanceAfterUndo >= 0) break;
+        }
       }
 
       tx.update(importRef, {
@@ -426,17 +831,37 @@ export async function undoEtransferImport(importId: string, reason: string): Pro
         undoneReason: reason.trim(),
         matchedPlayerId: rematch.playerId,
         matchSource: rematch.source,
+        autoSettledSessionIds: [],
       });
 
       if (playerRef && playerSnap?.exists()) {
         const before = (playerSnap.data().balance as number) ?? 0;
-        tx.update(playerRef, { balance: increment(delta) });
+        let runningBalance = before;
+        for (const session of sessionsToReopen) {
+          tx.update(session.ref, { players: session.players });
+          tx.set(doc(refs.balanceLedger), {
+            playerId,
+            sessionId: session.ref.id,
+            delta: session.cost,
+            balanceBefore: runningBalance,
+            balanceAfter: runningBalance + session.cost,
+            reason: 'settlement-undo',
+            note: `Refunded automatic settlement — undoing e-Transfer import: ${reason.trim()}`,
+            walletAdjustment: true,
+            createdAt: serverTimestamp(),
+          });
+          runningBalance += session.cost;
+        }
+        tx.update(playerRef, {
+          balance: increment(delta + settlementRefund),
+          ...(settlementRefund > 0 ? { owed: increment(settlementRefund) } : {}),
+        });
         tx.set(doc(refs.balanceLedger), {
           playerId,
           sessionId: null,
           delta,
-          balanceBefore: before,
-          balanceAfter: before + delta,
+          balanceBefore: runningBalance,
+          balanceAfter: runningBalance + delta,
           reason: 'etransfer-import-undo',
           note: `Reversed — undoing e-Transfer import: ${reason.trim()}`,
           walletAdjustment: true,

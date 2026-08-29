@@ -390,6 +390,151 @@ describe('undoEtransferImport', () => {
   });
 });
 
+describe('e-Transfer approval batches', () => {
+  function seedOwedSession(id: string, date: string, cost: number): void {
+    helpers.seedClubDoc('sessions', id, {
+      date: helpers.ts(date),
+      players: [{
+        id: 'p1',
+        percentage: 100,
+        cost,
+        paid: false,
+        paidVia: null,
+        comped: false,
+        highlighted: false,
+      }],
+    });
+  }
+
+  it('previews and settles only fully covered sessions from oldest to newest', async () => {
+    seedPlayer('p1', { balance: 0, owed: 35 });
+    seedOwedSession('oldest', '2026-08-01', 10);
+    seedOwedSession('next', '2026-08-08', 20);
+    seedOwedSession('newest', '2026-08-15', 5);
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      status: 'pending',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'sender@example.com',
+      amount: 25,
+    });
+
+    const preview = await etransfer.previewEtransferApprovalBatch([{
+      importId: 'msg-1',
+      playerId: 'p1',
+      amount: 25,
+      rememberMapping: false,
+    }]);
+
+    expect(preview.settlements.map((item) => item.sessionId)).toEqual(['oldest']);
+    expect(preview.endingBalances).toEqual({ p1: 15 });
+
+    await expect(etransfer.applyEtransferApprovalBatch(preview)).resolves.toEqual({
+      approved: 1,
+      settled: 1,
+      labelFailures: 0,
+    });
+
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 15, owed: 25 });
+    expect(helpers.getClubDocData('sessions', 'oldest')?.players).toEqual([
+      expect.objectContaining({ id: 'p1', paid: true, paidVia: 'balance' }),
+    ]);
+    expect(helpers.getClubDocData('sessions', 'next')?.players).toEqual([
+      expect.objectContaining({ id: 'p1', paid: false, paidVia: null }),
+    ]);
+    expect(helpers.getClubDocData('sessions', 'newest')?.players).toEqual([
+      expect.objectContaining({ id: 'p1', paid: false, paidVia: null }),
+    ]);
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
+      autoSettledSessionIds: ['oldest'],
+    });
+
+    await etransfer.undoEtransferImport('msg-1', 'batch was incorrect');
+
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 35 });
+    expect(helpers.getClubDocData('sessions', 'oldest')?.players).toEqual([
+      expect.objectContaining({
+        id: 'p1',
+        paid: false,
+        paidVia: null,
+        settledByEtransferImportId: null,
+      }),
+    ]);
+  });
+
+  it('rejects a stale reviewed batch before applying any import or settlement', async () => {
+    seedPlayer('p1', { balance: 0, owed: 10 });
+    seedOwedSession('oldest', '2026-08-01', 10);
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      status: 'pending',
+      senderName: 'CAI FANG WU',
+      amount: 20,
+    });
+    const preview = await etransfer.previewEtransferApprovalBatch([{
+      importId: 'msg-1',
+      playerId: 'p1',
+      amount: 20,
+      rememberMapping: false,
+    }]);
+    seedPlayer('p1', { balance: 5, owed: 10 });
+
+    await expect(etransfer.applyEtransferApprovalBatch(preview)).rejects.toThrow(
+      'batch changed since it was reviewed'
+    );
+
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'pending' });
+    expect(helpers.getClubDocData('sessions', 'oldest')?.players).toEqual([
+      expect.objectContaining({ paid: false, paidVia: null }),
+    ]);
+  });
+
+  it('reopens a pooled settlement when undoing an earlier contributing transfer', async () => {
+    seedPlayer('p1', { balance: 0, owed: 15 });
+    seedOwedSession('oldest', '2026-08-01', 15);
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1', status: 'pending', senderName: 'CAI FANG WU', amount: 10,
+    });
+    helpers.seedClubDoc('etransferImports', 'msg-2', {
+      gmailMessageId: 'msg-2', status: 'pending', senderName: 'CAI FANG WU', amount: 10,
+    });
+    const preview = await etransfer.previewEtransferApprovalBatch([
+      { importId: 'msg-1', playerId: 'p1', amount: 10, rememberMapping: false },
+      { importId: 'msg-2', playerId: 'p1', amount: 10, rememberMapping: false },
+    ]);
+    await etransfer.applyEtransferApprovalBatch(preview);
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 5, owed: 0 });
+
+    await etransfer.undoEtransferImport('msg-1', 'first transfer was incorrect');
+
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 10, owed: 15 });
+    expect(helpers.getClubDocData('sessions', 'oldest')?.players).toEqual([
+      expect.objectContaining({ paid: false, paidVia: null }),
+    ]);
+    expect(helpers.getClubDocData('etransferImports', 'msg-2')).toMatchObject({ status: 'applied' });
+  });
+
+  it('keeps an automatic settlement when the remaining balance still covers it after undo', async () => {
+    seedPlayer('p1', { balance: 100, owed: 20 });
+    seedOwedSession('oldest', '2026-08-01', 20);
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1', status: 'pending', senderName: 'CAI FANG WU', amount: 10,
+    });
+    const preview = await etransfer.previewEtransferApprovalBatch([
+      { importId: 'msg-1', playerId: 'p1', amount: 10, rememberMapping: false },
+    ]);
+    await etransfer.applyEtransferApprovalBatch(preview);
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 90, owed: 0 });
+
+    await etransfer.undoEtransferImport('msg-1', 'transfer was incorrect');
+
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 80, owed: 0 });
+    expect(helpers.getClubDocData('sessions', 'oldest')?.players).toEqual([
+      expect.objectContaining({ paid: true, paidVia: 'balance' }),
+    ]);
+  });
+});
+
 describe('sender mappings', () => {
   it('saves and fetches a mapping keyed by sender email', async () => {
     await etransfer.saveEtransferSenderMapping('caifang1966@gmail.com', 'CAI FANG WU', 'p1');
