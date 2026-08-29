@@ -331,6 +331,31 @@ describe('PlayersPage', () => {
     expect(screen.queryByText(format(previousMonthSession, 'MMM d, yyyy'))).not.toBeInTheDocument();
   });
 
+  it('links a balance history entry to its session\'s real date on the calendar', async () => {
+    const sessionDate = new Date(2026, 2, 10, 19, 30);
+    const players = [makePlayer({ id: 'p1', balance: 30 })];
+
+    seedSession('s1', {
+      date: ts(sessionDate),
+      players: [makeSessionPlayer({ id: 'p1', cost: 15 })],
+    });
+    seedLedgerEntry('l1', {
+      playerId: 'p1',
+      sessionId: 's1',
+      reason: 'settlement',
+      delta: -15,
+      balanceBefore: 30,
+      balanceAfter: 15,
+      note: 'Settled from prepaid balance — session on Mar 10, 2026',
+      createdAt: ts(new Date(2026, 2, 11)),
+    });
+
+    renderPage({ players, route: '/?playerId=p1' });
+
+    const sessionLink = await screen.findByRole('link', { name: format(sessionDate, 'MMM d, yyyy') });
+    expect(sessionLink).toHaveAttribute('href', `/?date=${format(sessionDate, 'yyyy-MM-dd')}`);
+  });
+
   it('labels a session auto-settled from a Gmail e-Transfer as "Gmail e-Transfer" instead of plain "Balance"', async () => {
     const now = new Date();
     const currentMonthSession = new Date(now.getFullYear(), now.getMonth(), 14, 19, 30);

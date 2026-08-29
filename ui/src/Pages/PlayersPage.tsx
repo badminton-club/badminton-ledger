@@ -17,7 +17,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { db, refs, setPlayerSettlement, setPlayerPaidBy } from '../services/firebase';
 import { addPlayer, updatePlayerProfile, deletePlayer } from '../services/firebase/players';
 import {
-  query, where, getDocs, orderBy,
+  query, where, getDocs, getDoc, orderBy,
   doc, runTransaction, increment, serverTimestamp,
 } from 'firebase/firestore';
 import { useAppSelector } from '../hooks';
@@ -109,6 +109,10 @@ export default function PlayersPage() {
   const [ledger,             setLedger]              = useState<LedgerEntry[]>([]);
   const [isLoadingLedger,    setIsLoadingLedger]     = useState(false);
   const [ledgerError,        setLedgerError]         = useState('');
+  // Real session dates for ledger entries that reference a session, keyed by
+  // sessionId — fetched separately from (and best-effort relative to) the
+  // ledger itself, so a linked entry can show a "view on calendar" link.
+  const [sessionDatesById,   setSessionDatesById]    = useState<Record<string, Date>>({});
   const [balanceAdjustment,  setBalanceAdjustment]   = useState<BalanceAdjustment>({ ...INIT_BALANCE });
   const [isUpdatingBalance,  setIsUpdatingBalance]   = useState(false);
   const [balanceError,       setBalanceError]        = useState('');
@@ -149,6 +153,34 @@ export default function PlayersPage() {
       // Sort client-side to avoid needing a composite (playerId + createdAt) index.
       entries.sort((a, b) => (b.createdAt?.toDate().getTime() ?? 0) - (a.createdAt?.toDate().getTime() ?? 0));
       setLedger(entries);
+
+      // Best-effort: look up the real date for every session a ledger entry
+      // references, so it can link to that session on the calendar. Failure
+      // here shouldn't block the ledger itself from showing.
+      const sessionIds = [...new Set(
+        entries.map(e => e.sessionId).filter((id): id is string => !!id)
+      )];
+      if (sessionIds.length > 0) {
+        try {
+          const sessionSnaps = await Promise.all(
+            sessionIds.map(id => getDoc(doc(refs.sessions, id)))
+          );
+          const dates: Record<string, Date> = {};
+          sessionSnaps.forEach((sessionSnap, i) => {
+            if (!sessionSnap.exists()) return;
+            const rawDate = sessionSnap.data().date as { toDate?: () => Date } | string | undefined;
+            const date = rawDate && typeof rawDate === 'object' && rawDate.toDate
+              ? rawDate.toDate()
+              : rawDate && typeof rawDate === 'string' ? new Date(rawDate) : null;
+            if (date) dates[sessionIds[i]] = date;
+          });
+          setSessionDatesById(dates);
+        } catch {
+          setSessionDatesById({});
+        }
+      } else {
+        setSessionDatesById({});
+      }
     } catch {
       setLedgerError('Failed to load balance history.');
     } finally {
@@ -663,6 +695,13 @@ export default function PlayersPage() {
                             </td>
                             <td className="text-muted" style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
                               {entry.note}
+                              {entry.sessionId && sessionDatesById[entry.sessionId] && (
+                                <div className="small">
+                                  <Link to={`/?date=${format(sessionDatesById[entry.sessionId], 'yyyy-MM-dd')}`}>
+                                    {format(sessionDatesById[entry.sessionId], 'MMM d, yyyy')}
+                                  </Link>
+                                </div>
+                              )}
                             </td>
                             <td className={`text-end text-nowrap ${entry.delta >= 0 ? 'text-success' : 'text-danger'}`}>
                               {entry.delta >= 0 ? '+' : ''}{entry.delta.toFixed(2)}
