@@ -37,7 +37,14 @@ service cloud.firestore {
     match /clubs/{clubId} {
       allow read:   if isMember(clubId);
       allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if isClubAdmin(clubId);
+      // ownerUid must never change after creation — it's what lets the original
+      // creator bootstrap the first superAdmin membership (see isClubOwner above
+      // and the members bootstrap clause below). Without this, any regular admin
+      // could rewrite ownerUid to a second account they control and use that
+      // account's now-true isClubOwner() to self-grant superAdmin, bypassing the
+      // "only superadmins may grant elevated roles" invariant entirely.
+      allow update: if isClubAdmin(clubId)
+        && request.resource.data.ownerUid == resource.data.get('ownerUid', null);
       allow delete: if isClubSuperAdmin(clubId);
 
       // Membership roster. Only superadmins may create/change/remove elevated roles
@@ -61,10 +68,15 @@ service cloud.firestore {
       }
 
       // Profile edit requests: a linked member proposes a name/email change here
-      // for an admin to review and apply — same shape as linkRequests above.
+      // for an admin to review and apply — same shape as linkRequests above,
+      // except create/update also requires the proposal target their OWN linked
+      // player. Without this, any member could write a proposedEdit for someone
+      // ELSE's playerId and have an admin unknowingly approve it against the
+      // wrong player.
       match /profileEditRequests/{uid} {
         allow read:           if isSignedIn() && (request.auth.uid == uid || isClubAdmin(clubId));
-        allow create, update: if isSignedIn() && request.auth.uid == uid;
+        allow create, update: if isSignedIn() && request.auth.uid == uid
+          && isMember(clubId) && request.resource.data.playerId == memberPlayerId(clubId);
         allow delete:         if isClubAdmin(clubId) || request.auth.uid == uid;
       }
 
