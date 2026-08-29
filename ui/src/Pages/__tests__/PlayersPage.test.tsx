@@ -489,7 +489,29 @@ describe('PlayersPage', () => {
     expect(getClubDocData('balanceLedger', 'auto-id-1')).toMatchObject({ delta: 70 });
   });
 
-  it('hides the payout checkbox when the payout tab is disabled', async () => {
+  it('fills the reason field with a quick "Cash Payment" or "E-Transfer Payment" button', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', balance: 20 })];
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    const reasonInput = screen.getByPlaceholderText(/Reason \(e\.g\., Cash Payment\)/) as HTMLInputElement;
+
+    await user.click(screen.getByRole('button', { name: 'Cash Payment' }));
+    expect(reasonInput.value).toBe('Cash Payment');
+
+    await user.click(screen.getByRole('button', { name: 'E-Transfer Payment' }));
+    expect(reasonInput.value).toBe('E-Transfer Payment');
+
+    await user.type(screen.getByPlaceholderText('Amount'), '15');
+    await user.click(screen.getByRole('button', { name: 'Update Balance' }));
+
+    await waitFor(() => expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 35 }));
+    expect(getClubDocData('balanceLedger', 'auto-id-1')).toMatchObject({ note: 'E-Transfer Payment' });
+  });
+
+  it('always shows the include-in-payout checkbox, regardless of whether the Payout tab itself is enabled', async () => {
     renderPage({
       players: [makePlayer({ id: 'p1' })],
       route: '/?playerId=p1',
@@ -497,7 +519,7 @@ describe('PlayersPage', () => {
     });
 
     expect(await screen.findByText('No balance history yet.')).toBeInTheDocument();
-    expect(screen.queryByRole('checkbox', { name: 'Include in owner payout' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Include in owner payout' })).toBeInTheDocument();
   });
 
   it('adds a player through the modal and shows them once the players slice refreshes', async () => {

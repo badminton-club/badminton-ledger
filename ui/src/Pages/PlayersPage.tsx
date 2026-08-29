@@ -25,7 +25,6 @@ import {
   selectAllPlayers, selectPlayerById,
   selectPlayersStatus, selectPlayersError,
 } from '../features/players/playersSlice';
-import { selectDisabledTabs } from '../features/club/clubSlice';
 import type { NewPlayerInput, PaidVia, Player, Session } from '../types';
 import type { RootState } from '../store';
 
@@ -56,6 +55,9 @@ const INIT_BALANCE: BalanceAdjustment = { amount: '', reason: '', type: 'credit'
 
 // Common top-up amounts shown as one-tap shortcuts in the Adjust Balance form.
 const QUICK_ADD_AMOUNTS = [10, 20, 50, 100];
+
+// Common reasons shown as one-tap shortcuts in the Adjust Balance form.
+const QUICK_REASONS = ['Cash Payment', 'E-Transfer Payment'];
 
 function formatPlayerName(player: Pick<Player, 'firstName' | 'lastName'>): string {
   return [player.firstName, player.lastName].filter(Boolean).join(' ');
@@ -91,8 +93,6 @@ export default function PlayersPage() {
   const playersList   = useAppSelector(selectAllPlayers);
   const playersStatus = useAppSelector(selectPlayersStatus);
   const playersError  = useAppSelector(selectPlayersError);
-  const disabledTabs  = useAppSelector(selectDisabledTabs);
-  const payoutEnabled = !disabledTabs.includes('payout');
   const selectedPlayer = useAppSelector((s: RootState) =>
     searchParams.get('playerId') ? selectPlayerById(s, searchParams.get('playerId')!) : null
 );
@@ -618,16 +618,27 @@ export default function PlayersPage() {
                           className="mb-2"
                           required
                         />
-                        {payoutEnabled && (
-                          <Form.Check
-                            type="checkbox"
-                            id="balance-include-in-payout"
-                            label="Include in owner payout"
-                            checked={balanceAdjustment.includeInPayout}
-                            onChange={e => setBalanceAdjustment(p => ({ ...p, includeInPayout: e.target.checked }))}
-                            className="mb-2"
-                          />
-                        )}
+                        <div className="d-flex gap-2 mb-2">
+                          {QUICK_REASONS.map(quickReason => (
+                            <Button
+                              key={quickReason}
+                              type="button"
+                              size="sm"
+                              variant="outline-secondary"
+                              onClick={() => setBalanceAdjustment(p => ({ ...p, reason: quickReason }))}
+                            >
+                              {quickReason}
+                            </Button>
+                          ))}
+                        </div>
+                        <Form.Check
+                          type="checkbox"
+                          id="balance-include-in-payout"
+                          label="Include in owner payout"
+                          checked={balanceAdjustment.includeInPayout}
+                          onChange={e => setBalanceAdjustment(p => ({ ...p, includeInPayout: e.target.checked }))}
+                          className="mb-2"
+                        />
                         <Button type="submit" variant="primary" size="sm" disabled={isUpdatingBalance}>
                           {isUpdatingBalance
                             ? <Spinner as="span" size="sm" animation="border" />
