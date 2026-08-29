@@ -1,5 +1,5 @@
 import { getDocs, writeBatch, doc, collection, setDoc, serverTimestamp, arrayUnion, Timestamp } from 'firebase/firestore';
-import { db, refs, clubDoc, memberDoc, userDoc, clubCollection, CLUB_DATA_COLLECTIONS } from './client';
+import { db, clubDoc, memberDoc, userDoc, clubCollection, getCurrentClubId, CLUB_DATA_COLLECTIONS } from './client';
 import { serviceCall } from './utils';
 
 /** Data collections that `clearAllData` empties. Auth-related collections are deliberately excluded. */
@@ -23,15 +23,32 @@ export type ClearSummary = Record<ClearableCollection, number>;
 const BATCH_LIMIT = 500;
 
 /**
+ * Snapshots the current club id once, for functions that loop with multiple
+ * `await`s — without this, `refs[name]` re-resolving the mutable "current
+ * club" on every access would let a mid-operation club switch (via the navbar)
+ * mix data from two different clubs into one clear/export/restore.
+ */
+function requireCurrentClubId(): string {
+  const clubId = getCurrentClubId();
+  if (!clubId) throw new Error('No club selected — set a current club before accessing club data.');
+  return clubId;
+}
+
+/**
  * Deletes every document from the data collections (not the collections themselves).
  * Batched to respect Firestore's 500-write limit. Returns a per-collection delete count.
  */
 export async function clearAllData(): Promise<ClearSummary> {
   return serviceCall('clearAllData', async () => {
+    // Snapshot the club once up front — refs[name] re-resolves against the
+    // mutable "current club" on every access, so without this, switching clubs
+    // via the navbar mid-operation (the loop awaits between collections and
+    // batch commits) could silently clear/export/restore a mix of two clubs.
+    const clubId = requireCurrentClubId();
     const summary = {} as ClearSummary;
 
     for (const name of CLEARABLE_COLLECTIONS) {
-      const snapshot = await getDocs(refs[name]);
+      const snapshot = await getDocs(clubCollection(name, clubId));
       let deleted = 0;
       let pending = 0;
       let batch = writeBatch(db);
@@ -96,9 +113,10 @@ export interface BackupData {
 /** Reads every data collection into a JSON-serializable backup object. */
 export async function exportAllData(): Promise<BackupData> {
   return serviceCall('exportAllData', async () => {
+    const clubId = requireCurrentClubId();
     const collections: BackupData['collections'] = {};
     for (const name of CLEARABLE_COLLECTIONS) {
-      const snapshot = await getDocs(refs[name]);
+      const snapshot = await getDocs(clubCollection(name, clubId));
       collections[name] = snapshot.docs.map(d => ({ id: d.id, data: serialize(d.data()) }));
     }
     return { version: 1, exportedAt: new Date().toISOString(), collections };
@@ -119,6 +137,7 @@ export async function restoreAllData(backup: BackupData): Promise<ClearSummary> 
       throw new Error('Invalid or unsupported backup file.');
     }
 
+    const clubId = requireCurrentClubId();
     const summary = {} as ClearSummary;
     for (const name of CLEARABLE_COLLECTIONS) {
       const entries = backup.collections[name] ?? [];
@@ -127,7 +146,7 @@ export async function restoreAllData(backup: BackupData): Promise<ClearSummary> 
       let batch = writeBatch(db);
 
       for (const entry of entries) {
-        batch.set(doc(refs[name], entry.id), deserialize(entry.data) as Record<string, unknown>);
+        batch.set(doc(clubCollection(name, clubId), entry.id), deserialize(entry.data) as Record<string, unknown>);
         pending += 1;
         written += 1;
         if (pending === BATCH_LIMIT) {

@@ -34,7 +34,7 @@ import {
   seedUserDoc,
   TEST_CLUB_ID,
 } from '../../../test-utils/firebaseTestHelpers';
-import { __getDocData, __seedDoc, Timestamp } from '../../../test-utils/fakeFirestore';
+import { __getAllPaths, __getDocData, __seedDoc, Timestamp } from '../../../test-utils/fakeFirestore';
 
 beforeEach(() => {
   resetFirebaseTestState();
@@ -498,5 +498,19 @@ describe('deleteClub', () => {
 
     expect(__getDocData('clubs/club-a/linkRequests/pending-uid')).toBeUndefined();
     expect(__getDocData('clubs/club-a/profileEditRequests/pending-uid-2')).toBeUndefined();
+  });
+
+  it('deletes a club with more than 500 members by committing multiple batches', async () => {
+    seedClubMetaDoc('club-a', { name: 'Big Club' });
+    seedMemberDoc('owner-1', { role: 'superAdmin' }, 'club-a');
+    seedUserDoc('owner-1', { clubs: ['club-a'], lastVisitedClub: 'club-a' });
+    for (let i = 0; i < 501; i += 1) {
+      __seedDoc(`clubs/club-a/members/member-${i}`, { role: 'member' });
+    }
+
+    await deleteClub('club-a', 'owner-1');
+
+    expect(__getDocData('clubs/club-a')).toBeUndefined();
+    expect(__getAllPaths().filter((p) => p.startsWith('clubs/club-a/'))).toHaveLength(0);
   });
 });

@@ -377,12 +377,20 @@ export async function deleteClub(clubId: string, uid: string): Promise<void> {
       getDocs(linkRequestsRef(clubId)),
       getDocs(profileEditRequestsRef(clubId)),
     ]);
-    const batch = writeBatch(db);
-    members.docs.forEach((d) => batch.delete(d.ref));
-    linkRequests.docs.forEach((d) => batch.delete(d.ref));
-    profileEditRequests.docs.forEach((d) => batch.delete(d.ref));
-    batch.delete(clubDoc(clubId));
-    await batch.commit();
+    // Chunked into <=500-write batches — a single batch would fail outright for
+    // any club with more members/requests than Firestore's per-batch limit.
+    const refsToDelete = [
+      ...members.docs.map((d) => d.ref),
+      ...linkRequests.docs.map((d) => d.ref),
+      ...profileEditRequests.docs.map((d) => d.ref),
+      clubDoc(clubId),
+    ];
+    const BATCH_LIMIT = 500;
+    for (let i = 0; i < refsToDelete.length; i += BATCH_LIMIT) {
+      const batch = writeBatch(db);
+      for (const ref of refsToDelete.slice(i, i + BATCH_LIMIT)) batch.delete(ref);
+      await batch.commit();
+    }
 
     await removeClubFromUser(uid, clubId);
   });
