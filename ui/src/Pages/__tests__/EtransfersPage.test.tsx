@@ -80,7 +80,9 @@ describe('EtransfersPage', () => {
     renderPage();
     expect(await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.')).toBeInTheDocument();
     const defaultSearchDate = getDefaultEtransferSearchAfterDate();
-    expect(screen.getByLabelText('Search emails after')).toHaveValue(defaultSearchDate);
+    // Default mode is the "1 week" rolling window, so no custom date input is shown.
+    expect(screen.getByRole('combobox', { name: 'Search window' })).toHaveValue('7');
+    expect(screen.queryByLabelText('Search emails after')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
 
@@ -89,10 +91,41 @@ describe('EtransfersPage', () => {
     expect(screen.getByText('cash for shoppers')).toBeInTheDocument();
     expect(await screen.findByText(/found 1 email\(s\) — 1 new/i)).toBeInTheDocument();
     // Single-candidate name lookup ("Cai" matches the seeded player "Cai Wu") pre-selects the player.
-    expect(screen.getByRole('combobox')).toHaveValue('p1');
+    expect(screen.getByRole('combobox', { name: '' })).toHaveValue('p1');
   });
 
-  it('loads and persists the club-specific earliest search date', async () => {
+  it('loads a saved rolling window and lets an admin switch presets or reset to default', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc('test-club', { name: 'Test Club', etransferSearchWindowDays: 30 });
+
+    renderPage();
+    const windowSelect = await screen.findByRole('combobox', { name: 'Search window' });
+    expect(windowSelect).toHaveValue('30');
+
+    await user.selectOptions(windowSelect, '14');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.getByText('Saved.')).toBeInTheDocument());
+    expect(getClubMetaDocData('test-club')).toMatchObject({ etransferSearchWindowDays: 14 });
+
+    await user.click(screen.getByRole('button', { name: 'Reset to default' }));
+    await waitFor(() => expect(screen.getByText('Reset to the default 1-week window.')).toBeInTheDocument());
+    expect(windowSelect).toHaveValue('7');
+    expect(getClubMetaDocData('test-club')).toMatchObject({
+      etransferSearchWindowDays: null,
+      etransferSearchAfterDate: null,
+    });
+  });
+
+  it('shows a fallback option for a saved window that is not one of the standard presets', async () => {
+    seedClubMetaDoc('test-club', { name: 'Test Club', etransferSearchWindowDays: 45 });
+
+    renderPage();
+    const windowSelect = await screen.findByRole('combobox', { name: 'Search window' });
+    expect(windowSelect).toHaveValue('45');
+    expect(within(windowSelect).getByText('45 days before today')).toBeInTheDocument();
+  });
+
+  it('loads and persists a club-specific custom search date', async () => {
     const user = userEvent.setup();
     seedClubMetaDoc('test-club', {
       name: 'Test Club',
@@ -100,15 +133,16 @@ describe('EtransfersPage', () => {
     });
 
     renderPage();
-    const dateInput = await screen.findByLabelText('Search emails after');
+    expect(await screen.findByRole('combobox', { name: 'Search window' })).toHaveValue('custom');
+    const dateInput = screen.getByLabelText('Search emails after');
     expect(dateInput).toHaveValue('2026-09-01');
 
     await user.clear(dateInput);
     await user.type(dateInput, '2026-10-15');
-    await user.click(screen.getByRole('button', { name: 'Save date' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Search date saved.')).toBeInTheDocument();
+      expect(screen.getByText('Saved.')).toBeInTheDocument();
     });
     expect(getClubMetaDocData('test-club')).toMatchObject({
       etransferSearchAfterDate: '2026-10-15',

@@ -26,6 +26,30 @@ let pendingTokenRequest: { value: Promise<string>; uid: string } | null = null;
 /** The default sender address for Interac e-Transfer autodeposit notifications. */
 export const DEFAULT_ETRANSFER_SENDER_ADDRESS = 'notify@payments.interac.ca';
 
+/** The default rolling search window: one calendar week back. */
+export const DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS = 7;
+
+/** Preset rolling-window choices offered in the e-Transfer search UI. */
+export const ETRANSFER_SEARCH_WINDOW_PRESETS: { days: number; label: string }[] = [
+  { days: 7, label: '1 week' },
+  { days: 14, label: '2 weeks' },
+  { days: 30, label: '1 month' },
+  { days: 90, label: '3 months' },
+];
+
+/**
+ * Formats the UTC calendar date `daysBack` days before `reference` (today,
+ * unless overridden — mainly for tests) as an ISO `YYYY-MM-DD` string.
+ */
+export function dateDaysBeforeUtc(daysBack: number, reference: Date = new Date()): string {
+  const todayUtcMs = Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate());
+  const target = new Date(todayUtcMs - daysBack * 24 * 60 * 60 * 1000);
+  const year = target.getUTCFullYear();
+  const month = String(target.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(target.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 /**
  * The default lower bound for Gmail e-Transfer searches: one calendar week
  * (UTC) before `reference` (today, unless overridden — mainly for tests).
@@ -33,12 +57,24 @@ export const DEFAULT_ETRANSFER_SENDER_ADDRESS = 'notify@payments.interac.ca';
  * time passes, rather than needing to be manually bumped forward.
  */
 export function getDefaultEtransferSearchAfterDate(reference: Date = new Date()): string {
-  const todayUtcMs = Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate());
-  const oneWeekAgo = new Date(todayUtcMs - 7 * 24 * 60 * 60 * 1000);
-  const year = oneWeekAgo.getUTCFullYear();
-  const month = String(oneWeekAgo.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(oneWeekAgo.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return dateDaysBeforeUtc(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS, reference);
+}
+
+/**
+ * Resolves the actual search-after date to use for a club: a rolling window
+ * (in days, recomputed fresh every call so it never goes stale) takes
+ * priority once set; otherwise falls back to a previously saved one-off
+ * absolute date, then finally the default rolling window.
+ */
+export function resolveEtransferSearchAfterDate(
+  club: { etransferSearchWindowDays?: number | null; etransferSearchAfterDate?: string | null } | null | undefined,
+  reference: Date = new Date()
+): string {
+  if (club?.etransferSearchWindowDays != null) {
+    return dateDaysBeforeUtc(club.etransferSearchWindowDays, reference);
+  }
+  if (club?.etransferSearchAfterDate) return club.etransferSearchAfterDate;
+  return getDefaultEtransferSearchAfterDate(reference);
 }
 
 export interface ParsedEtransferEmail {

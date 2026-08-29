@@ -198,6 +198,35 @@ describe('getDefaultEtransferSearchAfterDate', () => {
   });
 });
 
+describe('dateDaysBeforeUtc', () => {
+  it('computes an arbitrary number of UTC calendar days back', () => {
+    const reference = new Date('2026-08-27T14:47:00.000Z');
+    expect(gmail.dateDaysBeforeUtc(14, reference)).toBe('2026-08-13');
+    expect(gmail.dateDaysBeforeUtc(30, reference)).toBe('2026-07-28');
+    expect(gmail.dateDaysBeforeUtc(90, reference)).toBe('2026-05-29');
+  });
+});
+
+describe('resolveEtransferSearchAfterDate', () => {
+  const reference = new Date('2026-08-27T14:47:00.000Z');
+
+  it('prefers a saved rolling window, recomputed from the reference date', () => {
+    expect(gmail.resolveEtransferSearchAfterDate({ etransferSearchWindowDays: 30 }, reference)).toBe('2026-07-28');
+  });
+
+  it('falls back to a saved custom absolute date when no rolling window is set', () => {
+    expect(gmail.resolveEtransferSearchAfterDate(
+      { etransferSearchWindowDays: null, etransferSearchAfterDate: '2026-01-01' },
+      reference
+    )).toBe('2026-01-01');
+  });
+
+  it('falls back to the default 1-week rolling window when neither is set', () => {
+    expect(gmail.resolveEtransferSearchAfterDate(null, reference)).toBe('2026-08-20');
+    expect(gmail.resolveEtransferSearchAfterDate({}, reference)).toBe('2026-08-20');
+  });
+});
+
 describe('searchEtransferEmails', () => {
   it('re-authenticates with the read-only Gmail scope and parses full messages', async () => {
     helpers.setCurrentUser(userOne);

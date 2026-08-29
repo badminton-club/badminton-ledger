@@ -15,9 +15,13 @@ import {
   saveEtransferSenderMapping,
   deleteEtransferSenderMapping,
   setClubEtransferSearchAfterDate,
+  setClubEtransferSearchWindowDays,
+  resetClubEtransferSearchSetting,
   formatPlayerName,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
-  getDefaultEtransferSearchAfterDate,
+  DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS,
+  ETRANSFER_SEARCH_WINDOW_PRESETS,
+  resolveEtransferSearchAfterDate,
   type EtransferBatchPreview,
 } from '../services/firebase';
 import { toJSDate } from '../services/firebase/utils';
@@ -68,12 +72,41 @@ export default function EtransfersPage() {
   const [rowEdits, setRowEdits] = useState<Record<string, RowEdit>>({});
 
   const [senderAddress, setSenderAddress] = useState(DEFAULT_ETRANSFER_SENDER_ADDRESS);
-  const [searchAfterDate, setSearchAfterDate] = useState(() => getDefaultEtransferSearchAfterDate());
+  // null means "custom date" mode; otherwise a rolling window in days (recomputed fresh
+  // from today on every search, so it never goes stale like a saved absolute date would).
+  const [searchWindowDays, setSearchWindowDays] = useState<number | null>(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
+  const [customSearchDate, setCustomSearchDate] = useState('');
   const [savingSearchDate, setSavingSearchDate] = useState(false);
   const [searchDateMessage, setSearchDateMessage] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [searchMessage, setSearchMessage] = useState('');
+
+  // Always includes the presets, plus a fallback option for whatever value is
+  // currently loaded/selected (e.g. a club's saved window from before the
+  // preset list changed, or a value only ever set via Firestore directly) —
+  // so the <select> never silently mismatches the real underlying state.
+  const searchWindowOptions = useMemo(() => {
+    const presetDays = new Set(ETRANSFER_SEARCH_WINDOW_PRESETS.map((preset) => preset.days));
+    const options = ETRANSFER_SEARCH_WINDOW_PRESETS.map((preset) => ({
+      days: preset.days,
+      label: `${preset.label} before today`,
+    }));
+    if (searchWindowDays != null && !presetDays.has(searchWindowDays)) {
+      options.push({ days: searchWindowDays, label: `${searchWindowDays} days before today` });
+    }
+    return options;
+  }, [searchWindowDays]);
+
+  const searchAfterDate = useMemo(() => {
+    // Custom mode with no date chosen yet shouldn't silently fall back to the
+    // default window — leave it blank so the Search button stays disabled.
+    if (searchWindowDays == null && !customSearchDate) return '';
+    return resolveEtransferSearchAfterDate({
+      etransferSearchWindowDays: searchWindowDays,
+      etransferSearchAfterDate: customSearchDate,
+    });
+  }, [searchWindowDays, customSearchDate]);
 
   const [applyError, setApplyError] = useState<Record<string, string>>({});
   const [batchPreview, setBatchPreview] = useState<EtransferBatchPreview | null>(null);
@@ -117,7 +150,16 @@ export default function EtransfersPage() {
         fetchEtransferSenderMappings(),
       ]);
       setSenderAddress(club?.etransferSenderAddress || DEFAULT_ETRANSFER_SENDER_ADDRESS);
-      setSearchAfterDate(club?.etransferSearchAfterDate || getDefaultEtransferSearchAfterDate());
+      if (club?.etransferSearchWindowDays != null) {
+        setSearchWindowDays(club.etransferSearchWindowDays);
+        setCustomSearchDate('');
+      } else if (club?.etransferSearchAfterDate) {
+        setSearchWindowDays(null);
+        setCustomSearchDate(club.etransferSearchAfterDate);
+      } else {
+        setSearchWindowDays(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
+        setCustomSearchDate('');
+      }
       setPending(pendingList);
       setHistory(historyList);
       setMappings(mappingList);
@@ -137,12 +179,19 @@ export default function EtransfersPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  /** Persists whichever search-cutoff mode (rolling window or custom date) is active. */
+  const persistSearchSetting = async () => {
+    if (!clubId) return;
+    if (searchWindowDays != null) await setClubEtransferSearchWindowDays(clubId, searchWindowDays);
+    else await setClubEtransferSearchAfterDate(clubId, customSearchDate);
+  };
+
   const handleSearch = async () => {
     setSearching(true);
     setSearchError('');
     setSearchMessage('');
     try {
-      if (clubId) await setClubEtransferSearchAfterDate(clubId, searchAfterDate);
+      await persistSearchSetting();
       const { found, created } = await importEtransferEmails(senderAddress, searchAfterDate);
       setSearchMessage(
         found === 0
@@ -165,10 +214,26 @@ export default function EtransfersPage() {
     setSearchError('');
     setSearchDateMessage('');
     try {
-      await setClubEtransferSearchAfterDate(clubId, searchAfterDate);
-      setSearchDateMessage('Search date saved.');
+      await persistSearchSetting();
+      setSearchDateMessage('Saved.');
     } catch (err) {
-      setSearchError(err instanceof Error ? err.message : 'Failed to save the search date.');
+      setSearchError(err instanceof Error ? err.message : 'Failed to save the search setting.');
+    } finally {
+      setSavingSearchDate(false);
+    }
+  };
+
+  const handleResetSearchSetting = async () => {
+    setSavingSearchDate(true);
+    setSearchError('');
+    setSearchDateMessage('');
+    try {
+      if (clubId) await resetClubEtransferSearchSetting(clubId);
+      setSearchWindowDays(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
+      setCustomSearchDate('');
+      setSearchDateMessage('Reset to the default 1-week window.');
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : 'Failed to reset the search setting.');
     } finally {
       setSavingSearchDate(false);
     }
@@ -360,26 +425,60 @@ export default function EtransfersPage() {
             {searching ? <><Spinner size="sm" animation="border" className="me-2" />Connecting to Gmail…</> : 'Connect Gmail & Search'}
           </Button>
           <span className="text-muted small">Searching e-Transfers from: {senderAddress}</span>
-          <Form.Group controlId="etransfer-search-after">
-            <Form.Label className="small mb-1">Search emails after</Form.Label>
-            <Form.Control
-              type="date"
+          <Form.Group controlId="etransfer-search-window">
+            <Form.Label className="small mb-1">Search window</Form.Label>
+            <Form.Select
               size="sm"
-              value={searchAfterDate}
+              value={searchWindowDays == null ? 'custom' : String(searchWindowDays)}
               onChange={(e) => {
-                setSearchAfterDate(e.target.value);
+                const value = e.target.value;
+                if (value === 'custom') {
+                  setSearchWindowDays(null);
+                  setCustomSearchDate((prev) => prev || searchAfterDate);
+                } else {
+                  setSearchWindowDays(Number(value));
+                }
                 setSearchDateMessage('');
               }}
               disabled={savingSearchDate}
-            />
+            >
+              {searchWindowOptions.map((preset) => (
+                <option key={preset.days} value={preset.days}>{preset.label}</option>
+              ))}
+              <option value="custom">Custom date…</option>
+            </Form.Select>
           </Form.Group>
+          {searchWindowDays == null && (
+            <Form.Group controlId="etransfer-search-after">
+              <Form.Label className="small mb-1">Search emails after</Form.Label>
+              <Form.Control
+                type="date"
+                size="sm"
+                value={customSearchDate}
+                onChange={(e) => {
+                  setCustomSearchDate(e.target.value);
+                  setSearchDateMessage('');
+                }}
+                disabled={savingSearchDate}
+              />
+            </Form.Group>
+          )}
           <Button
             size="sm"
             variant="outline-secondary"
             onClick={handleSaveSearchDate}
             disabled={savingSearchDate || !searchAfterDate}
           >
-            {savingSearchDate ? <Spinner size="sm" animation="border" /> : 'Save date'}
+            {savingSearchDate ? <Spinner size="sm" animation="border" /> : 'Save'}
+          </Button>
+          <Button
+            size="sm"
+            variant="link"
+            className="p-0"
+            onClick={handleResetSearchSetting}
+            disabled={savingSearchDate}
+          >
+            Reset to default
           </Button>
           {searchDateMessage && <span className="text-success small">{searchDateMessage}</span>}
         </Card.Body>

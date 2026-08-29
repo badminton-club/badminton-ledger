@@ -18,6 +18,9 @@ import {
   removeClubFromUser,
   removeClubMember,
   setClubTabEnabled,
+  setClubEtransferSearchAfterDate,
+  setClubEtransferSearchWindowDays,
+  resetClubEtransferSearchSetting,
   setLastVisitedClub,
   setMemberPlayer,
   submitLinkRequest,
@@ -405,6 +408,45 @@ describe('setClubTabEnabled', () => {
     expect(__getDocData('clubs/club-a')).toMatchObject({
       name: 'Alpha Club',
       disabledTabs: ['ledger'],
+    });
+  });
+});
+
+describe('e-Transfer search cutoff settings', () => {
+  it('setClubEtransferSearchWindowDays saves the rolling window and clears any custom date', async () => {
+    seedClubMetaDoc('club-a', { name: 'Alpha Club', etransferSearchAfterDate: '2026-01-01' });
+
+    await setClubEtransferSearchWindowDays('club-a', 14);
+
+    expect(__getDocData('clubs/club-a')).toMatchObject({
+      etransferSearchWindowDays: 14,
+      etransferSearchAfterDate: null,
+    });
+  });
+
+  it('setClubEtransferSearchAfterDate saves a custom date and clears any rolling window', async () => {
+    seedClubMetaDoc('club-a', { name: 'Alpha Club', etransferSearchWindowDays: 30 });
+
+    await setClubEtransferSearchAfterDate('club-a', '2026-05-01');
+
+    expect(__getDocData('clubs/club-a')).toMatchObject({
+      etransferSearchAfterDate: '2026-05-01',
+      etransferSearchWindowDays: null,
+    });
+  });
+
+  it('resetClubEtransferSearchSetting clears both, reverting to the default rolling window', async () => {
+    seedClubMetaDoc('club-a', {
+      name: 'Alpha Club',
+      etransferSearchWindowDays: 30,
+      etransferSearchAfterDate: '2026-05-01',
+    });
+
+    await resetClubEtransferSearchSetting('club-a');
+
+    expect(__getDocData('clubs/club-a')).toMatchObject({
+      etransferSearchWindowDays: null,
+      etransferSearchAfterDate: null,
     });
   });
 });

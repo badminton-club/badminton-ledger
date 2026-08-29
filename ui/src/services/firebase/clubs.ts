@@ -143,10 +143,43 @@ export async function addClubMember(clubId: string, uid: string, role: ClubRole)
   });
 }
 
-/** Persists the earliest calendar date included in Gmail e-Transfer searches. */
+/**
+ * Persists the club's e-Transfer search cutoff as a rolling window (in days,
+ * recomputed fresh on every search) — clears any previously saved one-off
+ * absolute date, since the rolling window takes priority once set.
+ */
+export async function setClubEtransferSearchWindowDays(clubId: string, days: number): Promise<void> {
+  return serviceCall('setClubEtransferSearchWindowDays', async () => {
+    await setDoc(
+      clubDoc(clubId),
+      { etransferSearchWindowDays: days, etransferSearchAfterDate: null },
+      { merge: true }
+    );
+  });
+}
+
+/**
+ * Persists a one-off absolute cutoff date for e-Transfer searches — clears
+ * any saved rolling window, since an absolute date is a manual override.
+ */
 export async function setClubEtransferSearchAfterDate(clubId: string, date: string): Promise<void> {
   return serviceCall('setClubEtransferSearchAfterDate', async () => {
-    await setDoc(clubDoc(clubId), { etransferSearchAfterDate: date }, { merge: true });
+    await setDoc(
+      clubDoc(clubId),
+      { etransferSearchAfterDate: date, etransferSearchWindowDays: null },
+      { merge: true }
+    );
+  });
+}
+
+/** Clears any saved e-Transfer search cutoff, reverting to the default rolling window. */
+export async function resetClubEtransferSearchSetting(clubId: string): Promise<void> {
+  return serviceCall('resetClubEtransferSearchSetting', async () => {
+    await setDoc(
+      clubDoc(clubId),
+      { etransferSearchAfterDate: null, etransferSearchWindowDays: null },
+      { merge: true }
+    );
   });
 }
 
