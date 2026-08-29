@@ -94,7 +94,7 @@ describe('EtransfersPage', () => {
     expect(screen.getByRole('combobox', { name: '' })).toHaveValue('p1');
   });
 
-  it('loads a saved rolling window and lets an admin switch presets or reset to default', async () => {
+  it('loads a saved rolling window and lets an admin switch presets and save', async () => {
     const user = userEvent.setup();
     seedClubMetaDoc('test-club', { name: 'Test Club', etransferSearchWindowDays: 30 });
 
@@ -106,14 +106,6 @@ describe('EtransfersPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(screen.getByText('Saved.')).toBeInTheDocument());
     expect(getClubMetaDocData('test-club')).toMatchObject({ etransferSearchWindowDays: 14 });
-
-    await user.click(screen.getByRole('button', { name: 'Reset to default' }));
-    await waitFor(() => expect(screen.getByText('Reset to the default 1-week window.')).toBeInTheDocument());
-    expect(windowSelect).toHaveValue('7');
-    expect(getClubMetaDocData('test-club')).toMatchObject({
-      etransferSearchWindowDays: null,
-      etransferSearchAfterDate: null,
-    });
   });
 
   it('shows a fallback option for a saved window that is not one of the standard presets', async () => {

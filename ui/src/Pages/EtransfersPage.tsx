@@ -16,7 +16,6 @@ import {
   deleteEtransferSenderMapping,
   setClubEtransferSearchAfterDate,
   setClubEtransferSearchWindowDays,
-  resetClubEtransferSearchSetting,
   formatPlayerName,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
   DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS,
@@ -218,22 +217,6 @@ export default function EtransfersPage() {
       setSearchDateMessage('Saved.');
     } catch (err) {
       setSearchError(err instanceof Error ? err.message : 'Failed to save the search setting.');
-    } finally {
-      setSavingSearchDate(false);
-    }
-  };
-
-  const handleResetSearchSetting = async () => {
-    setSavingSearchDate(true);
-    setSearchError('');
-    setSearchDateMessage('');
-    try {
-      if (clubId) await resetClubEtransferSearchSetting(clubId);
-      setSearchWindowDays(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
-      setCustomSearchDate('');
-      setSearchDateMessage('Reset to the default 1-week window.');
-    } catch (err) {
-      setSearchError(err instanceof Error ? err.message : 'Failed to reset the search setting.');
     } finally {
       setSavingSearchDate(false);
     }
@@ -528,15 +511,6 @@ export default function EtransfersPage() {
             disabled={savingSearchDate || !searchAfterDate}
           >
             {savingSearchDate ? <Spinner size="sm" animation="border" /> : 'Save'}
-          </Button>
-          <Button
-            size="sm"
-            variant="link"
-            className="p-0"
-            onClick={handleResetSearchSetting}
-            disabled={savingSearchDate}
-          >
-            Reset to default
           </Button>
           {searchDateMessage && <span className="text-success small">{searchDateMessage}</span>}
         </Card.Body>
