@@ -665,7 +665,10 @@ export default function EtransfersPage() {
 
               <h6>Sessions to settle from balance</h6>
               {batchPreview.settlements.length === 0 ? (
-                <p className="text-muted">No owed sessions are fully covered by the resulting balances.</p>
+                <p className="text-muted">
+                  No owed session is fully covered by the resulting balance
+                  {Object.keys(batchPreview.endingBalances).length === 1 ? '' : 's'} below.
+                </p>
               ) : (
                 <Table responsive size="sm">
                   <thead>
@@ -682,7 +685,13 @@ export default function EtransfersPage() {
                   </tbody>
                 </Table>
               )}
-              {batchError && <Alert variant="danger" className="mb-0">{batchError}</Alert>}
+              <p className="text-muted small mb-0">
+                Resulting balance{Object.keys(batchPreview.endingBalances).length === 1 ? '' : 's'}:{' '}
+                {Object.entries(batchPreview.endingBalances)
+                  .map(([playerId, balance]) => `${playerName(playerId)}: ${money(balance)}`)
+                  .join(', ')}
+              </p>
+              {batchError && <Alert variant="danger" className="mb-0 mt-2">{batchError}</Alert>}
             </>
           )}
         </Modal.Body>

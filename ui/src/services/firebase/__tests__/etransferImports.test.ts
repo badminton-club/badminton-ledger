@@ -374,6 +374,59 @@ describe('e-Transfer approval batches', () => {
     });
   }
 
+  it('settles a one-cent oldest session and stops before the newer $10 session when credited $9 (does not skip ahead)', async () => {
+    seedPlayer('p1', { balance: 0, owed: 10.01 });
+    seedOwedSession('oldest', '2026-08-01', 0.01);
+    seedOwedSession('newest', '2026-08-08', 10);
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      status: 'pending',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'sender@example.com',
+      amount: 9,
+    });
+
+    const preview = await etransfer.previewEtransferApprovalBatch([{
+      importId: 'msg-1',
+      playerId: 'p1',
+      amount: 9,
+      rememberMapping: false,
+    }]);
+
+    expect(preview.settlements.map((item) => item.sessionId)).toEqual(['oldest']);
+    expect(preview.endingBalances).toEqual({ p1: 8.99 });
+
+    await etransfer.applyEtransferApprovalBatch(preview);
+
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 8.99, owed: 10 });
+    expect(helpers.getClubDocData('sessions', 'oldest')?.players).toEqual([
+      expect.objectContaining({ paid: true, paidVia: 'balance' }),
+    ]);
+    expect(helpers.getClubDocData('sessions', 'newest')?.players).toEqual([
+      expect.objectContaining({ paid: false, paidVia: null }),
+    ]);
+  });
+
+  it('pools credit across two selected imports and still settles the covered oldest session, stopping before the unaffordable newer one', async () => {
+    seedPlayer('p1', { balance: 0, owed: 10.01 });
+    seedOwedSession('oldest', '2026-08-01', 0.01);
+    seedOwedSession('newest', '2026-08-08', 10);
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1', status: 'pending', senderName: 'CAI FANG WU', amount: 4,
+    });
+    helpers.seedClubDoc('etransferImports', 'msg-2', {
+      gmailMessageId: 'msg-2', status: 'pending', senderName: 'CAI FANG WU', amount: 5,
+    });
+
+    const preview = await etransfer.previewEtransferApprovalBatch([
+      { importId: 'msg-1', playerId: 'p1', amount: 4, rememberMapping: false },
+      { importId: 'msg-2', playerId: 'p1', amount: 5, rememberMapping: false },
+    ]);
+
+    expect(preview.settlements.map((item) => item.sessionId)).toEqual(['oldest']);
+    expect(preview.endingBalances).toEqual({ p1: 8.99 });
+  });
+
   it('previews and settles only fully covered sessions from oldest to newest', async () => {
     seedPlayer('p1', { balance: 0, owed: 35 });
     seedOwedSession('oldest', '2026-08-01', 10);
