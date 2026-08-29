@@ -685,6 +685,18 @@ export default function EtransfersPage() {
                   </tbody>
                 </Table>
               )}
+              {batchPreview.blockingSessions.length > 0 && (
+                <p className="text-muted small mb-0">
+                  {batchPreview.blockingSessions.map((blocking) => (
+                    <span key={`${blocking.sessionId}-${blocking.playerId}`} className="d-block">
+                      Note: {playerName(blocking.playerId)}'s oldest remaining unpaid session —
+                      {' '}{money(blocking.cost)} on {format(blocking.sessionDate, 'MMM d, yyyy')} — isn't
+                      fully covered by the resulting balance of {money(blocking.availableBalance)}, so it
+                      (and any newer unpaid sessions) will stay unsettled even if one of them is smaller.
+                    </span>
+                  ))}
+                </p>
+              )}
               <p className="text-muted small mb-0">
                 Resulting balance{Object.keys(batchPreview.endingBalances).length === 1 ? '' : 's'}:{' '}
                 {Object.entries(batchPreview.endingBalances)

@@ -38,6 +38,15 @@ export interface EtransferBatchSettlement {
   cost: number;
 }
 
+/** The oldest unpaid session for a player that stopped oldest-first settlement short. */
+export interface EtransferBatchBlockingSession {
+  playerId: string;
+  sessionId: string;
+  sessionDate: Date;
+  cost: number;
+  availableBalance: number;
+}
+
 export interface EtransferBatchPreview {
   inputs: EtransferBatchApprovalInput[];
   approvals: {
@@ -47,6 +56,7 @@ export interface EtransferBatchPreview {
     amount: number;
   }[];
   settlements: EtransferBatchSettlement[];
+  blockingSessions: EtransferBatchBlockingSession[];
   startingBalances: Record<string, number>;
   startingOwed: Record<string, number>;
   endingBalances: Record<string, number>;
@@ -361,6 +371,7 @@ export async function previewEtransferApprovalBatch(
     }
 
     const settlements: EtransferBatchSettlement[] = [];
+    const blockingSessions: EtransferBatchBlockingSession[] = [];
     for (const playerId of selectedPlayerIds) {
       const playerInputs = inputs.filter((input) => input.playerId === playerId);
       const fundingImportId = playerInputs[playerInputs.length - 1].importId;
@@ -371,7 +382,19 @@ export async function previewEtransferApprovalBatch(
           ?? (participant.comped ? 'comp' : participant.paid ? 'etransfer' : null);
         if (paidVia !== null) continue;
         const costCents = toCents(participant.cost);
-        if (costCents > endingBalanceCents[playerId]) break;
+        if (costCents > endingBalanceCents[playerId]) {
+          // The oldest remaining unpaid session for this player is not affordable —
+          // record it so the UI can explain why settlement stopped here, even if a
+          // later (newer) unpaid session would otherwise have been affordable.
+          blockingSessions.push({
+            playerId,
+            sessionId: session.id,
+            sessionDate: session.date,
+            cost: participant.cost,
+            availableBalance: fromCents(endingBalanceCents[playerId]),
+          });
+          break;
+        }
 
         endingBalanceCents[playerId] -= costCents;
         settlements.push({
@@ -393,6 +416,7 @@ export async function previewEtransferApprovalBatch(
       inputs: inputs.map((input) => ({ ...input })),
       approvals,
       settlements,
+      blockingSessions,
       startingBalances,
       startingOwed,
       endingBalances,

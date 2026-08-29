@@ -196,6 +196,44 @@ describe('EtransfersPage', () => {
     ]);
   });
 
+  it('does not skip an older, larger unpaid session to settle a smaller newer one, and explains why in the preview', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 13.04 }));
+    seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'sender@example.com',
+      amount: 0.01,
+      emailDate: ts('2026-08-26'),
+      status: 'pending',
+      matchedPlayerId: 'p1',
+      matchSource: 'name-lookup',
+    });
+    seedClubDoc('sessions', 'older-big', {
+      date: ts('2026-08-19T12:00:00'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 13.03, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    seedClubDoc('sessions', 'newer-small', {
+      date: ts('2026-08-21T12:00:00'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 0.01, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+
+    renderPage();
+    await screen.findByText('CAI FANG WU');
+    await user.click(screen.getByRole('button', { name: 'Review batch (1)' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/No owed session is fully covered/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/oldest remaining unpaid session/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/\$13\.03 on Aug 19, 2026/)).toBeInTheDocument();
+  });
+
   it('undoes an applied import and reverses the balance', async () => {
     const user = userEvent.setup();
     seedClubDoc('players', 'p1', makePlayer({ balance: 210 })); // already includes the +200 credit

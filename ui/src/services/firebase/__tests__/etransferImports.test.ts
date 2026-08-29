@@ -395,6 +395,13 @@ describe('e-Transfer approval batches', () => {
 
     expect(preview.settlements.map((item) => item.sessionId)).toEqual(['oldest']);
     expect(preview.endingBalances).toEqual({ p1: 8.99 });
+    expect(preview.blockingSessions).toEqual([{
+      playerId: 'p1',
+      sessionId: 'newest',
+      sessionDate: new Date('2026-08-08T00:00:00.000Z'),
+      cost: 10,
+      availableBalance: 8.99,
+    }]);
 
     await etransfer.applyEtransferApprovalBatch(preview);
 
@@ -405,6 +412,38 @@ describe('e-Transfer approval batches', () => {
     expect(helpers.getClubDocData('sessions', 'newest')?.players).toEqual([
       expect.objectContaining({ paid: false, paidVia: null }),
     ]);
+  });
+
+  it('does not skip an unaffordable older unpaid session to settle a cheaper, newer one — reports it as a blocking session instead', async () => {
+    // Mirrors a real reported case: an older $13.03 unpaid session and a newer,
+    // smaller $0.01 unpaid one. A $0.01 credit covers the small session by amount,
+    // but oldest-first means the bigger, older debt must clear first.
+    seedPlayer('p1', { balance: 0, owed: 13.04 });
+    seedOwedSession('older-big', '2026-08-19', 13.03);
+    seedOwedSession('newer-small', '2026-08-21', 0.01);
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      status: 'pending',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'sender@example.com',
+      amount: 0.01,
+    });
+
+    const preview = await etransfer.previewEtransferApprovalBatch([{
+      importId: 'msg-1',
+      playerId: 'p1',
+      amount: 0.01,
+      rememberMapping: false,
+    }]);
+
+    expect(preview.settlements).toEqual([]);
+    expect(preview.blockingSessions).toEqual([{
+      playerId: 'p1',
+      sessionId: 'older-big',
+      sessionDate: new Date('2026-08-19T00:00:00.000Z'),
+      cost: 13.03,
+      availableBalance: 0.01,
+    }]);
   });
 
   it('pools credit across two selected imports and still settles the covered oldest session, stopping before the unaffordable newer one', async () => {
