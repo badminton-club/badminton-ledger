@@ -252,6 +252,16 @@ describe('applyEtransferImport', () => {
       etransfer.applyEtransferImport('msg-1', { playerId: 'p1', amount: 0, rememberMapping: false })
     ).rejects.toThrow('valid positive amount');
   });
+
+  it('rounds a sub-cent amount so the recorded appliedAmount always matches the actual balance credit', async () => {
+    seedPendingImport({ amount: 200 });
+    seedPlayer('p1', { balance: 0 });
+
+    await etransfer.applyEtransferImport('msg-1', { playerId: 'p1', amount: 10.005, rememberMapping: false });
+
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 10.01 });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({ appliedAmount: 10.01 });
+  });
 });
 
 describe('rejectEtransferImport', () => {
@@ -403,6 +413,31 @@ describe('e-Transfer approval batches', () => {
       }],
     });
   }
+
+  it('normalizes a sub-cent amount so appliedAmount and the credited balance always agree', async () => {
+    seedPlayer('p1', { balance: 0, owed: 0 });
+    helpers.seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      status: 'pending',
+      senderName: 'CAI FANG WU',
+      amount: 10.005,
+    });
+
+    const preview = await etransfer.previewEtransferApprovalBatch([{
+      importId: 'msg-1',
+      playerId: 'p1',
+      amount: 10.005,
+      rememberMapping: false,
+    }]);
+
+    expect(preview.approvals[0].amount).toBe(10.01);
+    expect(preview.endingBalances).toEqual({ p1: 10.01 });
+
+    await etransfer.applyEtransferApprovalBatch(preview);
+
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 10.01 });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({ appliedAmount: 10.01 });
+  });
 
   it('settles a one-cent oldest session and stops before the newer $10 session when credited $9 (does not skip ahead)', async () => {
     seedPlayer('p1', { balance: 0, owed: 10.01 });

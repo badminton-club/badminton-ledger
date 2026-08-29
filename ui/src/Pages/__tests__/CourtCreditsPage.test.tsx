@@ -13,6 +13,12 @@ import {
 import { __getAllPaths } from '../../test-utils/fakeFirestore';
 import CourtCreditsPage from '../CourtCreditsPage';
 
+jest.mock('../../services/firebase', () => ({
+  ...jest.requireActual('../../services/firebase'),
+  fetchCourtCreditAdjustments: jest.fn(),
+}));
+import { fetchCourtCreditAdjustments } from '../../services/firebase';
+
 const currentUser = {
   uid: 'admin-1',
   displayName: 'Grace Hopper',
@@ -33,6 +39,9 @@ describe('CourtCreditsPage', () => {
   beforeEach(() => {
     resetFirebaseTestState();
     setCurrentUser(currentUser);
+    // Default to the real implementation; individual tests override as needed.
+    const actual = jest.requireActual('../../services/firebase');
+    jest.mocked(fetchCourtCreditAdjustments).mockImplementation(actual.fetchCourtCreditAdjustments);
   });
 
   it('renders court credit batches and shows detail/history for the opened accordion item', async () => {
@@ -167,6 +176,37 @@ describe('CourtCreditsPage', () => {
     ]));
   });
 
+  it('recomputes costPerHour when an edit changes totalCost or hoursPurchased so future sessions are not billed at a stale rate', async () => {
+    const user = userEvent.setup();
+
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Richmond block',
+      totalCost: 180,
+      costPerHour: 18,
+      hoursPurchased: 10,
+      remainingHours: 5,
+      purchaserName: 'Pat',
+      purchaseDate: ts('2026-04-10T12:00:00Z'),
+      createdAt: ts('2026-04-10T12:00:00Z'),
+    });
+
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /Richmond block/ }));
+    await user.click(screen.getByRole('button', { name: 'Edit Batch Details' }));
+
+    // Correcting only the total cost (a data-entry fix) — hours purchased stays 10.
+    await user.clear(screen.getAllByRole('spinbutton')[1]);
+    await user.type(screen.getAllByRole('spinbutton')[1], '200');
+    await user.type(screen.getAllByRole('textbox')[4], 'Corrected purchase price');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(getClubDocData('courtCredits', 'c1')).toMatchObject({
+      totalCost: 200,
+      hoursPurchased: 10,
+      costPerHour: 20,
+    }));
+  });
+
   it('creates a new credit batch from the add modal and opens it after reloading', async () => {
     const user = userEvent.setup();
 
@@ -201,5 +241,73 @@ describe('CourtCreditsPage', () => {
       remainingHours: 4,
       notes: 'Evening courts',
     });
+  });
+
+  it('shows the actual error instead of silently claiming no history when loading history fails', async () => {
+    const user = userEvent.setup();
+    jest.mocked(fetchCourtCreditAdjustments).mockRejectedValue(new Error('offline'));
+
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Richmond block',
+      totalCost: 180,
+      costPerHour: 20,
+      hoursPurchased: 9,
+      remainingHours: 4.5,
+      purchaserName: 'Pat',
+      purchaseDate: ts('2026-02-18T12:00:00Z'),
+      createdAt: ts('2026-02-18T12:00:00Z'),
+    });
+
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /Richmond block/ }));
+
+    expect(await screen.findByText('Failed to load history.')).toBeInTheDocument();
+    expect(screen.queryByText('No usage or adjustments recorded.')).not.toBeInTheDocument();
+  });
+
+  it('does not leak an edit-form validation error into a different batch\'s history view', async () => {
+    const user = userEvent.setup();
+
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Richmond block',
+      totalCost: 180,
+      costPerHour: 18,
+      hoursPurchased: 10,
+      remainingHours: 5,
+      purchaserName: 'Pat',
+      purchaseDate: ts('2026-04-10T12:00:00Z'),
+      createdAt: ts('2026-04-10T12:00:00Z'),
+    });
+    seedClubDoc('courtCredits', 'c2', {
+      name: 'Fall block',
+      totalCost: 120,
+      costPerHour: 15,
+      hoursPurchased: 8,
+      remainingHours: 8,
+      purchaserName: 'Alex',
+      purchaseDate: ts('2026-01-12T12:00:00Z'),
+      createdAt: ts('2026-01-12T12:00:00Z'),
+    });
+
+    renderPage();
+
+    // Trigger a validation error while editing the first batch.
+    await user.click(await screen.findByRole('button', { name: /Richmond block/ }));
+    await user.click(screen.getAllByRole('button', { name: 'Edit Batch Details' })[0]);
+    await user.clear(screen.getAllByRole('spinbutton')[0]);
+    await user.type(screen.getAllByRole('spinbutton')[0], '0');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(await screen.findByText('Valid hours purchased required.')).toBeInTheDocument();
+
+    // Without cancelling the edit, switch to the second batch's accordion.
+    const fallToggle = screen.getByRole('button', { name: /Fall block/ });
+    await user.click(fallToggle);
+    const fallItem = fallToggle.closest('.accordion-item') as HTMLElement;
+
+    // The stale validation error must not leak into this batch's own history
+    // section, and its real history should load normally (not blocked by
+    // Richmond block's still-in-progress edit elsewhere on the page).
+    expect(within(fallItem).queryByText('Valid hours purchased required.')).not.toBeInTheDocument();
+    expect(await within(fallItem).findByText('No usage or adjustments recorded.')).toBeInTheDocument();
   });
 });

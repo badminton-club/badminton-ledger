@@ -104,11 +104,15 @@ export default function BirdiesPage() {
   // ── Fetch history when selected batch changes ────────────────────────────────
   useEffect(() => {
     if (!selectedBatch?.id || isEditing) { setHistory([]); return; }
+    // Guards against a slower response for a previously-selected batch resolving
+    // after a newer selection and overwriting its history with stale data.
+    let cancelled = false;
     setIsLoadingHistory(true);
     Promise.all([
       fetchInventoryAdjustmentsForBatch(selectedBatch.id),
       fetchBirdieUsageForBatch(selectedBatch.id),
     ]).then(([adjustments, usages]) => {
+      if (cancelled) return;
       const adj = adjustments.map(a => ({
         ...a,
         type:      'adjustment' as const,
@@ -120,8 +124,9 @@ export default function BirdiesPage() {
         eventDate: (u as any).date?.toDate?.() ?? new Date((u as any).date ?? 0),
       }));
       setHistory([...adj, ...use].sort((a, b) => compareDesc(a.eventDate, b.eventDate)));
-    }).catch(() => setPageError('Failed to load batch history.'))
-      .finally(() => setIsLoadingHistory(false));
+    }).catch(() => { if (!cancelled) setPageError('Failed to load batch history.'); })
+      .finally(() => { if (!cancelled) setIsLoadingHistory(false); });
+    return () => { cancelled = true; };
   }, [selectedBatch?.id, isEditing]);
 
   // ── Fetch inventory ──────────────────────────────────────────────────────────

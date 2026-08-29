@@ -124,4 +124,32 @@ describe('useClubBootstrap', () => {
     await waitFor(() => expect(store.getState().club.ready).toBe(true));
     expect(store.getState().club.currentClubId).toBeNull();
   });
+
+  it('does not let a slower first user\'s club load overwrite a faster account switch', async () => {
+    const userA = { uid: 'user-a', displayName: 'User A', email: 'a@example.com' };
+    const userB = { uid: 'user-b', displayName: 'User B', email: 'b@example.com' };
+    seedUserDoc(userA.uid, { clubs: ['club-a'] });
+    seedClubMetaDoc('club-a', { name: 'Club A' });
+    seedMemberDoc(userA.uid, { role: 'admin' }, 'club-a');
+    seedUserDoc(userB.uid, { clubs: ['club-b'] });
+    seedClubMetaDoc('club-b', { name: 'Club B' });
+    seedMemberDoc(userB.uid, { role: 'member' }, 'club-b');
+
+    const store = makeTestStore();
+    renderBootstrap(store);
+    // Both switches fire before either's async club/profile load resolves —
+    // without the stale-result guard, A's slower-to-settle promise chain could
+    // still overwrite B's state once it eventually resolves.
+    setCurrentUser(userA);
+    setCurrentUser(userB);
+
+    await waitFor(() => expect(store.getState().club.currentClubId).toBe('club-b'));
+    await waitFor(() => expect(store.getState().club.role).toBe('member'));
+    // Give any stale A-related dispatches a chance to land before asserting
+    // the final state is still B's, not overwritten back to A's.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.getState().club.currentClubId).toBe('club-b');
+    expect(store.getState().club.role).toBe('member');
+    expect(store.getState().club.clubs.map((c) => c.id)).toEqual(['club-b']);
+  });
 });

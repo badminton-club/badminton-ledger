@@ -70,6 +70,7 @@ export default function CourtCreditsPage() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [error,            setError]            = useState<string | null>(null);
   const [formError,        setFormError]        = useState('');
+  const [historyError,     setHistoryError]     = useState('');
   const [showAddModal,     setShowAddModal]     = useState(false);
   const [sortConfig,       setSortConfig]       = useState<{ key: SortKey; direction: SortDir }>({
     key: 'purchaseDate', direction: 'desc',
@@ -99,12 +100,20 @@ export default function CourtCreditsPage() {
 
   // ── Load history when accordion opens ────────────────────────────────────────
   useEffect(() => {
-    if (!activeKey || editingId) { setHistory([]); return; }
+    setHistoryError('');
+    // Only skip loading when the batch actually being edited is the open one —
+    // an in-progress edit on a different (now-collapsed) batch shouldn't block
+    // history from loading for the one currently expanded.
+    if (!activeKey || editingId === activeKey) { setHistory([]); return; }
+    // Guards against a slower response for a previously-selected batch resolving
+    // after a newer selection and overwriting its history with stale data.
+    let cancelled = false;
     setIsLoadingHistory(true);
     Promise.all([
       fetchCourtCreditAdjustments(activeKey),
       fetchCourtCreditUsage(activeKey),
     ]).then(([adjustments, usages]) => {
+      if (cancelled) return;
       const adj = adjustments.map(a => ({
         ...a,
         type:      'adjustment' as const,
@@ -116,8 +125,9 @@ export default function CourtCreditsPage() {
         eventDate: (u as any).date?.toDate?.() ?? new Date((u as any).date ?? 0),
       }));
       setHistory([...adj, ...use].sort((a, b) => compareDesc(a.eventDate, b.eventDate)));
-    }).catch(() => setFormError('Failed to load history.'))
-      .finally(() => setIsLoadingHistory(false));
+    }).catch(() => { if (!cancelled) setHistoryError('Failed to load history.'); })
+      .finally(() => { if (!cancelled) setIsLoadingHistory(false); });
+    return () => { cancelled = true; };
   }, [activeKey, editingId]);
 
   // ── Sorting ──────────────────────────────────────────────────────────────────
@@ -198,7 +208,17 @@ export default function CourtCreditsPage() {
       await updateCourtCreditBatch(
         editingId,
         original,
-        { ...editForm, name: editForm.name.trim(), hoursPurchased: hours, totalCost: cost, remainingHours: remaining },
+        {
+          ...editForm,
+          name: editForm.name.trim(),
+          hoursPurchased: hours,
+          totalCost: cost,
+          remainingHours: remaining,
+          // hoursPurchased/totalCost drive the per-hour rate — recompute it here
+          // so a correction to either doesn't leave future sessions billed at a
+          // stale rate.
+          costPerHour: hours > 0 ? cost / hours : original.costPerHour,
+        },
         editReason,
         auth.currentUser?.uid ?? 'admin',
         currentUserName(),
@@ -354,10 +374,13 @@ export default function CourtCreditsPage() {
                       <hr />
                       <h5>Batch History</h5>
                       {isLoadingHistory && <Spinner animation="border" size="sm" />}
-                      {!isLoadingHistory && history.length === 0 && activeKey === batch.id && (
+                      {!isLoadingHistory && historyError && activeKey === batch.id && (
+                        <Alert variant="danger" dismissible onClose={() => setHistoryError('')}>{historyError}</Alert>
+                      )}
+                      {!isLoadingHistory && !historyError && history.length === 0 && activeKey === batch.id && (
                         <p className="text-muted">No usage or adjustments recorded.</p>
                       )}
-                      {!isLoadingHistory && history.length > 0 && activeKey === batch.id && (() => {
+                      {!isLoadingHistory && !historyError && history.length > 0 && activeKey === batch.id && (() => {
                         // Remaining hours after each event, reconstructed from current
                         // remaining by walking newest → oldest and adding back usage.
                         const remainingByRow = new Map<HistoryItem, number>();

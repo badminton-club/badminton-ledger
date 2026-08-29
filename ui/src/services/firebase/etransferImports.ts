@@ -3,7 +3,6 @@ import {
   getDoc,
   getDocs,
   setDoc,
-  updateDoc,
   deleteDoc,
   query,
   where,
@@ -324,13 +323,18 @@ export async function fetchEtransferImportHistory(): Promise<EtransferImport[]> 
  * skipped.
  */
 export async function previewEtransferApprovalBatch(
-  inputs: EtransferBatchApprovalInput[]
+  rawInputs: EtransferBatchApprovalInput[]
 ): Promise<EtransferBatchPreview> {
   return serviceCall('previewEtransferApprovalBatch', async () => {
-    if (inputs.length === 0) throw new Error('Select at least one pending import.');
-    if (new Set(inputs.map((input) => input.importId)).size !== inputs.length) {
+    if (rawInputs.length === 0) throw new Error('Select at least one pending import.');
+    if (new Set(rawInputs.map((input) => input.importId)).size !== rawInputs.length) {
       throw new Error('The batch contains a duplicate import.');
     }
+    // Normalize every amount to the nearest cent up front so it can never drift
+    // from the cent-based math used below for settlements/ledger entries — e.g.
+    // an amount like 10.005 (possible via manual entry) would otherwise credit
+    // $10.01 to the balance while recording an unrounded $10.005 as "applied".
+    const inputs = rawInputs.map((input) => ({ ...input, amount: fromCents(toCents(input.amount)) }));
 
     const [importSnaps, players, sessions] = await Promise.all([
       Promise.all(inputs.map((input) => getDoc(doc(refs.etransferImports, input.importId)))),
@@ -633,6 +637,9 @@ export async function applyEtransferImport(
     if (!Number.isFinite(options.amount) || options.amount <= 0) {
       throw new Error('Enter a valid positive amount.');
     }
+    // Normalize to the nearest cent so the ledger entry and appliedAmount agree
+    // exactly (see the identical normalization in previewEtransferApprovalBatch).
+    const amount = fromCents(toCents(options.amount));
 
     const importRef = doc(refs.etransferImports, importId);
     const uid = auth.currentUser?.uid ?? null;
@@ -651,13 +658,13 @@ export async function applyEtransferImport(
 
       const before = (playerSnap.data().balance as number) ?? 0;
       const ledgerRef = doc(refs.balanceLedger);
-      tx.update(playerRef, { balance: increment(options.amount) });
+      tx.update(playerRef, { balance: increment(amount) });
       tx.set(ledgerRef, {
         playerId: options.playerId,
         sessionId: null,
-        delta: options.amount,
+        delta: amount,
         balanceBefore: before,
-        balanceAfter: before + options.amount,
+        balanceAfter: before + amount,
         reason: 'etransfer-import',
         note: `Gmail e-Transfer from ${importData.senderName}` + (importData.memo ? ` — ${importData.memo}` : ''),
         walletAdjustment: true,
@@ -666,7 +673,7 @@ export async function applyEtransferImport(
       tx.update(importRef, {
         status: 'applied',
         matchedPlayerId: options.playerId,
-        appliedAmount: options.amount,
+        appliedAmount: amount,
         balanceLedgerEntryId: ledgerRef.id,
         reviewedByUid: uid,
         reviewedAt: serverTimestamp(),
@@ -695,16 +702,20 @@ export async function rejectEtransferImport(importId: string, reason: string): P
     if (!reason.trim()) throw new Error('A reason is required.');
 
     const importRef = doc(refs.etransferImports, importId);
-    const importSnap = await getDoc(importRef);
-    if (!importSnap.exists()) throw new Error('Import record not found.');
-    const importData = importSnap.data();
-    if (importData.status !== 'pending') throw new Error('This import has already been reviewed.');
+    // Read-check-write atomically so a concurrent apply/reject/dismiss of the
+    // same import can't race past the pending-status check between the read
+    // and the write.
+    await runTransaction(db, async (tx) => {
+      const importSnap = await tx.get(importRef);
+      if (!importSnap.exists()) throw new Error('Import record not found.');
+      if (importSnap.data().status !== 'pending') throw new Error('This import has already been reviewed.');
 
-    await updateDoc(importRef, {
-      status: 'rejected',
-      rejectionReason: reason.trim(),
-      reviewedByUid: auth.currentUser?.uid ?? null,
-      reviewedAt: serverTimestamp(),
+      tx.update(importRef, {
+        status: 'rejected',
+        rejectionReason: reason.trim(),
+        reviewedByUid: auth.currentUser?.uid ?? null,
+        reviewedAt: serverTimestamp(),
+      });
     });
   });
 }
@@ -720,11 +731,14 @@ export async function rejectEtransferImport(importId: string, reason: string): P
 export async function dismissEtransferImport(importId: string): Promise<void> {
   return serviceCall('dismissEtransferImport', async () => {
     const importRef = doc(refs.etransferImports, importId);
-    const importSnap = await getDoc(importRef);
-    if (!importSnap.exists()) throw new Error('Import record not found.');
-    if (importSnap.data().status !== 'pending') throw new Error('This import has already been reviewed.');
+    // Read-check-delete atomically — see the identical note in rejectEtransferImport.
+    await runTransaction(db, async (tx) => {
+      const importSnap = await tx.get(importRef);
+      if (!importSnap.exists()) throw new Error('Import record not found.');
+      if (importSnap.data().status !== 'pending') throw new Error('This import has already been reviewed.');
 
-    await deleteDoc(importRef);
+      tx.delete(importRef);
+    });
   });
 }
 

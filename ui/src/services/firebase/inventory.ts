@@ -164,7 +164,7 @@ export async function updateCourtCreditBatch(
     //@ts-ignore
     const changes = diffFields(original, updated, [
       'name', 'purchaseDate', 'purchaserName', 'hoursPurchased',
-      'totalCost', 'remainingHours', 'notes',
+      'totalCost', 'remainingHours', 'costPerHour', 'notes',
     ]);
     if (changes.length === 0) return;
 

@@ -39,7 +39,15 @@ export function useClubBootstrap(): void {
 
   // Auth → club list → current club
   useEffect(() => {
+    // Tracks the most recent auth event so a slower-resolving fetch for a
+    // previous user (e.g. right after a fast sign-out/account-switch) can't
+    // overwrite state with stale data once a newer auth event has already
+    // been processed.
+    let latestUid: string | null = null;
     const unsubscribe = onAuthStateChangedListener(async (user) => {
+      const uid = user?.uid ?? null;
+      latestUid = uid;
+
       if (!user) {
         setCurrentClubId(null);
         dispatch(resetClub());
@@ -53,11 +61,13 @@ export function useClubBootstrap(): void {
       if (clubParam) {
         try { await addClubToUser(user.uid, clubParam); } catch { /* ignore */ }
       }
+      if (latestUid !== uid) return;
 
       const [clubs, profile] = await Promise.all([
         fetchUserClubs(user.uid),
         fetchUserProfile(user.uid),
       ]);
+      if (latestUid !== uid) return;
       dispatch(setClubs(clubs));
 
       const stored = localStorage.getItem(LS_KEY);
