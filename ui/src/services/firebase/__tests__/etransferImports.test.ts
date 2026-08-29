@@ -14,7 +14,7 @@ let fakeFirestore: FakeFirestoreModule;
 jest.mock('../gmail', () => ({
   searchEtransferEmails: jest.fn(),
   DEFAULT_ETRANSFER_SENDER_ADDRESS: 'notify@payments.interac.ca',
-  DEFAULT_ETRANSFER_SEARCH_AFTER_DATE: '2026-08-27',
+  getDefaultEtransferSearchAfterDate: jest.fn(() => '2026-08-27'),
 }));
 
 function makeParsedEmail(overrides: Partial<ParsedEtransferEmail> = {}): ParsedEtransferEmail {

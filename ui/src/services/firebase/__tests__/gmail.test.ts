@@ -182,6 +182,22 @@ describe('parseEtransferMessage', () => {
   });
 });
 
+describe('getDefaultEtransferSearchAfterDate', () => {
+  it('returns exactly one UTC calendar week before the given reference date', () => {
+    expect(gmail.getDefaultEtransferSearchAfterDate(new Date('2026-08-27T14:47:00.000Z'))).toBe('2026-08-20');
+  });
+
+  it('crosses a month/year boundary correctly', () => {
+    expect(gmail.getDefaultEtransferSearchAfterDate(new Date('2026-01-03T00:00:00.000Z'))).toBe('2025-12-27');
+  });
+
+  it('defaults to one week before the real current date when no reference is given', () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-27T08:45:55.172Z'));
+    expect(gmail.getDefaultEtransferSearchAfterDate()).toBe('2026-08-20');
+    jest.useRealTimers();
+  });
+});
+
 describe('searchEtransferEmails', () => {
   it('re-authenticates with the read-only Gmail scope and parses full messages', async () => {
     helpers.setCurrentUser(userOne);

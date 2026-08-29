@@ -25,7 +25,21 @@ let pendingTokenRequest: { value: Promise<string>; uid: string } | null = null;
 
 /** The default sender address for Interac e-Transfer autodeposit notifications. */
 export const DEFAULT_ETRANSFER_SENDER_ADDRESS = 'notify@payments.interac.ca';
-export const DEFAULT_ETRANSFER_SEARCH_AFTER_DATE = '2026-08-27';
+
+/**
+ * The default lower bound for Gmail e-Transfer searches: one calendar week
+ * (UTC) before `reference` (today, unless overridden — mainly for tests).
+ * Computed at call time rather than a fixed constant so it stays useful as
+ * time passes, rather than needing to be manually bumped forward.
+ */
+export function getDefaultEtransferSearchAfterDate(reference: Date = new Date()): string {
+  const todayUtcMs = Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate());
+  const oneWeekAgo = new Date(todayUtcMs - 7 * 24 * 60 * 60 * 1000);
+  const year = oneWeekAgo.getUTCFullYear();
+  const month = String(oneWeekAgo.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(oneWeekAgo.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 export interface ParsedEtransferEmail {
   gmailMessageId: string;
@@ -257,7 +271,7 @@ function gmailAfterEpochSeconds(date: string): number {
 
 export async function searchEtransferEmails(
   senderAddress: string,
-  searchAfterDate: string = DEFAULT_ETRANSFER_SEARCH_AFTER_DATE
+  searchAfterDate: string = getDefaultEtransferSearchAfterDate()
 ): Promise<ParsedEtransferEmail[]> {
   return serviceCall('searchEtransferEmails', async () => {
     // Gmail accepts Unix seconds, which avoids its documented PST-based

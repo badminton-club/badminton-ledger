@@ -18,7 +18,7 @@ import { fetchSessions } from './sessions';
 import {
   searchEtransferEmails,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
-  DEFAULT_ETRANSFER_SEARCH_AFTER_DATE,
+  getDefaultEtransferSearchAfterDate,
   type ParsedEtransferEmail,
 } from './gmail';
 import type { EtransferImport, EtransferSenderMapping, Player, SessionPlayer } from 'types';
@@ -252,7 +252,7 @@ export async function deleteEtransferSenderMapping(id: string): Promise<void> {
  */
 export async function importEtransferEmails(
   senderAddress: string = DEFAULT_ETRANSFER_SENDER_ADDRESS,
-  searchAfterDate: string = DEFAULT_ETRANSFER_SEARCH_AFTER_DATE
+  searchAfterDate: string = getDefaultEtransferSearchAfterDate()
 ): Promise<{ found: number; created: number }> {
   return serviceCall('importEtransferEmails', async () => {
     const parsed = await searchEtransferEmails(senderAddress, searchAfterDate);

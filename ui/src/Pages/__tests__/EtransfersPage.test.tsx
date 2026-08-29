@@ -14,6 +14,7 @@ import {
 } from '../../test-utils/firebaseTestHelpers';
 import {
   searchEtransferEmails,
+  getDefaultEtransferSearchAfterDate,
 } from '../../services/firebase/gmail';
 import type { Player } from '../../types';
 
@@ -78,11 +79,12 @@ describe('EtransfersPage', () => {
 
     renderPage();
     expect(await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.')).toBeInTheDocument();
-    expect(screen.getByLabelText('Search emails after')).toHaveValue('2026-08-27');
+    const defaultSearchDate = getDefaultEtransferSearchAfterDate();
+    expect(screen.getByLabelText('Search emails after')).toHaveValue(defaultSearchDate);
 
     await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
 
-    expect(searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca', '2026-08-27');
+    expect(searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca', defaultSearchDate);
     expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
     expect(screen.getByText('cash for shoppers')).toBeInTheDocument();
     expect(await screen.findByText(/found 1 email\(s\) — 1 new/i)).toBeInTheDocument();
@@ -330,6 +332,35 @@ describe('EtransfersPage', () => {
     const historyCard = screen.getByText('History').closest('.card') as HTMLElement;
     expect(within(historyCard).getByText('Rejected')).toBeInTheDocument();
     expect(within(historyCard).getByText('not a club payment')).toBeInTheDocument();
+  });
+
+  it('fills the reject reason with the "Not badminton" quick button', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer());
+    seedClubDoc('etransferImports', 'msg-1', {
+      gmailMessageId: 'msg-1',
+      senderName: 'CAI FANG WU',
+      amount: 200,
+      emailDate: ts('2026-08-26'),
+      status: 'pending',
+      matchedPlayerId: 'p1',
+      matchSource: 'name-lookup',
+    });
+
+    renderPage();
+    expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /reject/i }));
+    const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Not badminton' }));
+    expect(within(dialog).getByLabelText(/reason/i)).toHaveValue('Not badminton');
+
+    await user.click(within(dialog).getByRole('button', { name: 'Reject' }));
+
+    await waitFor(() => expect(getClubDocData('etransferImports', 'msg-1')).toMatchObject({
+      status: 'rejected',
+      rejectionReason: 'Not badminton',
+    }));
   });
 
   it('undoes a rejected import and returns it to review', async () => {

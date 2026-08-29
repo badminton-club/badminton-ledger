@@ -17,7 +17,7 @@ import {
   setClubEtransferSearchAfterDate,
   formatPlayerName,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
-  DEFAULT_ETRANSFER_SEARCH_AFTER_DATE,
+  getDefaultEtransferSearchAfterDate,
   type EtransferBatchPreview,
 } from '../services/firebase';
 import { toJSDate } from '../services/firebase/utils';
@@ -68,7 +68,7 @@ export default function EtransfersPage() {
   const [rowEdits, setRowEdits] = useState<Record<string, RowEdit>>({});
 
   const [senderAddress, setSenderAddress] = useState(DEFAULT_ETRANSFER_SENDER_ADDRESS);
-  const [searchAfterDate, setSearchAfterDate] = useState(DEFAULT_ETRANSFER_SEARCH_AFTER_DATE);
+  const [searchAfterDate, setSearchAfterDate] = useState(() => getDefaultEtransferSearchAfterDate());
   const [savingSearchDate, setSavingSearchDate] = useState(false);
   const [searchDateMessage, setSearchDateMessage] = useState('');
   const [searching, setSearching] = useState(false);
@@ -117,7 +117,7 @@ export default function EtransfersPage() {
         fetchEtransferSenderMappings(),
       ]);
       setSenderAddress(club?.etransferSenderAddress || DEFAULT_ETRANSFER_SENDER_ADDRESS);
-      setSearchAfterDate(club?.etransferSearchAfterDate || DEFAULT_ETRANSFER_SEARCH_AFTER_DATE);
+      setSearchAfterDate(club?.etransferSearchAfterDate || getDefaultEtransferSearchAfterDate());
       setPending(pendingList);
       setHistory(historyList);
       setMappings(mappingList);
@@ -779,6 +779,17 @@ export default function EtransfersPage() {
                 disabled={rejecting}
                 autoFocus
               />
+              <div className="mt-2">
+                <Button
+                  size="sm"
+                  variant="outline-secondary"
+                  type="button"
+                  disabled={rejecting}
+                  onClick={() => setRejectReason('Not badminton')}
+                >
+                  Not badminton
+                </Button>
+              </div>
             </Form.Group>
             {rejectError && <Alert variant="danger" className="py-2 mb-0">{rejectError}</Alert>}
           </Modal.Body>
