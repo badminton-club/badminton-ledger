@@ -113,4 +113,4 @@ export function userDoc(uid: string): DocumentReference {
   return doc(db, 'users', uid);
 }
 
-export { db, auth };
+export { db, auth, app };

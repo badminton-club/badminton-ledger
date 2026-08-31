@@ -1,19 +1,27 @@
-import { FirebaseError } from 'firebase/app';
-import { GoogleAuthProvider, reauthenticateWithPopup } from 'firebase/auth';
-import { auth } from './client';
+import { FirebaseError, initializeApp, getApps } from 'firebase/app';
+import { GoogleAuthProvider, getAuth, signInWithPopup, signOut, type Auth } from 'firebase/auth';
+import { auth, app } from './client';
 import { serviceCall } from './utils';
 
-// This app only supports Google sign-in, so every signed-in user already has a
-// Google identity linked to their Firebase account. Re-authenticating with the
-// Gmail scope added reuses that same Google OAuth client — same pattern as the
-// Google Drive backup feature (see drive.ts) — no separate Google Cloud
-// project/credentials need to be configured for this feature.
+// Gmail authorization runs through a separate, throwaway Firebase Auth
+// instance — its own secondary "app" registered under the same Firebase
+// project (same OAuth client, so still no separate Google Cloud project or
+// credentials need to be configured for this feature) — rather than
+// re-authenticating the signed-in club member directly. This deliberately
+// lets an admin authorize Gmail access from a DIFFERENT Google account than
+// the one they're signed into the club app with: e.g. many clubs receive
+// Interac e-Transfer notifications in a separate, shared club Gmail account
+// rather than an individual admin's own personal one. Nothing about this
+// secondary identity is ever stored anywhere — only the resulting OAuth
+// access token is used, and the secondary session is signed out of
+// immediately after the token is captured (see getGmailAccessToken below).
 //
 // Read-only is all this feature needs: it only searches/reads messages, never
 // writes to Gmail. Already-reviewed emails are excluded from future searches by
 // checking Firestore (the Gmail message id is the doc id — see
 // etransferImports.ts), not by mutating labels, so no write scope is required.
 const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const GMAIL_AUTH_APP_NAME = 'gmail-oauth';
 const TOKEN_TTL_MS = 55 * 60 * 1000;
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
@@ -22,6 +30,14 @@ const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 // without a page reload.
 let cachedToken: { value: string; expiresAt: number; uid: string } | null = null;
 let pendingTokenRequest: { value: Promise<string>; uid: string } | null = null;
+
+/** Lazily creates (or reuses) the secondary Firebase app + Auth instance used
+ *  purely to run a standalone Google sign-in popup for Gmail authorization. */
+function getGmailAuthInstance(): Auth {
+  const existing = getApps().find((a) => a.name === GMAIL_AUTH_APP_NAME);
+  const gmailApp = existing ?? initializeApp(app.options, GMAIL_AUTH_APP_NAME);
+  return getAuth(gmailApp);
+}
 
 /** The default sender address for Interac e-Transfer autodeposit notifications. */
 export const DEFAULT_ETRANSFER_SENDER_ADDRESS = 'notify@payments.interac.ca';
@@ -90,8 +106,9 @@ export interface ParsedEtransferEmail {
 }
 
 /**
- * Re-authenticates the current user with the Gmail scope added and returns a
- * fresh OAuth access token, cached for the session so repeated searches don't
+ * Runs a standalone Google sign-in popup (any Google account — not
+ * necessarily the one signed into the club app) and returns a fresh Gmail
+ * OAuth access token, cached for the session so repeated searches don't
  * re-prompt for every single request.
  */
 async function getGmailAccessToken(): Promise<string> {
@@ -108,17 +125,15 @@ async function getGmailAccessToken(): Promise<string> {
   }
 
   const request = (async () => {
+    const gmailAuth = getGmailAuthInstance();
     const provider = new GoogleAuthProvider();
     provider.addScope(GMAIL_SCOPE);
 
     let result;
     try {
-      result = await reauthenticateWithPopup(user, provider);
+      result = await signInWithPopup(gmailAuth, provider);
     } catch (err) {
       if (err instanceof FirebaseError) {
-        if (err.code === 'auth/user-mismatch') {
-          throw new Error("Select the same Google account you're signed in with.");
-        }
         if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
           throw new Error('Gmail authorization was cancelled.');
         }
@@ -130,6 +145,9 @@ async function getGmailAccessToken(): Promise<string> {
     if (!credential?.accessToken) {
       throw new Error('Failed to get Gmail access — please try again.');
     }
+    // Discard the throwaway secondary identity immediately — only the
+    // access token above is used going forward.
+    await signOut(gmailAuth).catch(() => { /* best-effort cleanup */ });
     cachedToken = { value: credential.accessToken, expiresAt: Date.now() + TOKEN_TTL_MS, uid: user.uid };
     return credential.accessToken;
   })();

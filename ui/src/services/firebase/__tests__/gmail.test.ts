@@ -9,6 +9,7 @@ const originalFetch = global.fetch;
 let gmail: GmailModule;
 let helpers: HelpersModule;
 let fakeAuth: FakeAuthModule;
+let firebaseApp: typeof import('firebase/app');
 
 const userOne = { uid: 'user-1', displayName: 'User One', email: 'user1@example.com' };
 
@@ -115,6 +116,7 @@ beforeEach(() => {
   gmail = require('../gmail');
   helpers = require('../../../test-utils/firebaseTestHelpers');
   fakeAuth = require('../../../test-utils/fakeAuth');
+  firebaseApp = require('firebase/app');
   helpers.resetFirebaseTestState();
   global.fetch = jest.fn() as unknown as typeof fetch;
 });
@@ -268,6 +270,40 @@ describe('searchEtransferEmails', () => {
     expect(searchUrl).toContain(encodeURIComponent(`after:${Date.UTC(2026, 7, 27) / 1000}`));
     expectBearerToken(0, 'gmail-token');
     expectBearerToken(1, 'gmail-token');
+  });
+
+  it('authorizes Gmail access via a standalone popup that does not require the same Google account as the signed-in club member', async () => {
+    // Signed into the club app as userOne, but the queued popup "selects" a
+    // completely different Google account (different uid/email) — e.g. the
+    // club's own shared Gmail inbox rather than this admin's personal one.
+    // This must succeed with no special same-account error.
+    helpers.setCurrentUser(userOne);
+    const clubGmailAccount = { uid: 'club-gmail-account', displayName: 'Club Inbox', email: 'club@example.com' };
+    fakeAuth.__setReauthImplementation(async () => ({
+      user: clubGmailAccount,
+      __credential: { accessToken: 'club-inbox-token' },
+    }));
+
+    const message = sampleMessage();
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ messages: [{ id: 'msg-1', threadId: 'thread-1' }] }))
+      .mockResolvedValueOnce(jsonResponse(message));
+
+    const results = await gmail.searchEtransferEmails('notify@payments.interac.ca', '2026-08-27');
+
+    expect(results).toHaveLength(1);
+    expectBearerToken(0, 'club-inbox-token');
+  });
+
+  it('no longer maps auth/user-mismatch into a same-account error — the popup runs on a separate, unrestricted auth instance', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async () => {
+      throw new firebaseApp.FirebaseError('auth/user-mismatch', 'wrong account');
+    });
+
+    // Propagates as the original Firebase error rather than being rewritten
+    // into "Select the same Google account you're signed in with."
+    await expect(gmail.searchEtransferEmails('notify@payments.interac.ca')).rejects.toThrow('wrong account');
   });
 
   it('returns an empty array when no messages are found, without fetching any message detail', async () => {

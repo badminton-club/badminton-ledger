@@ -59,16 +59,38 @@ export class FakeAuth {
 }
 
 const AUTH_INSTANCE = new FakeAuth();
+// Secondary auth instances (e.g. gmail.ts's throwaway Gmail-OAuth app),
+// keyed by app name — isolated from AUTH_INSTANCE so signing in/out there
+// never touches the main club-app signed-in user. See `getAuth` below.
+const secondaryAuthInstances = new Map<string, FakeAuth>();
 
-export function getAuth(): FakeAuth {
-  return AUTH_INSTANCE;
+export function getAuth(app?: { name?: string }): FakeAuth {
+  const name = app?.name;
+  if (!name || name === '[DEFAULT]') return AUTH_INSTANCE;
+  if (!secondaryAuthInstances.has(name)) secondaryAuthInstances.set(name, new FakeAuth());
+  return secondaryAuthInstances.get(name)!;
 }
 
-export async function signInWithPopup(auth: FakeAuth, _provider: GoogleAuthProvider): Promise<{ user: FakeUser }> {
-  if (!auth.currentUser) {
-    throw new Error('[fakeAuth] signInWithPopup called with no user queued — call __setCurrentUser first.');
+export async function signInWithPopup(auth: FakeAuth, provider: GoogleAuthProvider): Promise<{ user: FakeUser | null; __credential?: { accessToken: string } }> {
+  if (auth === AUTH_INSTANCE) {
+    // Default (main) app instance — the club-login flow.
+    if (!auth.currentUser) {
+      throw new Error('[fakeAuth] signInWithPopup called with no user queued — call __setCurrentUser first.');
+    }
+    return { user: auth.currentUser };
   }
-  return { user: auth.currentUser };
+  // A secondary (throwaway) auth instance — used to grab a scoped OAuth
+  // access token for an arbitrary Google account (e.g. Gmail e-Transfer
+  // search) without requiring it to match the main signed-in user. Shares
+  // the same queued-implementation control as `reauthenticateWithPopup`
+  // (see `__setReauthImplementation`) since both exist purely to resolve to
+  // a credential with an `accessToken`.
+  if (!reauthImpl) {
+    throw new Error(
+      '[fakeAuth] signInWithPopup (secondary auth instance) called with no implementation queued — call __setReauthImplementation first.'
+    );
+  }
+  return reauthImpl(auth.currentUser, provider);
 }
 
 export async function reauthenticateWithPopup(user: FakeUser, provider: GoogleAuthProvider): Promise<{ user: FakeUser }> {
@@ -80,13 +102,14 @@ export async function reauthenticateWithPopup(user: FakeUser, provider: GoogleAu
   return reauthImpl(user, provider);
 }
 
-type ReauthResult = { user: FakeUser; __credential?: { accessToken: string } };
-type ReauthImplementation = (user: FakeUser, provider: GoogleAuthProvider) => Promise<ReauthResult>;
+type ReauthResult = { user: FakeUser | null; __credential?: { accessToken: string } };
+type ReauthImplementation = (user: FakeUser | null, provider: GoogleAuthProvider) => Promise<ReauthResult>;
 let reauthImpl: ReauthImplementation | null = null;
 
 /**
  * Test-only control for `reauthenticateWithPopup` (used by drive.ts to get a
- * scoped Drive access token). Queue either a resolved result — include
+ * scoped Drive access token) and for `signInWithPopup` on a secondary auth
+ * instance (used by gmail.ts). Queue either a resolved result — include
  * `__credential: { accessToken }` so `GoogleAuthProvider.credentialFromResult`
  * can read it back — or a rejection to simulate a cancelled/failed popup.
  *
@@ -114,6 +137,8 @@ export function onAuthStateChanged(
 /** Test-only control: resets the shared fake auth instance's user to signed-out. */
 export function __resetAuth(): void {
   AUTH_INSTANCE.__setCurrentUser(null);
+  secondaryAuthInstances.forEach((instance) => instance.__setCurrentUser(null));
+  secondaryAuthInstances.clear();
   reauthImpl = null;
   registeredAccounts.clear();
   verificationEmailsSent.length = 0;
