@@ -5,6 +5,7 @@ type AdminModule = typeof import('../admin');
 type HelpersModule = typeof import('../../../test-utils/firebaseTestHelpers');
 type FakeAuthModule = typeof import('../../../test-utils/fakeAuth');
 type FakeFirestoreModule = typeof import('../../../test-utils/fakeFirestore');
+type BackupCryptoModule = typeof import('../../backupCrypto');
 type BackupData = import('../admin').BackupData;
 
 const originalFetch = global.fetch;
@@ -14,6 +15,7 @@ let admin: AdminModule;
 let helpers: HelpersModule;
 let fakeAuth: FakeAuthModule;
 let fakeFirestore: FakeFirestoreModule;
+let backupCrypto: BackupCryptoModule;
 let firebaseApp: typeof import('firebase/app');
 
 const userOne = { uid: 'user-1', displayName: 'User One', email: 'user1@example.com' };
@@ -56,6 +58,7 @@ beforeEach(() => {
   helpers = require('../../../test-utils/firebaseTestHelpers');
   fakeAuth = require('../../../test-utils/fakeAuth');
   fakeFirestore = require('../../../test-utils/fakeFirestore');
+  backupCrypto = require('../../backupCrypto');
   firebaseApp = require('firebase/app');
   helpers.resetFirebaseTestState();
   global.fetch = jest.fn() as unknown as typeof fetch;
@@ -136,6 +139,49 @@ describe('backupToGoogleDrive', () => {
 
     await expect(drive.backupToGoogleDrive()).rejects.toThrow('Google Drive request failed (403): denied');
     expect(consoleSpy).toHaveBeenCalledWith('[backupToGoogleDrive]', expect.any(Error));
+  });
+
+  it('encrypts the uploaded payload when a passphrase is given, instead of uploading the plain backup JSON', async () => {
+    helpers.setCurrentUser(userOne);
+    helpers.seedClubDoc('players', 'player-1', { name: 'Jamie', balance: 42 });
+    fakeAuth.__setReauthImplementation(async user => ({ user, __credential: { accessToken: 'drive-token' } }));
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ files: [] }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'folder-1' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'file-1' }));
+
+    await drive.backupToGoogleDrive({ passphrase: 'super-secret' });
+
+    const uploadRequest = fetchMock().mock.calls[2][1] as RequestInit;
+    const uploadedBody = uploadRequest.body as string;
+    // The plaintext player name/balance must never appear in the uploaded
+    // request body — only inside an encrypted envelope.
+    expect(uploadedBody).not.toContain('Jamie');
+    expect(uploadedBody).toContain('"__encrypted":true');
+    expect(uploadedBody).toContain('"kdf":"PBKDF2-SHA256"');
+
+    // The envelope embedded in the multipart body decrypts back to the
+    // original exported backup data with the same passphrase.
+    const bodyJsonPart = uploadedBody.split('\r\n').find((line) => line.includes('"__encrypted"'))!;
+    const envelope = JSON.parse(bodyJsonPart);
+    const decryptedJson = await backupCrypto.decryptBackupPayload(envelope, 'super-secret');
+    expect(JSON.parse(decryptedJson).collections.players[0].data).toMatchObject({ name: 'Jamie', balance: 42 });
+  });
+
+  it('uploads the plain (unencrypted) backup JSON when no passphrase is given', async () => {
+    helpers.setCurrentUser(userOne);
+    helpers.seedClubDoc('players', 'player-1', { name: 'Jamie' });
+    fakeAuth.__setReauthImplementation(async user => ({ user, __credential: { accessToken: 'drive-token' } }));
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ files: [] }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'folder-1' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'file-1' }));
+
+    await drive.backupToGoogleDrive({});
+
+    const uploadRequest = fetchMock().mock.calls[2][1] as RequestInit;
+    expect(uploadRequest.body as string).toContain('Jamie');
+    expect(uploadRequest.body as string).not.toContain('"__encrypted"');
   });
 });
 
@@ -304,6 +350,51 @@ describe('restoreFromGoogleDrive', () => {
 
     await expect(drive.restoreFromGoogleDrive('missing-file')).rejects.toThrow(
       'Failed to download backup from Drive (404): missing'
+    );
+    expect(consoleSpy).toHaveBeenCalledWith('[restoreFromGoogleDrive]', expect.any(Error));
+  });
+
+  it('decrypts and restores an encrypted backup given the correct passphrase', async () => {
+    helpers.seedClubDoc('players', 'player-1', { name: 'Jamie' });
+    const backup = await admin.exportAllData();
+    await admin.clearAllData();
+
+    const envelope = await backupCrypto.encryptBackupPayload(JSON.stringify(backup), 'super-secret');
+
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async user => ({ user, __credential: { accessToken: 'restore-token' } }));
+    fetchMock().mockResolvedValueOnce(textResponse(JSON.stringify(envelope)));
+
+    const summary = await drive.restoreFromGoogleDrive('drive-file-3', 'super-secret');
+
+    expect(summary).toEqual({ ...emptySummary(), players: 1 });
+    expect(helpers.getClubDocData('players', 'player-1')).toEqual({ name: 'Jamie' });
+  });
+
+  it('asks for a passphrase instead of failing generically when the downloaded backup is encrypted and none was given', async () => {
+    const backup = await admin.exportAllData();
+    const envelope = await backupCrypto.encryptBackupPayload(JSON.stringify(backup), 'super-secret');
+
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async user => ({ user, __credential: { accessToken: 'restore-token' } }));
+    fetchMock().mockResolvedValueOnce(textResponse(JSON.stringify(envelope)));
+
+    await expect(drive.restoreFromGoogleDrive('drive-file-4')).rejects.toThrow(
+      'This backup is encrypted — enter its passphrase to restore.'
+    );
+  });
+
+  it('rejects an incorrect passphrase for an encrypted backup with a friendly error', async () => {
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const backup = await admin.exportAllData();
+    const envelope = await backupCrypto.encryptBackupPayload(JSON.stringify(backup), 'super-secret');
+
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async user => ({ user, __credential: { accessToken: 'restore-token' } }));
+    fetchMock().mockResolvedValueOnce(textResponse(JSON.stringify(envelope)));
+
+    await expect(drive.restoreFromGoogleDrive('drive-file-5', 'wrong-passphrase')).rejects.toThrow(
+      'Incorrect passphrase, or the backup file is corrupted.'
     );
     expect(consoleSpy).toHaveBeenCalledWith('[restoreFromGoogleDrive]', expect.any(Error));
   });

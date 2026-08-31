@@ -11,6 +11,7 @@ import {
   type DriveBackupResult,
   type DriveBackupFile,
 } from '../services/firebase/drive';
+import { encryptBackupPayload, decryptBackupPayload, isEncryptedBackupPayload } from '../services/backupCrypto';
 import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, updatePlayerProfile } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
@@ -44,6 +45,7 @@ export default function SettingsPage() {
   const [error, setError] = useState('');
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [localBackupPassphrase, setLocalBackupPassphrase] = useState('');
   const [restoreResult, setRestoreResult] = useState<ClearSummary | null>(null);
   const [ioError, setIoError] = useState('');
   const [drivingBackingUp, setDriveBackingUp] = useState(false);
@@ -53,9 +55,11 @@ export default function SettingsPage() {
   const [driveBackups, setDriveBackups] = useState<DriveBackupFile[]>([]);
   const [loadingDriveBackups, setLoadingDriveBackups] = useState(false);
   const [restoringDriveFileId, setRestoringDriveFileId] = useState<string | null>(null);
+  const [driveRestorePassphrase, setDriveRestorePassphrase] = useState('');
   const [showDriveBackup, setShowDriveBackup] = useState(false);
   const [driveBackupFileName, setDriveBackupFileName] = useState('');
   const [driveBackupFolderName, setDriveBackupFolderName] = useState('');
+  const [driveBackupPassphrase, setDriveBackupPassphrase] = useState('');
   const [driveRestoreFolderName, setDriveRestoreFolderName] = useState('');
 
   const [members, setMembers] = useState<ClubMember[]>([]);
@@ -368,7 +372,10 @@ export default function SettingsPage() {
     setBackingUp(true);
     try {
       const data = await exportAllData();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const json = JSON.stringify(data, null, 2);
+      const passphrase = localBackupPassphrase.trim();
+      const payload = passphrase ? JSON.stringify(await encryptBackupPayload(json, passphrase)) : json;
+      const blob = new Blob([payload], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -394,7 +401,21 @@ export default function SettingsPage() {
     setRestoreResult(null);
     setRestoring(true);
     try {
-      const backup = JSON.parse(await file.text()) as BackupData;
+      const raw = await file.text();
+      let parsedRaw: unknown;
+      try {
+        parsedRaw = JSON.parse(raw);
+      } catch {
+        throw new Error('The selected file is not a valid backup (invalid JSON).');
+      }
+      let json = raw;
+      if (isEncryptedBackupPayload(parsedRaw)) {
+        if (!localBackupPassphrase.trim()) {
+          throw new Error('This backup is encrypted — enter its passphrase above, then choose the file again.');
+        }
+        json = await decryptBackupPayload(parsedRaw, localBackupPassphrase.trim());
+      }
+      const backup = JSON.parse(json) as BackupData;
       setRestoreResult(await restoreAllData(backup));
     } catch (err) {
       setIoError(err instanceof Error ? err.message : 'Restore failed.');
@@ -407,6 +428,7 @@ export default function SettingsPage() {
     setDriveError('');
     setDriveBackupFileName('');
     setDriveBackupFolderName('');
+    setDriveBackupPassphrase('');
     setShowDriveBackup(true);
   };
 
@@ -418,6 +440,7 @@ export default function SettingsPage() {
       setDriveResult(await backupToGoogleDrive({
         fileName: driveBackupFileName,
         folderName: driveBackupFolderName,
+        passphrase: driveBackupPassphrase.trim() || undefined,
       }));
       setShowDriveBackup(false);
     } catch (err) {
@@ -448,7 +471,7 @@ export default function SettingsPage() {
     setDriveError('');
     setRestoringDriveFileId(file.id);
     try {
-      setRestoreResult(await restoreFromGoogleDrive(file.id));
+      setRestoreResult(await restoreFromGoogleDrive(file.id, driveRestorePassphrase.trim() || undefined));
       setShowDriveRestore(false);
     } catch (err) {
       setDriveError(err instanceof Error ? err.message : 'Restore from Google Drive failed.');
@@ -763,12 +786,29 @@ export default function SettingsPage() {
             </Form.Label>
             <Button
               variant="outline-secondary"
-              onClick={() => { setDriveRestoreFolderName(''); handleOpenDriveRestore(); }}
+              onClick={() => { setDriveRestoreFolderName(''); setDriveRestorePassphrase(''); handleOpenDriveRestore(); }}
               disabled={backingUp || restoring || drivingBackingUp}
             >
               Restore from Google Drive
             </Button>
           </div>
+          <Form.Group className="mt-2" controlId="local-backup-passphrase" style={{ maxWidth: 340 }}>
+            <Form.Label className="small mb-1">Passphrase (optional)</Form.Label>
+            <Form.Control
+              type="password"
+              size="sm"
+              placeholder="Leave blank for no encryption"
+              autoComplete="new-password"
+              value={localBackupPassphrase}
+              onChange={(e) => setLocalBackupPassphrase(e.target.value)}
+              disabled={backingUp || restoring || drivingBackingUp}
+            />
+            <Form.Text className="text-muted">
+              Encrypts "Download backup" with AES-256 when set, and is used to decrypt "Restore
+              from file" if the chosen file turns out to be encrypted. There's no way to recover a
+              forgotten passphrase — nothing about it is ever stored.
+            </Form.Text>
+          </Form.Group>
           <Form.Text className="text-muted d-block mt-2">
             Drive backups default to a "{DEFAULT_BACKUP_FOLDER_NAME}" folder in your own Google
             Drive, but you can name the file and choose a different folder when backing up.
@@ -838,6 +878,18 @@ export default function SettingsPage() {
             </Button>
           </Form>
 
+          <Form.Group className="mb-3" controlId="drive-restore-passphrase">
+            <Form.Label className="small mb-1">Passphrase (only needed for an encrypted backup)</Form.Label>
+            <Form.Control
+              type="password"
+              size="sm"
+              autoComplete="new-password"
+              value={driveRestorePassphrase}
+              onChange={(e) => setDriveRestorePassphrase(e.target.value)}
+              disabled={loadingDriveBackups || restoringDriveFileId !== null}
+            />
+          </Form.Group>
+
           {loadingDriveBackups ? (
             <div className="text-center py-3"><Spinner animation="border" size="sm" /></div>
           ) : driveBackups.length === 0 ? (
@@ -901,6 +953,21 @@ export default function SettingsPage() {
               />
               <Form.Text className="text-muted">
                 Created in your Drive root if it doesn't already exist.
+              </Form.Text>
+            </Form.Group>
+            <Form.Group className="mb-3" controlId="drive-backup-passphrase">
+              <Form.Label>Passphrase (optional)</Form.Label>
+              <Form.Control
+                type="password"
+                autoComplete="new-password"
+                value={driveBackupPassphrase}
+                onChange={(e) => setDriveBackupPassphrase(e.target.value)}
+                disabled={drivingBackingUp}
+              />
+              <Form.Text className="text-muted">
+                Encrypts this backup with AES-256 so it's unreadable to anyone who can see this
+                Drive folder without the passphrase. The same passphrase is required to restore
+                it — there's no way to recover a forgotten one.
               </Form.Text>
             </Form.Group>
             {driveError && <Alert variant="danger" className="mb-0">{driveError}</Alert>}
