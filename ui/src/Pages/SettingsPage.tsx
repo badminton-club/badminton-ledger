@@ -122,21 +122,6 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSyncMemberAccess = async (member: ClubMember) => {
-    if (!clubId) return;
-    setMembersError('');
-    setMembersMessage('');
-    setAssigningUid(member.uid);
-    try {
-      await addClubMember(clubId, member.uid, member.role);
-      setMembersMessage('Club access synced. Ask the member to refresh or sign in again.');
-    } catch (err) {
-      setMembersError(err instanceof Error ? err.message : 'Failed to sync member access.');
-    } finally {
-      setAssigningUid(null);
-    }
-  };
-
   const handleAssignPlayer = async (memberUid: string, pid: string | null) => {
     if (!clubId) return;
     setMembersError('');
@@ -727,14 +712,6 @@ export default function SettingsPage() {
                         <option key={p.id} value={p.id}>{playerLabel(p)}</option>
                       ))}
                     </Form.Select>
-                    <Button
-                      size="sm"
-                      variant="outline-secondary"
-                      disabled={assigningUid === m.uid}
-                      onClick={() => handleSyncMemberAccess(m)}
-                    >
-                      Sync access
-                    </Button>
                     {isSuperAdmin && (
                       <Button size="sm" variant="outline-danger" disabled={assigningUid === m.uid} onClick={() => handleRemoveMember(m.uid)}>
                         Remove

@@ -134,6 +134,22 @@ describe('addSession', () => {
     expect(ledger[0].reason).toBe('session');
   });
 
+  it('marks a zero-cost player paid by balance without changing their balance or owed amount', async () => {
+    seedPlayer('p1', { balance: 0, owed: 0 });
+
+    const sessionId = await addSession(baseSessionData({
+      players: [{ id: 'p1', percentage: 0, cost: 0, paid: false, highlighted: false }],
+    }));
+
+    const session = getClubDocData('sessions', sessionId)!;
+    expect((session.players as any[])[0]).toMatchObject({
+      paid: true,
+      paidVia: 'balance',
+    });
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
+    expect(ledgerEntriesFor('p1')).toHaveLength(0);
+  });
+
   it('does not auto-settle from balance when the player is already paid/comped', async () => {
     seedPlayer('p1', { balance: 50 });
 

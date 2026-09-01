@@ -30,6 +30,7 @@ import {
 import { selectDisabledTabs } from '../features/club/clubSlice';
 import type { NewPlayerInput, PaidVia, Player, Session } from '../types';
 import type { RootState } from '../store';
+import { isSessionPlayerUnpaid } from '../utils/sessionPayment';
 
 interface BalanceAdjustment {
   amount: string;
@@ -1003,7 +1004,7 @@ export default function PlayersPage() {
                     ${selectedLedgerSessionPlayer.cost.toFixed(2)}{' '}
                     {selectedLedgerSessionPlayer.comped || selectedLedgerSessionPlayer.paidVia === 'comp'
                       ? <Badge bg="warning">Comped</Badge>
-                      : selectedLedgerSessionPlayer.paid
+                      : !isSessionPlayerUnpaid(selectedLedgerSessionPlayer)
                         ? <Badge bg="success">Paid</Badge>
                         : <Badge bg="danger">Unpaid</Badge>}
                   </span>
