@@ -197,7 +197,6 @@ function PlayerRow({
     onSetPaidBy(payerId);
   };
 
-  // Clearly marks how the session was settled (shown to members).
   const settlement = player.comped
     ? { label: 'Comp', bg: 'info' }
     : currentVia === 'transfer'
@@ -214,7 +213,6 @@ function PlayerRow({
     { method: 'balance',   label: 'Balance',    activeVariant: 'primary' },
     { method: 'etransfer', label: 'e-Transfer', activeVariant: 'success' },
   ];
-
   const otherPlayers = payerOptions.filter(o => o.id !== player.id);
   const [payerSearch, setPayerSearch] = useState('');
   const filteredPayers = useMemo(
@@ -313,6 +311,7 @@ function PlayerRow({
     </ListGroup.Item>
   );
 }
+
 
 function SummaryRow({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
   return (

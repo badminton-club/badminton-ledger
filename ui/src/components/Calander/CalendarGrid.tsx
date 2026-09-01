@@ -59,19 +59,21 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, onDa
     for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
     return (
-        <div style={styles.grid}>
-            <div style={styles.headerRow}>
-                {WEEKDAYS.map((wd) => (
-                    <div key={wd} style={styles.headerCell}>
-                        {wd}
+        <div style={styles.scrollContainer}>
+            <div style={styles.grid}>
+                <div style={styles.headerRow}>
+                    {WEEKDAYS.map((wd) => (
+                        <div key={wd} style={styles.headerCell}>
+                            {wd}
+                        </div>
+                    ))}
+                </div>
+                {weeks.map((week, i) => (
+                    <div key={i} style={styles.weekRow}>
+                        {week}
                     </div>
                 ))}
             </div>
-            {weeks.map((week, i) => (
-                <div key={i} style={styles.weekRow}>
-                    {week}
-                </div>
-            ))}
         </div>
     );
 }
@@ -191,14 +193,28 @@ function DayCell({
 }
 
 const styles: Record<string, React.CSSProperties> = {
+    // On narrow screens, 7 columns of readable day cells don't fit — rather
+    // than squeezing cells until they're illegibly small, the grid keeps a
+    // fixed minimum width and this wrapper scrolls horizontally instead.
+    scrollContainer: {
+        width: "100%",
+        overflowX: "auto",
+        WebkitOverflowScrolling: "touch", // momentum scrolling on iOS
+    },
     grid: {
         width: "100%",
+        minWidth: 560, // 7 cols × 80px — the smallest a day cell stays usable
         borderTop: "0.5px solid var(--color-border-tertiary)",
         borderLeft: "0.5px solid var(--color-border-tertiary)",
     },
     headerRow: {
         display: "grid",
-        gridTemplateColumns: "repeat(7, 1fr)",
+        // minmax(0, 1fr), not bare 1fr: without the explicit 0 minimum, a grid
+        // track can't shrink below its content's min-content size, so a cell
+        // with wider content (e.g. the "×3" session-count badge) silently
+        // pushes just *that* column wider than the others — which is exactly
+        // why header and week rows were drifting out of alignment on mobile.
+        gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
     },
     headerCell: {
         padding: "10px 0",
@@ -213,7 +229,7 @@ const styles: Record<string, React.CSSProperties> = {
     },
     weekRow: {
         display: "grid",
-        gridTemplateColumns: "repeat(7, 1fr)",
+        gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
     },
     cell: {
         minHeight: 120,
@@ -233,7 +249,7 @@ const styles: Record<string, React.CSSProperties> = {
         opacity: 0.4,
     },
     dayNumber: {
-        minWidth: 24,
+        width: 28,
         height: 28,
         display: "flex",
         alignItems: "center",
