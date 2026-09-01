@@ -37,7 +37,14 @@ service cloud.firestore {
     match /clubs/{clubId} {
       allow read:   if isMember(clubId);
       allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if isClubAdmin(clubId);
+      // ownerUid must never change after creation — it's what lets the original
+      // creator bootstrap the first superAdmin membership (see isClubOwner above
+      // and the members bootstrap clause below). Without this, any regular admin
+      // could rewrite ownerUid to a second account they control and use that
+      // account's now-true isClubOwner() to self-grant superAdmin, bypassing the
+      // "only superadmins may grant elevated roles" invariant entirely.
+      allow update: if isClubAdmin(clubId)
+        && request.resource.data.ownerUid == resource.data.get('ownerUid', null);
       allow delete: if isClubSuperAdmin(clubId);
 
       // Membership roster. Only superadmins may create/change/remove elevated roles
@@ -61,10 +68,15 @@ service cloud.firestore {
       }
 
       // Profile edit requests: a linked member proposes a name/email change here
-      // for an admin to review and apply — same shape as linkRequests above.
+      // for an admin to review and apply — same shape as linkRequests above,
+      // except create/update also requires the proposal target their OWN linked
+      // player. Without this, any member could write a proposedEdit for someone
+      // ELSE's playerId and have an admin unknowingly approve it against the
+      // wrong player.
       match /profileEditRequests/{uid} {
         allow read:           if isSignedIn() && (request.auth.uid == uid || isClubAdmin(clubId));
-        allow create, update: if isSignedIn() && request.auth.uid == uid;
+        allow create, update: if isSignedIn() && request.auth.uid == uid
+          && isMember(clubId) && request.resource.data.playerId == memberPlayerId(clubId);
         allow delete:         if isClubAdmin(clubId) || request.auth.uid == uid;
       }
 
@@ -91,12 +103,46 @@ service cloud.firestore {
       }
       match /archivedSessions/{doc}      { allow read, write: if isClubAdmin(clubId); }
       match /payouts/{doc}               { allow read, write: if isClubAdmin(clubId); }
+      // Gmail e-Transfer autodeposit import review queue + remembered sender→player
+      // mappings — admins only, same as other financial data.
+      match /etransferImports/{doc}        { allow read, write: if isClubAdmin(clubId); }
+      match /etransferSenderMappings/{doc} { allow read, write: if isClubAdmin(clubId); }
     }
 
     // ── User profiles ──────────────────────────────────────────────────────────
-    // Each user reads/writes only their own profile (their saved club list + default).
+    // Each user manages their own profile (their saved club list + default).
     match /users/{uid} {
-      allow read, write: if isSignedIn() && request.auth.uid == uid;
+      allow read, delete: if isSignedIn() && request.auth.uid == uid;
+      allow create: if isSignedIn() && (
+        request.auth.uid == uid
+        // A club admin may initialize only the saved-club list for a user who
+        // does not have a profile yet.
+        || (
+          request.resource.data.keys().hasOnly(['clubs'])
+          && request.resource.data.clubs.size() == 1
+          && isClubAdmin(request.resource.data.clubs[0])
+        )
+      );
+      allow update: if isSignedIn() && (
+        request.auth.uid == uid
+        // A club admin granting someone membership (see clubs.ts `addClubMember`)
+        // also needs their club to show up in that member's own club switcher —
+        // otherwise it only appears once the member separately opens a share
+        // link. Scoped tightly so an admin can't touch anything else on another
+        // user's profile: only the `clubs` field may change, only by appending
+        // exactly one id, and only a club the caller actually administers.
+        || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clubs'])
+          && (
+            // Keep retries/idempotent syncs harmless when the club is already saved.
+            request.resource.data.clubs == resource.data.get('clubs', [])
+            || (
+              request.resource.data.clubs.size() == resource.data.get('clubs', []).size() + 1
+              && isClubAdmin(request.resource.data.clubs.removeAll(resource.data.get('clubs', []))[0])
+            )
+          )
+        )
+      );
     }
 
     // ── Deny everything else ───────────────────────────────────────────────────

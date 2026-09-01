@@ -16,6 +16,12 @@ import {
 import { __getDocData, __seedDoc } from '../../test-utils/fakeFirestore';
 import type { Player } from '../../types';
 
+jest.mock('../../services/firebase/drive', () => ({
+  ...jest.requireActual('../../services/firebase/drive'),
+  backupToGoogleDrive: jest.fn(),
+}));
+import { backupToGoogleDrive } from '../../services/firebase/drive';
+
 const superAdminUser = {
   uid: 'super-admin-1',
   displayName: 'Super Admin',
@@ -68,6 +74,7 @@ function renderPage(options: {
 beforeEach(() => {
   resetFirebaseTestState();
   setCurrentUser(superAdminUser);
+  jest.mocked(backupToGoogleDrive).mockReset();
   Object.defineProperty(URL, 'createObjectURL', {
     configurable: true,
     writable: true,
@@ -107,10 +114,25 @@ describe('SettingsPage', () => {
     renderPage({ role: 'admin' });
 
     expect(screen.getByText('Club settings')).toBeInTheDocument();
+    expect(screen.getByText(TEST_CLUB_ID)).toBeInTheDocument();
     expect(await screen.findByText('member-1')).toBeInTheDocument();
-    expect(screen.queryByText('Danger zone')).not.toBeInTheDocument();
+    expect(screen.queryByText(/danger zone/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Admin' })).not.toBeInTheDocument();
+  });
+
+  it('collapses the danger zone behind a dropdown for super admins until expanded', async () => {
+    const user = userEvent.setup();
+    renderPage({ role: 'superAdmin' });
+
+    const dangerZoneToggle = await screen.findByRole('button', { name: /danger zone/i });
+    expect(dangerZoneToggle).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(dangerZoneToggle);
+
+    expect(dangerZoneToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Clear all data' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete club' })).toBeInTheDocument();
   });
 
   it('persists tab visibility toggles to Firestore and Redux state', async () => {
@@ -139,6 +161,24 @@ describe('SettingsPage', () => {
       expect(store.getState().club.disabledTabs).toEqual(['birdies']);
       expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
         disabledTabs: ['birdies'],
+      });
+    });
+  });
+
+  it('shows a toggle for the Attendance tab, so it can be hidden from every club member, not just admins', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club' });
+    const { store } = renderPage({ role: 'admin' });
+
+    const attendanceToggle = screen.getByRole('checkbox', { name: 'Show the Attendance tab' });
+    expect(attendanceToggle).toBeChecked();
+
+    await user.click(attendanceToggle);
+
+    await waitFor(() => {
+      expect(store.getState().club.disabledTabs).toEqual(['attendance']);
+      expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+        disabledTabs: ['attendance'],
       });
     });
   });
@@ -177,6 +217,23 @@ describe('SettingsPage', () => {
       });
     });
     expect(await screen.findByText('new-admin')).toBeInTheDocument();
+    // The new admin's own profile is updated too, so the club shows up in
+    // their club switcher without them needing a separate join link.
+    expect(__getDocData('users/new-admin')).toMatchObject({ clubs: [TEST_CLUB_ID] });
+  });
+
+  it('repairs saved club access for an existing member', async () => {
+    const user = userEvent.setup();
+    seedMemberDoc('member-1', { role: 'member', playerId: null });
+    renderPage({ role: 'superAdmin' });
+
+    const memberRow = (await screen.findByText('member-1')).closest('.list-group-item') as HTMLElement;
+    await user.click(within(memberRow).getByRole('button', { name: 'Sync access' }));
+
+    await waitFor(() => {
+      expect(__getDocData('users/member-1')).toMatchObject({ clubs: [TEST_CLUB_ID] });
+    });
+    expect(screen.getByText(/club access synced/i)).toBeInTheDocument();
   });
 
   it('approves pending link requests using the auto-suggested player match', async () => {
@@ -418,6 +475,75 @@ describe('SettingsPage', () => {
     expect(__getDocData(`clubs/${TEST_CLUB_ID}/sessions/s1`)).toBeDefined();
   });
 
+  it('encrypts a local backup with a passphrase and round-trips it through restore-from-file', async () => {
+    const user = userEvent.setup();
+    let capturedBlob: Blob | null = null;
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: jest.fn((blob: Blob) => {
+        capturedBlob = blob;
+        return 'blob:backup';
+      }),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      writable: true,
+      value: jest.fn(),
+    });
+    jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    seedClubDoc('players', 'p1', makePlayer());
+    renderPage({ role: 'superAdmin', players: [makePlayer()] });
+
+    await user.type(screen.getByPlaceholderText('Leave blank for no encryption'), 'super-secret');
+    await user.click(screen.getByRole('button', { name: 'Download backup' }));
+
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
+    const backupJson = await new Response(capturedBlob as Blob).text();
+    const parsed = JSON.parse(backupJson);
+    // The uploaded/downloaded file must be an encrypted envelope, not the
+    // plain backup — the player's name must not appear anywhere in it.
+    expect(parsed.__encrypted).toBe(true);
+    expect(backupJson).not.toContain('Jamie'); // makePlayer()'s default first name
+
+    await clearAllData();
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}/players/p1`)).toBeUndefined();
+
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+    fireEvent.change(fileInput as HTMLInputElement, {
+      target: { files: [{ name: 'backup.json', text: async () => backupJson }] },
+    });
+
+    expect(await screen.findByText('Restore complete.')).toBeInTheDocument();
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}/players/p1`)).toBeDefined();
+  });
+
+  it('shows a friendly error when restoring an encrypted local file without a passphrase', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true, writable: true, value: jest.fn(() => 'blob:backup'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: jest.fn() });
+
+    seedClubDoc('players', 'p1', makePlayer());
+    renderPage({ role: 'superAdmin', players: [makePlayer()] });
+
+    const { encryptBackupPayload } = await import('../../services/backupCrypto');
+    const envelope = await encryptBackupPayload(JSON.stringify({ version: 1, exportedAt: '', collections: {} }), 'pw');
+
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+    fireEvent.change(fileInput as HTMLInputElement, {
+      target: { files: [{ name: 'backup.json', text: async () => JSON.stringify(envelope) }] },
+    });
+
+    expect(await screen.findByText(
+      'This backup is encrypted — enter its passphrase above, then choose the file again.'
+    )).toBeInTheDocument();
+  });
+
   it('requires the confirmation phrase before clearing data and then deletes every club collection document', async () => {
     const user = userEvent.setup();
     jest.spyOn(window, 'confirm').mockReturnValue(true);
@@ -436,6 +562,8 @@ describe('SettingsPage', () => {
     });
 
     renderPage({ role: 'superAdmin' });
+
+    await user.click(screen.getByRole('button', { name: /danger zone/i }));
 
     const clearButton = screen.getByRole('button', { name: 'Clear all data' });
     expect(clearButton).toBeDisabled();
@@ -464,5 +592,29 @@ describe('SettingsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Backup to Google Drive' }));
 
     expect(await screen.findByRole('button', { name: 'Backup' })).toBeInTheDocument();
+  });
+
+  it('passes a typed passphrase through to the Google Drive backup call, and omits it when left blank', async () => {
+    const user = userEvent.setup();
+    jest.mocked(backupToGoogleDrive).mockResolvedValue({ fileName: 'backup.json' });
+    renderPage({ role: 'admin' });
+
+    await user.click(screen.getByRole('button', { name: 'Backup to Google Drive' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Passphrase (optional)'), 'super-secret');
+    await user.click(within(dialog).getByRole('button', { name: 'Backup' }));
+
+    await waitFor(() => expect(backupToGoogleDrive).toHaveBeenCalledWith(
+      expect.objectContaining({ passphrase: 'super-secret' })
+    ));
+
+    jest.mocked(backupToGoogleDrive).mockClear();
+    await user.click(screen.getByRole('button', { name: 'Backup to Google Drive' }));
+    const secondDialog = await screen.findByRole('dialog');
+    await user.click(within(secondDialog).getByRole('button', { name: 'Backup' }));
+
+    await waitFor(() => expect(backupToGoogleDrive).toHaveBeenCalledWith(
+      expect.objectContaining({ passphrase: undefined })
+    ));
   });
 });

@@ -23,6 +23,7 @@ const initialState = reducer(undefined, { type: '@@INIT' });
 
 function makeResolutionItem(overrides: Partial<NameResolutionItem> = {}): NameResolutionItem {
   return {
+    id: 'item-1',
     rawName: 'John Smith',
     resolvedPlayerId: null,
     isNew: false,
@@ -54,19 +55,36 @@ describe('sessionModalSlice reducer', () => {
     expect(reducer(initialState, setResolutionItems(items)).resolutionItems).toEqual(items);
   });
 
-  it('updateResolutionItem patches only the item at the given index', () => {
-    const items = [makeResolutionItem({ rawName: 'A' }), makeResolutionItem({ rawName: 'B' })];
+  it('updateResolutionItem patches only the item with the matching id', () => {
+    const items = [makeResolutionItem({ id: 'item-a', rawName: 'A' }), makeResolutionItem({ id: 'item-b', rawName: 'B' })];
     const withItems = reducer(initialState, setResolutionItems(items));
-    const updated = reducer(withItems, updateResolutionItem({ index: 1, patch: { resolvedPlayerId: 'p2' } }));
+    const updated = reducer(withItems, updateResolutionItem({ id: 'item-b', patch: { resolvedPlayerId: 'p2' } }));
     expect(updated.resolutionItems[0]).toEqual(items[0]);
     expect(updated.resolutionItems[1]).toEqual({ ...items[1], resolvedPlayerId: 'p2' });
   });
 
-  it('updateResolutionItem is a no-op for an out-of-range index', () => {
-    const items = [makeResolutionItem()];
+  it('updateResolutionItem is a no-op for an id that is not present', () => {
+    const items = [makeResolutionItem({ id: 'item-a' })];
     const withItems = reducer(initialState, setResolutionItems(items));
-    const updated = reducer(withItems, updateResolutionItem({ index: 5, patch: { resolvedPlayerId: 'p1' } }));
+    const updated = reducer(withItems, updateResolutionItem({ id: 'missing', patch: { resolvedPlayerId: 'p1' } }));
     expect(updated.resolutionItems).toEqual(items);
+  });
+
+  it('updateResolutionItem keeps patching the correct item by id after the array is reordered/shrunk', () => {
+    const items = [
+      makeResolutionItem({ id: 'item-a', rawName: 'A' }),
+      makeResolutionItem({ id: 'item-b', rawName: 'B' }),
+      makeResolutionItem({ id: 'item-c', rawName: 'C' }),
+    ];
+    const withItems = reducer(initialState, setResolutionItems(items));
+    // Simulates removing the first row (as ResolveNamesStep's handleRemove does),
+    // shifting what was previously at index 2 ('item-c') down to index 1.
+    const afterRemoval = reducer(withItems, setResolutionItems(items.slice(1)));
+    // A late-resolving match for 'item-c' (originally captured at index 2) must
+    // still land on 'item-c', not on whatever now occupies index 2 (nothing).
+    const updated = reducer(afterRemoval, updateResolutionItem({ id: 'item-c', patch: { resolvedPlayerId: 'p3' } }));
+    expect(updated.resolutionItems.find(i => i.id === 'item-c')?.resolvedPlayerId).toBe('p3');
+    expect(updated.resolutionItems.find(i => i.id === 'item-b')?.resolvedPlayerId).toBeNull();
   });
 
   it('setConfirmedPlayers replaces the confirmed players list', () => {

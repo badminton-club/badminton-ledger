@@ -184,4 +184,40 @@ describe('SessionCalendar', () => {
 
     expect(within(dayCell).queryByRole('button', { name: 'View session details' })).not.toBeInTheDocument();
   });
+
+  it('lets a non-admin select an empty day without launching the admin-only add-session flow', async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    renderWithProviders(<SessionCalendar />, {
+      preloadedState: {
+        club: makeClubState({ currentClubId: TEST_CLUB_ID, role: 'member' }),
+        players: makePlayersState([makePlayer('p1', 'Alice', 'Zhang')]),
+      },
+    });
+
+    await screen.findByRole('button', { name: 'August 2026' });
+    await user.click((await screen.findByText('11')).parentElement as HTMLElement);
+
+    expect(await screen.findByText(dateHeading('Tuesday August 11'))).toBeInTheDocument();
+    expect(screen.getByText('No session this day')).toBeInTheDocument();
+    expect(screen.queryByTestId('session-modal')).not.toBeInTheDocument();
+  });
+
+  it('deselects the day when navigating months, so "+ Add Session" cannot silently create a session in the month navigated away from', async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    seedSession('aug-10', new Date(2026, 7, 10), { location: 'Court A' });
+
+    renderCalendar();
+
+    await screen.findByRole('button', { name: 'August 2026' });
+    await user.click((await screen.findByText('10')).parentElement as HTMLElement);
+    expect(await screen.findByText(dateHeading('Monday August 10'))).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '>' }));
+    expect(await screen.findByRole('button', { name: 'September 2026' })).toBeInTheDocument();
+
+    // The selected-day panel must go back to its empty state — not keep
+    // showing (or silently targeting) August 10 from before navigating.
+    expect(screen.getByText('Select a day to see session details')).toBeInTheDocument();
+    expect(screen.queryByText(dateHeading('Monday August 10'))).not.toBeInTheDocument();
+  });
 });

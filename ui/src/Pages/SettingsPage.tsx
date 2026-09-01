@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup, Badge, Modal } from 'react-bootstrap';
+import { Container, Card, Button, Form, Alert, Spinner, ListGroup, InputGroup, Badge, Modal, Accordion } from 'react-bootstrap';
 import { format } from 'date-fns';
 import { clearAllData, exportAllData, restoreAllData, CLEARABLE_COLLECTIONS, type ClearSummary, type BackupData } from '../services/firebase/admin';
 import {
@@ -11,6 +11,7 @@ import {
   type DriveBackupResult,
   type DriveBackupFile,
 } from '../services/firebase/drive';
+import { encryptBackupPayload, decryptBackupPayload, isEncryptedBackupPayload } from '../services/backupCrypto';
 import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, updatePlayerProfile } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
@@ -44,6 +45,7 @@ export default function SettingsPage() {
   const [error, setError] = useState('');
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [localBackupPassphrase, setLocalBackupPassphrase] = useState('');
   const [restoreResult, setRestoreResult] = useState<ClearSummary | null>(null);
   const [ioError, setIoError] = useState('');
   const [drivingBackingUp, setDriveBackingUp] = useState(false);
@@ -53,14 +55,17 @@ export default function SettingsPage() {
   const [driveBackups, setDriveBackups] = useState<DriveBackupFile[]>([]);
   const [loadingDriveBackups, setLoadingDriveBackups] = useState(false);
   const [restoringDriveFileId, setRestoringDriveFileId] = useState<string | null>(null);
+  const [driveRestorePassphrase, setDriveRestorePassphrase] = useState('');
   const [showDriveBackup, setShowDriveBackup] = useState(false);
   const [driveBackupFileName, setDriveBackupFileName] = useState('');
   const [driveBackupFolderName, setDriveBackupFolderName] = useState('');
+  const [driveBackupPassphrase, setDriveBackupPassphrase] = useState('');
   const [driveRestoreFolderName, setDriveRestoreFolderName] = useState('');
 
   const [members, setMembers] = useState<ClubMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState('');
+  const [membersMessage, setMembersMessage] = useState('');
   const [newMemberUid, setNewMemberUid] = useState('');
   const [newMemberRole, setNewMemberRole] = useState<ClubRole>('member');
   const [addingMember, setAddingMember] = useState(false);
@@ -87,6 +92,7 @@ export default function SettingsPage() {
     if (!clubId) { setMembers([]); return; }
     setMembersLoading(true);
     setMembersError('');
+    setMembersMessage('');
     try {
       setMembers(await fetchClubMembers(clubId));
     } catch (err) {
@@ -107,11 +113,27 @@ export default function SettingsPage() {
     try {
       await addClubMember(clubId, target, newMemberRole);
       setNewMemberUid('');
+      setMembersMessage('Member access saved. The club will appear the next time they refresh or sign in.');
       await loadMembers();
     } catch (err) {
       setMembersError(err instanceof Error ? err.message : 'Failed to add member.');
     } finally {
       setAddingMember(false);
+    }
+  };
+
+  const handleSyncMemberAccess = async (member: ClubMember) => {
+    if (!clubId) return;
+    setMembersError('');
+    setMembersMessage('');
+    setAssigningUid(member.uid);
+    try {
+      await addClubMember(clubId, member.uid, member.role);
+      setMembersMessage('Club access synced. Ask the member to refresh or sign in again.');
+    } catch (err) {
+      setMembersError(err instanceof Error ? err.message : 'Failed to sync member access.');
+    } finally {
+      setAssigningUid(null);
     }
   };
 
@@ -350,7 +372,10 @@ export default function SettingsPage() {
     setBackingUp(true);
     try {
       const data = await exportAllData();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const json = JSON.stringify(data, null, 2);
+      const passphrase = localBackupPassphrase.trim();
+      const payload = passphrase ? JSON.stringify(await encryptBackupPayload(json, passphrase)) : json;
+      const blob = new Blob([payload], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -376,7 +401,21 @@ export default function SettingsPage() {
     setRestoreResult(null);
     setRestoring(true);
     try {
-      const backup = JSON.parse(await file.text()) as BackupData;
+      const raw = await file.text();
+      let parsedRaw: unknown;
+      try {
+        parsedRaw = JSON.parse(raw);
+      } catch {
+        throw new Error('The selected file is not a valid backup (invalid JSON).');
+      }
+      let json = raw;
+      if (isEncryptedBackupPayload(parsedRaw)) {
+        if (!localBackupPassphrase.trim()) {
+          throw new Error('This backup is encrypted — enter its passphrase above, then choose the file again.');
+        }
+        json = await decryptBackupPayload(parsedRaw, localBackupPassphrase.trim());
+      }
+      const backup = JSON.parse(json) as BackupData;
       setRestoreResult(await restoreAllData(backup));
     } catch (err) {
       setIoError(err instanceof Error ? err.message : 'Restore failed.');
@@ -389,6 +428,7 @@ export default function SettingsPage() {
     setDriveError('');
     setDriveBackupFileName('');
     setDriveBackupFolderName('');
+    setDriveBackupPassphrase('');
     setShowDriveBackup(true);
   };
 
@@ -400,6 +440,7 @@ export default function SettingsPage() {
       setDriveResult(await backupToGoogleDrive({
         fileName: driveBackupFileName,
         folderName: driveBackupFolderName,
+        passphrase: driveBackupPassphrase.trim() || undefined,
       }));
       setShowDriveBackup(false);
     } catch (err) {
@@ -430,7 +471,7 @@ export default function SettingsPage() {
     setDriveError('');
     setRestoringDriveFileId(file.id);
     try {
-      setRestoreResult(await restoreFromGoogleDrive(file.id));
+      setRestoreResult(await restoreFromGoogleDrive(file.id, driveRestorePassphrase.trim() || undefined));
       setShowDriveRestore(false);
     } catch (err) {
       setDriveError(err instanceof Error ? err.message : 'Restore from Google Drive failed.');
@@ -468,7 +509,8 @@ export default function SettingsPage() {
   return (
     <Container className="mt-4" style={{ maxWidth: 900 }}>
       <h3>Club settings</h3>
-      <p className="text-muted">Settings for the club you currently have open.</p>
+      <p className="text-muted mb-1">Settings for the club you currently have open.</p>
+      <p className="text-muted">Club ID: <code>{clubId}</code></p>
 
       <Card className="mt-3">
         <Card.Header>Tabs</Card.Header>
@@ -631,6 +673,10 @@ export default function SettingsPage() {
             Add people by their user ID (shown on their Account page) and link each to a player so
             they can see their own attendance.
           </Card.Text>
+          <Card.Text className="text-muted small">
+            Admins manage day-to-day club data. Super admins can also grant admin access, remove
+            members, clear all data, and delete the club.
+          </Card.Text>
 
           <InputGroup className="mb-3">
             <Form.Control
@@ -654,6 +700,7 @@ export default function SettingsPage() {
           </InputGroup>
 
           {membersError && <Alert variant="danger" className="py-2">{membersError}</Alert>}
+          {membersMessage && <Alert variant="success" className="py-2">{membersMessage}</Alert>}
 
           {membersLoading ? (
             <Spinner animation="border" size="sm" />
@@ -680,6 +727,14 @@ export default function SettingsPage() {
                         <option key={p.id} value={p.id}>{playerLabel(p)}</option>
                       ))}
                     </Form.Select>
+                    <Button
+                      size="sm"
+                      variant="outline-secondary"
+                      disabled={assigningUid === m.uid}
+                      onClick={() => handleSyncMemberAccess(m)}
+                    >
+                      Sync access
+                    </Button>
                     {isSuperAdmin && (
                       <Button size="sm" variant="outline-danger" disabled={assigningUid === m.uid} onClick={() => handleRemoveMember(m.uid)}>
                         Remove
@@ -731,12 +786,29 @@ export default function SettingsPage() {
             </Form.Label>
             <Button
               variant="outline-secondary"
-              onClick={() => { setDriveRestoreFolderName(''); handleOpenDriveRestore(); }}
+              onClick={() => { setDriveRestoreFolderName(''); setDriveRestorePassphrase(''); handleOpenDriveRestore(); }}
               disabled={backingUp || restoring || drivingBackingUp}
             >
               Restore from Google Drive
             </Button>
           </div>
+          <Form.Group className="mt-2" controlId="local-backup-passphrase" style={{ maxWidth: 340 }}>
+            <Form.Label className="small mb-1">Passphrase (optional)</Form.Label>
+            <Form.Control
+              type="password"
+              size="sm"
+              placeholder="Leave blank for no encryption"
+              autoComplete="new-password"
+              value={localBackupPassphrase}
+              onChange={(e) => setLocalBackupPassphrase(e.target.value)}
+              disabled={backingUp || restoring || drivingBackingUp}
+            />
+            <Form.Text className="text-muted">
+              Encrypts "Download backup" with AES-256 when set, and is used to decrypt "Restore
+              from file" if the chosen file turns out to be encrypted. There's no way to recover a
+              forgotten passphrase — nothing about it is ever stored.
+            </Form.Text>
+          </Form.Group>
           <Form.Text className="text-muted d-block mt-2">
             Drive backups default to a "{DEFAULT_BACKUP_FOLDER_NAME}" folder in your own Google
             Drive, but you can name the file and choose a different folder when backing up.
@@ -806,6 +878,18 @@ export default function SettingsPage() {
             </Button>
           </Form>
 
+          <Form.Group className="mb-3" controlId="drive-restore-passphrase">
+            <Form.Label className="small mb-1">Passphrase (only needed for an encrypted backup)</Form.Label>
+            <Form.Control
+              type="password"
+              size="sm"
+              autoComplete="new-password"
+              value={driveRestorePassphrase}
+              onChange={(e) => setDriveRestorePassphrase(e.target.value)}
+              disabled={loadingDriveBackups || restoringDriveFileId !== null}
+            />
+          </Form.Group>
+
           {loadingDriveBackups ? (
             <div className="text-center py-3"><Spinner animation="border" size="sm" /></div>
           ) : driveBackups.length === 0 ? (
@@ -871,6 +955,21 @@ export default function SettingsPage() {
                 Created in your Drive root if it doesn't already exist.
               </Form.Text>
             </Form.Group>
+            <Form.Group className="mb-3" controlId="drive-backup-passphrase">
+              <Form.Label>Passphrase (optional)</Form.Label>
+              <Form.Control
+                type="password"
+                autoComplete="new-password"
+                value={driveBackupPassphrase}
+                onChange={(e) => setDriveBackupPassphrase(e.target.value)}
+                disabled={drivingBackingUp}
+              />
+              <Form.Text className="text-muted">
+                Encrypts this backup with AES-256 so it's unreadable to anyone who can see this
+                Drive folder without the passphrase. The same passphrase is required to restore
+                it — there's no way to recover a forgotten one.
+              </Form.Text>
+            </Form.Group>
             {driveError && <Alert variant="danger" className="mb-0">{driveError}</Alert>}
           </Modal.Body>
           <Modal.Footer>
@@ -892,107 +991,107 @@ export default function SettingsPage() {
       </Modal>
 
       {isSuperAdmin && (
-      <>
-      <Card border="danger" className="mt-3">
-        <Card.Header className="bg-danger text-white">Danger zone</Card.Header>
-        <Card.Body>
-          <Card.Title>Clear all data</Card.Title>
-          <Card.Text>
-            Permanently deletes every document from the collections below. The collections
-            themselves are left in place.
-          </Card.Text>
-          <ListGroup variant="flush" className="mb-3">
-            {CLEARABLE_COLLECTIONS.map((name) => (
-              <ListGroup.Item key={name}>{name}</ListGroup.Item>
-            ))}
-          </ListGroup>
-
-          <Form.Group className="mb-3" controlId="settings-clear-all-confirm">
-            <Form.Label>
-              Type <strong>{CONFIRM_PHRASE}</strong> to enable the button.
-            </Form.Label>
-            <Form.Control
-              type="text"
-              value={confirmText}
-              onChange={(e) => setConfirmText(e.target.value)}
-              placeholder={CONFIRM_PHRASE}
-              disabled={clearing}
-            />
-          </Form.Group>
-
-          <Button
-            variant="danger"
-            onClick={handleClear}
-            disabled={confirmText !== CONFIRM_PHRASE || clearing}
-          >
-            {clearing ? (
-              <>
-                <Spinner as="span" animation="border" size="sm" className="me-2" />
-                Clearing...
-              </>
-            ) : (
-              'Clear all data'
-            )}
-          </Button>
-
-          {error && (
-            <Alert variant="danger" className="mt-3">
-              {error}
-            </Alert>
-          )}
-
-          {result && (
-            <Alert variant="success" className="mt-3">
-              <div>Data cleared successfully.</div>
-              <ul className="mb-0 mt-2">
-                {Object.entries(result).map(([name, count]) => (
-                  <li key={name}>
-                    {name}: {count} document{count === 1 ? '' : 's'} deleted
-                  </li>
+        <Accordion className="mt-3 mb-4">
+          <Accordion.Item eventKey="danger-zone" className="border-danger">
+            <Accordion.Header>
+              <span className="text-danger fw-semibold">⚠ Danger zone</span>
+            </Accordion.Header>
+            <Accordion.Body>
+              <h5>Clear all data</h5>
+              <p>
+                Permanently deletes every document from the collections below. The collections
+                themselves are left in place.
+              </p>
+              <ListGroup variant="flush" className="mb-3">
+                {CLEARABLE_COLLECTIONS.map((name) => (
+                  <ListGroup.Item key={name}>{name}</ListGroup.Item>
                 ))}
-              </ul>
-            </Alert>
-          )}
-        </Card.Body>
-      </Card>
+              </ListGroup>
 
-      <Card border="danger" className="mt-3">
-        <Card.Header className="bg-danger text-white">Delete this club</Card.Header>
-        <Card.Body>
-          <Card.Text>
-            Permanently deletes this club and its membership roster. Only allowed once every data
-            collection above is empty — use <strong>Clear all data</strong> first. Type the club id{' '}
-            <strong>{clubId}</strong> to confirm.
-          </Card.Text>
-          <Form.Control
-            className="mb-3"
-            value={deleteClubText}
-            onChange={(e) => setDeleteClubText(e.target.value)}
-            placeholder={clubId ?? ''}
-            disabled={deletingClub}
-          />
-          <Button
-            variant="danger"
-            onClick={handleDeleteClub}
-            disabled={deletingClub || !clubId || deleteClubText !== clubId}
-          >
-            {deletingClub ? (
-              <>
-                <Spinner as="span" animation="border" size="sm" className="me-2" />
-                Deleting…
-              </>
-            ) : (
-              'Delete club'
-            )}
-          </Button>
-          {deleteClubError && (
-            <Alert variant="danger" className="mt-3">
-              {deleteClubError}
-            </Alert>
-          )}
-        </Card.Body>
-      </Card>
-      </>
+              <Form.Group className="mb-3" controlId="settings-clear-all-confirm">
+                <Form.Label>
+                  Type <strong>{CONFIRM_PHRASE}</strong> to enable the button.
+                </Form.Label>
+                <Form.Control
+                  type="text"
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder={CONFIRM_PHRASE}
+                  disabled={clearing}
+                />
+              </Form.Group>
+
+              <Button
+                variant="danger"
+                onClick={handleClear}
+                disabled={confirmText !== CONFIRM_PHRASE || clearing}
+              >
+                {clearing ? (
+                  <>
+                    <Spinner as="span" animation="border" size="sm" className="me-2" />
+                    Clearing...
+                  </>
+                ) : (
+                  'Clear all data'
+                )}
+              </Button>
+
+              {error && (
+                <Alert variant="danger" className="mt-3">
+                  {error}
+                </Alert>
+              )}
+
+              {result && (
+                <Alert variant="success" className="mt-3">
+                  <div>Data cleared successfully.</div>
+                  <ul className="mb-0 mt-2">
+                    {Object.entries(result).map(([name, count]) => (
+                      <li key={name}>
+                        {name}: {count} document{count === 1 ? '' : 's'} deleted
+                      </li>
+                    ))}
+                  </ul>
+                </Alert>
+              )}
+
+              <hr />
+
+              <h5>Delete this club</h5>
+              <p>
+                Permanently deletes this club and its membership roster. Only allowed once every
+                data collection above is empty — use <strong>Clear all data</strong> first. Type
+                the club id <strong>{clubId}</strong> to confirm.
+              </p>
+              <Form.Control
+                className="mb-3"
+                value={deleteClubText}
+                onChange={(e) => setDeleteClubText(e.target.value)}
+                placeholder={clubId ?? ''}
+                disabled={deletingClub}
+              />
+              <Button
+                variant="danger"
+                onClick={handleDeleteClub}
+                disabled={deletingClub || !clubId || deleteClubText !== clubId}
+              >
+                {deletingClub ? (
+                  <>
+                    <Spinner as="span" animation="border" size="sm" className="me-2" />
+                    Deleting…
+                  </>
+                ) : (
+                  'Delete club'
+                )}
+              </Button>
+              {deleteClubError && (
+                <Alert variant="danger" className="mt-3">
+                  {deleteClubError}
+                </Alert>
+              )}
+            </Accordion.Body>
+          </Accordion.Item>
+        </Accordion>
       )}
     </Container>
   );

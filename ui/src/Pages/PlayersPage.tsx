@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Container, Row, Col, Card, Form, Button, ButtonGroup,
   ListGroup, Spinner, Alert, InputGroup,
-  Dropdown, DropdownButton, Table, Badge,
+  Dropdown, DropdownButton, Table, Badge, Modal,
 } from 'react-bootstrap';
 import {
   format, startOfMonth, endOfMonth, addMonths, subMonths, startOfYear, endOfYear,
@@ -14,7 +14,9 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { getMonthYear } from '../utils/dateUtils';
 import AddPlayerModal from '../components/AddPlayerModal';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { db, refs, setPlayerSettlement, setPlayerPaidBy } from '../services/firebase';
+import {
+  db, refs, fetchSessionById, setPlayerSettlement, setPlayerPaidBy,
+} from '../services/firebase';
 import { addPlayer, updatePlayerProfile, deletePlayer } from '../services/firebase/players';
 import {
   query, where, getDocs, orderBy,
@@ -50,13 +52,42 @@ interface LedgerEntry {
   voidedNote?:   string;
 }
 
+type PlayerSort = 'name' | 'owed' | 'overdrawn';
+
 const INIT_BALANCE: BalanceAdjustment = { amount: '', reason: '', type: 'credit', includeInPayout: true };
 
 // Common top-up amounts shown as one-tap shortcuts in the Adjust Balance form.
 const QUICK_ADD_AMOUNTS = [10, 20, 50, 100];
 
+// Common reasons shown as one-tap shortcuts in the Adjust Balance form.
+const QUICK_REASONS = ['Cash Payment', 'E-Transfer Payment'];
+
 function formatPlayerName(player: Pick<Player, 'firstName' | 'lastName'>): string {
   return [player.firstName, player.lastName].filter(Boolean).join(' ');
+}
+
+function comparePlayerNames(a: Player, b: Player): number {
+  return formatPlayerName(a).localeCompare(formatPlayerName(b), undefined, { sensitivity: 'base' });
+}
+
+function comparePlayers(a: Player, b: Player, sort: PlayerSort): number {
+  if (sort === 'owed') {
+    const aOwed = a.owed ?? 0;
+    const bOwed = b.owed ?? 0;
+    if ((aOwed > 0) !== (bOwed > 0)) return aOwed > 0 ? -1 : 1;
+    if (aOwed > 0 && aOwed !== bOwed) return bOwed - aOwed;
+    if ((a.balance < 0) !== (b.balance < 0)) return a.balance < 0 ? -1 : 1;
+  }
+
+  if (sort === 'overdrawn') {
+    if ((a.balance < 0) !== (b.balance < 0)) return a.balance < 0 ? -1 : 1;
+    if (a.balance < 0 && a.balance !== b.balance) return a.balance - b.balance;
+    const aOwed = a.owed ?? 0;
+    const bOwed = b.owed ?? 0;
+    if ((aOwed > 0) !== (bOwed > 0)) return aOwed > 0 ? -1 : 1;
+  }
+
+  return comparePlayerNames(a, b);
 }
 
 export default function PlayersPage() {
@@ -66,13 +97,13 @@ export default function PlayersPage() {
   const playersStatus = useAppSelector(selectPlayersStatus);
   const playersError  = useAppSelector(selectPlayersError);
   const disabledTabs  = useAppSelector(selectDisabledTabs);
-  const payoutEnabled = !disabledTabs.includes('payout');
   const selectedPlayer = useAppSelector((s: RootState) =>
     searchParams.get('playerId') ? selectPlayerById(s, searchParams.get('playerId')!) : null
 );
   const selectedPlayerId = searchParams.get('playerId');
 
   const [searchTerm,         setSearchTerm]         = useState('');
+  const [playerSort,         setPlayerSort]         = useState<PlayerSort>('name');
   const [filteredPlayers,    setFilteredPlayers]     = useState<Player[]>(playersList);
   const [currentMonth,       setCurrentMonth]        = useState(new Date());
   const [attendedSessions,   setAttendedSessions]    = useState<Session[]>([]);
@@ -82,6 +113,8 @@ export default function PlayersPage() {
   const [ledger,             setLedger]              = useState<LedgerEntry[]>([]);
   const [isLoadingLedger,    setIsLoadingLedger]     = useState(false);
   const [ledgerError,        setLedgerError]         = useState('');
+  const [linkedSessionsById, setLinkedSessionsById] = useState<Record<string, Session>>({});
+  const [selectedLedgerSessionId, setSelectedLedgerSessionId] = useState<string | null>(null);
   const [balanceAdjustment,  setBalanceAdjustment]   = useState<BalanceAdjustment>({ ...INIT_BALANCE });
   const [isUpdatingBalance,  setIsUpdatingBalance]   = useState(false);
   const [balanceError,       setBalanceError]        = useState('');
@@ -96,18 +129,25 @@ export default function PlayersPage() {
     setSearchParams(next);
   };
 
-  // Filter
+  // Filter and sort
   useEffect(() => {
-    if (!searchTerm.trim()) { setFilteredPlayers(playersList); return; }
     const term = searchTerm.toLowerCase();
-    setFilteredPlayers(playersList.filter(p =>
-      p.firstName.toLowerCase().includes(term) ||
-      (p.lastName ?? '').toLowerCase().includes(term)
-    ));
-  }, [searchTerm, playersList]);
+    const matchingPlayers = searchTerm.trim()
+      ? playersList.filter(p =>
+          p.firstName.toLowerCase().includes(term) ||
+          (p.lastName ?? '').toLowerCase().includes(term)
+        )
+      : playersList;
+    setFilteredPlayers([...matchingPlayers].sort((a, b) => comparePlayers(a, b, playerSort)));
+  }, [searchTerm, playerSort, playersList]);
 
   // Balance ledger
+  // Guards against rapid player switches: an older in-flight request resolving
+  // after a newer one has started must never overwrite the newer request's
+  // result (or its loading/error state) with stale data.
+  const ledgerRequestSeqRef = useRef(0);
   const fetchLedger = useCallback(async (playerId: string, opts?: { silent?: boolean }) => {
+    const seq = ++ledgerRequestSeqRef.current;
     if (!opts?.silent) setIsLoadingLedger(true);
     setLedgerError('');
     try {
@@ -116,14 +156,32 @@ export default function PlayersPage() {
         where('playerId', '==', playerId),
       );
       const snap = await getDocs(q);
+      if (seq !== ledgerRequestSeqRef.current) return; // superseded by a newer request
       const entries = snap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry));
       // Sort client-side to avoid needing a composite (playerId + createdAt) index.
       entries.sort((a, b) => (b.createdAt?.toDate().getTime() ?? 0) - (a.createdAt?.toDate().getTime() ?? 0));
       setLedger(entries);
+
+      // Session details are supplementary to the ledger, so a deleted linked
+      // session must not prevent the balance history itself from loading.
+      const sessionIds = [...new Set(
+        entries.map(e => e.sessionId).filter((id): id is string => !!id)
+      )];
+      if (sessionIds.length > 0) {
+        const results = await Promise.allSettled(sessionIds.map(fetchSessionById));
+        if (seq !== ledgerRequestSeqRef.current) return; // superseded by a newer request
+        const sessions: Record<string, Session> = {};
+        results.forEach((result) => {
+          if (result.status === 'fulfilled') sessions[result.value.id] = result.value;
+        });
+        setLinkedSessionsById(sessions);
+      } else {
+        setLinkedSessionsById({});
+      }
     } catch {
-      setLedgerError('Failed to load balance history.');
+      if (seq === ledgerRequestSeqRef.current) setLedgerError('Failed to load balance history.');
     } finally {
-      if (!opts?.silent) setIsLoadingLedger(false);
+      if (!opts?.silent && seq === ledgerRequestSeqRef.current) setIsLoadingLedger(false);
     }
   }, []);
 
@@ -152,7 +210,9 @@ export default function PlayersPage() {
   }, [selectedPlayerId]);
 
   // Attended sessions
+  const sessionsRequestSeqRef = useRef(0);
   const fetchAttendedSessions = useCallback(async (opts?: { silent?: boolean }) => {
+    const seq = ++sessionsRequestSeqRef.current;
     if (!selectedPlayerId) { setAttendedSessions([]); return; }
     if (!opts?.silent) setIsLoadingSessions(true);
     setSessionsError('');
@@ -164,14 +224,15 @@ export default function PlayersPage() {
         orderBy('date', 'desc'),
       );
       const snap = await getDocs(q);
+      if (seq !== sessionsRequestSeqRef.current) return; // superseded by a newer request
       const all  = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Session[];
       setAttendedSessions(all.filter(s =>
         Array.isArray(s.players) && s.players.some(p => p.id === selectedPlayerId)
       ));
     } catch {
-      setSessionsError('Failed to load sessions.');
+      if (seq === sessionsRequestSeqRef.current) setSessionsError('Failed to load sessions.');
     } finally {
-      if (!opts?.silent) setIsLoadingSessions(false);
+      if (!opts?.silent && seq === sessionsRequestSeqRef.current) setIsLoadingSessions(false);
     }
   }, [selectedPlayerId, currentMonth]);
 
@@ -216,12 +277,25 @@ export default function PlayersPage() {
     if (!selectedPlayer) return;
 
     const amount = parseFloat(balanceAdjustment.amount);
-    if (isNaN(amount) || amount === 0) { setBalanceError('Enter a valid non-zero amount.'); return; }
+    if (isNaN(amount) || amount <= 0) { setBalanceError('Enter a valid positive amount.'); return; }
     if (!balanceAdjustment.reason.trim()) { setBalanceError('Reason is required.'); return; }
+
+    const delta = balanceAdjustment.type === 'credit' ? amount : -amount;
+    const projectedBalance = (selectedPlayer.balance ?? 0) + delta;
+    if (delta < 0 && projectedBalance < 0) {
+      const ok = window.confirm(
+        `${formatPlayerName(selectedPlayer)} has $${(selectedPlayer.balance ?? 0).toFixed(2)} — ` +
+        `deducting $${amount.toFixed(2)} will leave them at $${projectedBalance.toFixed(2)} (negative). Continue?`
+      );
+      if (!ok) return;
+    }
 
     setIsUpdatingBalance(true);
     setBalanceError('');
-    const delta = balanceAdjustment.type === 'credit' ? amount : -amount;
+    // The checkbox itself is hidden (not just disabled) when the Payout tab is
+    // off, so its stale value must never leak into the write — force exclusion
+    // whenever the admin never had the option to see/set it.
+    const includeInPayout = !disabledTabs.includes('payout') && balanceAdjustment.includeInPayout;
 
     try {
       await runTransaction(db, async tx => {
@@ -238,7 +312,7 @@ export default function PlayersPage() {
           balanceAfter:  before + delta,
           // 'manual' counts toward the owner payout; 'manual-excluded' is a balance
           // change the club doesn't owe the owner (e.g. correcting an error).
-          reason:        balanceAdjustment.includeInPayout ? 'manual' : 'manual-excluded',
+          reason:        includeInPayout ? 'manual' : 'manual-excluded',
           note:          balanceAdjustment.reason.trim(),
           walletAdjustment: true, // this entry actually moves the player's prepaid balance
           createdAt:     serverTimestamp(),
@@ -290,10 +364,17 @@ export default function PlayersPage() {
     if (!selectedPlayer) return;
     const first = edFirst.trim();
     if (!first) { setDetailsError('First name is required.'); return; }
+    const email = edEmail.trim();
+    if (email && playersList.some(
+      p => p.id !== selectedPlayer.id && (p.email ?? '').toLowerCase() === email.toLowerCase()
+    )) {
+      setDetailsError(`Another player already uses "${email}". Use a different email, or leave it blank.`);
+      return;
+    }
     setDetailsError('');
     setSavingDetails(true);
     try {
-      await updatePlayerProfile(selectedPlayer.id, { firstName: first, lastName: edLast.trim() || null, email: edEmail.trim() || null });
+      await updatePlayerProfile(selectedPlayer.id, { firstName: first, lastName: edLast.trim() || null, email: email || null });
       setEditingDetails(false);
     } catch (err) {
       setDetailsError(err instanceof Error ? err.message : 'Failed to save details.');
@@ -336,6 +417,12 @@ export default function PlayersPage() {
   const walletLedger = ledger.filter(e =>
     e.reason !== 'payment' && e.reason !== 'comp' && e.walletAdjustment !== false
   );
+  const selectedLedgerSession = selectedLedgerSessionId
+    ? linkedSessionsById[selectedLedgerSessionId] ?? null
+    : null;
+  const selectedLedgerSessionPlayer = selectedLedgerSession?.players.find(
+    player => player.id === selectedPlayerId
+  );
 
   return (
     <Container fluid className="mt-4 pb-4">
@@ -350,13 +437,27 @@ export default function PlayersPage() {
           <Card>
             <Card.Header>Players</Card.Header>
             <Card.Body>
-              <Form.Control
-                type="text"
-                placeholder="Search by name…"
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                className="mb-2"
-              />
+              <Row className="g-2 mb-2">
+                <Col>
+                  <Form.Control
+                    type="text"
+                    placeholder="Search by name…"
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                  />
+                </Col>
+                <Col xs="auto">
+                  <Form.Select
+                    aria-label="Sort players"
+                    value={playerSort}
+                    onChange={e => setPlayerSort(e.target.value as PlayerSort)}
+                  >
+                    <option value="name">Name</option>
+                    <option value="owed">Owed first</option>
+                    <option value="overdrawn">Overdrawn first</option>
+                  </Form.Select>
+                </Col>
+              </Row>
               {playersStatus === 'loading' && playersList.length === 0 && (
                 <div className="text-center"><Spinner animation="border" size="sm" /></div>
               )}
@@ -543,7 +644,20 @@ export default function PlayersPage() {
                           className="mb-2"
                           required
                         />
-                        {payoutEnabled && (
+                        <div className="d-flex gap-2 mb-2">
+                          {QUICK_REASONS.map(quickReason => (
+                            <Button
+                              key={quickReason}
+                              type="button"
+                              size="sm"
+                              variant={balanceAdjustment.reason === quickReason ? 'success' : 'outline-success'}
+                              onClick={() => setBalanceAdjustment(p => ({ ...p, reason: quickReason }))}
+                            >
+                              {quickReason}
+                            </Button>
+                          ))}
+                        </div>
+                        {!disabledTabs.includes('payout') && (
                           <Form.Check
                             type="checkbox"
                             id="balance-include-in-payout"
@@ -584,6 +698,7 @@ export default function PlayersPage() {
                           </th>
                           <th style={{ whiteSpace: 'nowrap' }}>Type</th>
                           <th>Note</th>
+                          <th style={{ whiteSpace: 'nowrap' }}>Session</th>
                           <th className="text-end">Change</th>
                           <th className="text-end">Balance</th>
                         </tr>
@@ -620,6 +735,18 @@ export default function PlayersPage() {
                             </td>
                             <td className="text-muted" style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
                               {entry.note}
+                            </td>
+                            <td className="text-nowrap">
+                              {entry.sessionId && linkedSessionsById[entry.sessionId] && (
+                                <Button
+                                  variant="link"
+                                  className="p-0 align-baseline"
+                                  style={{ fontSize: 'inherit' }}
+                                  onClick={() => setSelectedLedgerSessionId(entry.sessionId!)}
+                                >
+                                  {format(linkedSessionsById[entry.sessionId].date, 'MMM d, yyyy')}
+                                </Button>
+                              )}
                             </td>
                             <td className={`text-end text-nowrap ${entry.delta >= 0 ? 'text-success' : 'text-danger'}`}>
                               {entry.delta >= 0 ? '+' : ''}{entry.delta.toFixed(2)}
@@ -694,9 +821,16 @@ export default function PlayersPage() {
                                   const via: PaidVia =
                                     playerInSession.paidVia ??
                                     (playerInSession.comped ? 'comp' : playerInSession.paid ? 'etransfer' : null);
-                                  const settledCredit =
-                                    via === 'etransfer' || via === 'comp' ? playerInSession.cost : 0;
-                                  const balanceIfDrawn = (selectedPlayer?.balance ?? 0) - settledCredit;
+                                  // A 'balance' settlement auto-applied from a Gmail e-Transfer batch
+                                  // (see etransferImports.ts) is called out distinctly from a manually
+                                  // chosen balance draw, since the money ultimately came from that
+                                  // e-Transfer.
+                                  const settledViaEtransferBalance =
+                                    via === 'balance' && !!playerInSession.settledByEtransferImportId;
+                                  // Switching any non-balance settlement to Balance draws the
+                                  // full session cost from this player's current prepaid wallet.
+                                  const balanceIfDrawn =
+                                    (selectedPlayer?.balance ?? 0) - playerInSession.cost;
                                   const settleOptions: { method: PaidVia; label: string; activeVariant: string }[] = [
                                     { method: null,        label: 'Unpaid',  activeVariant: 'danger'  },
                                     { method: 'comp',      label: 'Comp',    activeVariant: 'info'    },
@@ -738,14 +872,24 @@ export default function PlayersPage() {
                                   return (
                                     <>
                                       <ButtonGroup size="sm" className="mt-1">
-                                        {settleOptions.map(o => (
+                                        {settleOptions.map(o => {
+                                          const isActive = via === o.method;
+                                          const displayLabel = o.method === 'balance' && isActive && settledViaEtransferBalance
+                                            ? 'Gmail e-Transfer'
+                                            : o.label;
+                                          return (
                                           <React.Fragment key={o.label}>
                                             <Button
-                                              variant={via === o.method ? o.activeVariant : 'outline-secondary'}
+                                              variant={isActive ? o.activeVariant : 'outline-secondary'}
                                               style={{ fontSize: 11, padding: '1px 8px' }}
                                               onClick={() => pick(o.method)}
+                                              title={
+                                                o.method === 'balance' && isActive && settledViaEtransferBalance
+                                                  ? 'Automatically settled from balance funded by a Gmail e-Transfer'
+                                                  : undefined
+                                              }
                                             >
-                                              {o.label}
+                                              {displayLabel}
                                             </Button>
                                             {o.method === null && otherPlayers.length > 0 && (
                                               <Dropdown as={ButtonGroup} align="end">
@@ -777,7 +921,8 @@ export default function PlayersPage() {
                                               </Dropdown>
                                             )}
                                           </React.Fragment>
-                                        ))}
+                                          );
+                                        })}
                                       </ButtonGroup>
                                       {playerInSession.settledAt && (via === 'comp' || playerInSession.paid) && (
                                         <div className="text-muted" style={{ fontSize: 11 }}>
@@ -807,6 +952,81 @@ export default function PlayersPage() {
         onAddPlayer={handleAddPlayer}
         existingPlayers={playersList}
       />
+
+      <Modal
+        show={!!selectedLedgerSession}
+        onHide={() => setSelectedLedgerSessionId(null)}
+        centered
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>
+            {selectedLedgerSession
+              ? `Session — ${format(selectedLedgerSession.date, 'MMMM d, yyyy')}`
+              : 'Session'}
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {selectedLedgerSession && (
+            <ListGroup variant="flush">
+              {selectedLedgerSession.location && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span>Location</span>
+                  <span>{selectedLedgerSession.location}</span>
+                </ListGroup.Item>
+              )}
+              <ListGroup.Item className="d-flex justify-content-between">
+                <span>Courts</span>
+                <span>{selectedLedgerSession.courtCount}</span>
+              </ListGroup.Item>
+              <ListGroup.Item className="d-flex justify-content-between">
+                <span>Players</span>
+                <span>{selectedLedgerSession.players.length}</span>
+              </ListGroup.Item>
+              <ListGroup.Item className="d-flex justify-content-between">
+                <span>Court cost</span>
+                <span>${selectedLedgerSession.totalCourtCost.toFixed(2)}</span>
+              </ListGroup.Item>
+              {selectedLedgerSession.totalBirdieCost > 0 && (
+                <ListGroup.Item className="d-flex justify-content-between">
+                  <span>Birdie cost</span>
+                  <span>${selectedLedgerSession.totalBirdieCost.toFixed(2)}</span>
+                </ListGroup.Item>
+              )}
+              <ListGroup.Item className="d-flex justify-content-between fw-bold">
+                <span>Total session cost</span>
+                <span>${selectedLedgerSession.totalSessionCost.toFixed(2)}</span>
+              </ListGroup.Item>
+              {selectedLedgerSessionPlayer && (
+                <ListGroup.Item className="d-flex justify-content-between fw-bold">
+                  <span>{selectedPlayer ? formatPlayerName(selectedPlayer) : 'Player'} cost</span>
+                  <span>
+                    ${selectedLedgerSessionPlayer.cost.toFixed(2)}{' '}
+                    {selectedLedgerSessionPlayer.comped || selectedLedgerSessionPlayer.paidVia === 'comp'
+                      ? <Badge bg="warning">Comped</Badge>
+                      : selectedLedgerSessionPlayer.paid
+                        ? <Badge bg="success">Paid</Badge>
+                        : <Badge bg="danger">Unpaid</Badge>}
+                  </span>
+                </ListGroup.Item>
+              )}
+            </ListGroup>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setSelectedLedgerSessionId(null)}>
+            Close
+          </Button>
+          {selectedLedgerSession && (
+            <Link
+              to={`/?date=${format(selectedLedgerSession.date, 'yyyy-MM-dd')}`}
+              className="btn btn-primary"
+              onClick={() => setSelectedLedgerSessionId(null)}
+            >
+              Open in calendar
+            </Link>
+          )}
+        </Modal.Footer>
+      </Modal>
 
       <ConfirmDialog
         show={showDeleteConfirm}

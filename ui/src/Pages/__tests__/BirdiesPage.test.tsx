@@ -99,6 +99,83 @@ describe('BirdiesPage', () => {
     expect(screen.getByRole('link', { name: 'View on calendar' })).toHaveAttribute('href', '/?date=2026-03-04');
   });
 
+  it('labels a negative session-usage transaction (a session-edit return) as Returned, not a negative Used', async () => {
+    seedClubDoc('birdieInventory', 'b1', {
+      name: 'Club 30',
+      costPerTube: 33,
+      birdsPerTube: 12,
+      tubesPurchased: 5,
+      unopenedTubesRemaining: 2,
+      birdsInOpenTube: 4,
+      purchaserName: 'Pat',
+      purchaseDate: ts('2026-02-10T12:00:00Z'),
+      createdAt: ts('2026-02-10T12:00:00Z'),
+    });
+    seedClubDoc('transactions', 'tx-1', {
+      resourceType: 'birdie',
+      batchId: 'b1',
+      quantityUsed: -3,
+      cost: -8.25,
+      sessionId: 's1',
+      date: ts('2026-03-04T12:00:00Z'),
+      createdAt: ts('2026-03-04T12:00:00Z'),
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText('Club 30')).toBeInTheDocument();
+    await user.click(screen.getByText('Club 30').closest('tr')!);
+
+    expect(await screen.findByText('Returned: 3 birds')).toBeInTheDocument();
+    expect(screen.queryByText('Used: -3 birds')).not.toBeInTheDocument();
+  });
+
+  it('reverses a manual adjustment\'s own stock change when reconstructing "Remaining" for older history rows', async () => {
+    // Current stock: 2 unopened * 12/tube + 4 open = 28.
+    seedClubDoc('birdieInventory', 'b1', {
+      name: 'Club 30',
+      costPerTube: 33,
+      birdsPerTube: 12,
+      tubesPurchased: 5,
+      unopenedTubesRemaining: 2,
+      birdsInOpenTube: 4,
+      purchaserName: 'Pat',
+      purchaseDate: ts('2026-02-01T12:00:00Z'),
+      createdAt: ts('2026-02-01T12:00:00Z'),
+    });
+    // Newest: used 5 birds.
+    seedClubDoc('transactions', 'tx-newest', {
+      resourceType: 'birdie', batchId: 'b1', quantityUsed: 5, cost: 13.75, sessionId: 's-newest',
+      date: ts('2026-03-10T12:00:00Z'), createdAt: ts('2026-03-10T12:00:00Z'),
+    });
+    // Middle: a recount that corrected unopenedTubesRemaining upward by 2
+    // tubes (+24 birds) — this itself must be reversed for older rows.
+    seedClubDoc('inventoryAdjustments', 'adj-1', {
+      adjustmentDate: ts('2026-03-05T12:00:00Z'),
+      userId: currentUser.uid, userName: currentUser.displayName,
+      resourceType: 'birdieBatch', batchId: 'b1', batchNameSnapshot: 'Club 30',
+      reason: 'Recount',
+      changes: [{ field: 'unopenedTubesRemaining', oldValue: 1, newValue: 3 }],
+    });
+    // Oldest: used 9 birds.
+    seedClubDoc('transactions', 'tx-oldest', {
+      resourceType: 'birdie', batchId: 'b1', quantityUsed: 9, cost: 24.75, sessionId: 's-oldest',
+      date: ts('2026-03-01T12:00:00Z'), createdAt: ts('2026-03-01T12:00:00Z'),
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText('Club 30')).toBeInTheDocument();
+    await user.click(screen.getByText('Club 30').closest('tr')!);
+
+    const rows = (await screen.findAllByText(/^\d+ birds$/)).map((el) => el.textContent);
+    // Newest-first: 28 (current) → undo -5 usage → 33 → undo the adjustment's
+    // own +24 → 9 → (oldest row's usage isn't reversed further, nothing older).
+    expect(rows).toEqual(['28 birds', '33 birds', '9 birds']);
+  });
+
   it('validates edits, saves them, logs an adjustment, and keeps the batch selected after reload', async () => {
     const user = userEvent.setup();
 
@@ -126,6 +203,16 @@ describe('BirdiesPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save Changes' }));
 
     expect(await screen.findByText('Birds in open tube must be 0–12.')).toBeInTheDocument();
+    expect(adjustmentDocIds()).toEqual([]);
+
+    // Unopened tubes remaining can't exceed what was ever purchased (4).
+    await user.clear(screen.getAllByRole('spinbutton')[4]);
+    await user.type(screen.getAllByRole('spinbutton')[4], '0');
+    await user.clear(screen.getAllByRole('spinbutton')[3]);
+    await user.type(screen.getAllByRole('spinbutton')[3], '5');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    expect(await screen.findByText("Unopened tubes can't exceed the 4 tubes purchased.")).toBeInTheDocument();
     expect(adjustmentDocIds()).toEqual([]);
 
     await user.clear(screen.getAllByRole('textbox')[0]);

@@ -104,11 +104,15 @@ export default function BirdiesPage() {
   // ── Fetch history when selected batch changes ────────────────────────────────
   useEffect(() => {
     if (!selectedBatch?.id || isEditing) { setHistory([]); return; }
+    // Guards against a slower response for a previously-selected batch resolving
+    // after a newer selection and overwriting its history with stale data.
+    let cancelled = false;
     setIsLoadingHistory(true);
     Promise.all([
       fetchInventoryAdjustmentsForBatch(selectedBatch.id),
       fetchBirdieUsageForBatch(selectedBatch.id),
     ]).then(([adjustments, usages]) => {
+      if (cancelled) return;
       const adj = adjustments.map(a => ({
         ...a,
         type:      'adjustment' as const,
@@ -120,8 +124,9 @@ export default function BirdiesPage() {
         eventDate: (u as any).date?.toDate?.() ?? new Date((u as any).date ?? 0),
       }));
       setHistory([...adj, ...use].sort((a, b) => compareDesc(a.eventDate, b.eventDate)));
-    }).catch(() => setPageError('Failed to load batch history.'))
-      .finally(() => setIsLoadingHistory(false));
+    }).catch(() => { if (!cancelled) setPageError('Failed to load batch history.'); })
+      .finally(() => { if (!cancelled) setIsLoadingHistory(false); });
+    return () => { cancelled = true; };
   }, [selectedBatch?.id, isEditing]);
 
   // ── Fetch inventory ──────────────────────────────────────────────────────────
@@ -251,6 +256,7 @@ export default function BirdiesPage() {
     if (isNaN(tubes)    || tubes < 0)       { setPageError('Valid tubes purchased required.');              return; }
     if (isNaN(birds)    || birds <= 0)      { setPageError('Valid birds per tube required.');               return; }
     if (isNaN(unopened) || unopened < 0)    { setPageError('Valid unopened tubes required.');               return; }
+    if (unopened > tubes)                   { setPageError(`Unopened tubes can't exceed the ${tubes} tubes purchased.`); return; }
     if (isNaN(open)     || open < 0 || open > birds) { setPageError(`Birds in open tube must be 0–${birds}.`); return; }
     if (!editForm.purchaserName.trim())     { setPageError('Purchaser name is required.');                  return; }
     if (!editReason.trim())                 { setPageError('Reason for edit is required.');                 return; }
@@ -294,7 +300,7 @@ export default function BirdiesPage() {
                 {sortIndicator(key)}
               </th>
             ))}
-            <th>Total Cost</th>
+            <th title="Value of the batch's remaining stock — the unopened tubes plus the open tube's fraction, at cost/tube">Remaining Value</th>
             <th><span className="visually-hidden">Details</span></th>
           </tr>
         </thead>
@@ -452,11 +458,27 @@ export default function BirdiesPage() {
           {!isLoadingHistory && history.length > 0 && (() => {
             // Remaining birds after each event, reconstructed from current stock by
             // walking newest → oldest and adding back usage (history is newest-first).
+            // Manual adjustments can also directly change unopenedTubesRemaining/
+            // birdsInOpenTube (e.g. a recount) — those must be reversed too, or
+            // every row OLDER than such an adjustment shows an inflated/incorrect
+            // remaining count that ignores the correction.
+            const birdsPerTube = selectedBatch.birdsPerTube || 1;
             const remainingByRow = new Map<HistoryItem, number>();
             let remaining = totalRemainingBirds(selectedBatch);
             for (const item of history) {
               remainingByRow.set(item, remaining);
-              if (item.type === 'sessionUsage') remaining += (item.quantityUsed as number) ?? 0;
+              if (item.type === 'sessionUsage') {
+                remaining += (item.quantityUsed as number) ?? 0;
+              } else if (item.type === 'adjustment') {
+                const changes = item.changes as { field: string; oldValue: unknown; newValue: unknown }[] | undefined;
+                for (const c of changes ?? []) {
+                  if (c.field === 'unopenedTubesRemaining') {
+                    remaining += ((Number(c.oldValue) || 0) - (Number(c.newValue) || 0)) * birdsPerTube;
+                  } else if (c.field === 'birdsInOpenTube') {
+                    remaining += (Number(c.oldValue) || 0) - (Number(c.newValue) || 0);
+                  }
+                }
+              }
             }
             return (
               <Table striped borderless hover responsive size="sm">
@@ -471,7 +493,11 @@ export default function BirdiesPage() {
                         <td style={style}>{format(item.eventDate, 'yyyy-MM-dd')}</td>
                         <td style={style}>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
                         <td style={style}>
-                          {item.type === 'sessionUsage' && `Used: ${item.quantityUsed as number} birds`}
+                          {item.type === 'sessionUsage' && (
+                            (item.quantityUsed as number) < 0
+                              ? `Returned: ${Math.abs(item.quantityUsed as number)} birds`
+                              : `Used: ${item.quantityUsed as number} birds`
+                          )}
                           {item.type === 'adjustment' && (
                             <>
                               Reason: {item.reason as string}

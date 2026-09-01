@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Container, Row, Col, Button } from "react-bootstrap";
+import { Container, Row, Col, Button, Alert } from "react-bootstrap";
 import { format } from "date-fns";
 import { Link } from "react-router-dom";
 // import "./HomePage.css";
@@ -13,22 +13,24 @@ import type { RootState } from "../store";
 export default function HomePage() {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [sessionIndex, setSessionIndex] = useState(0);
+    const [sessionsError, setSessionsError] = useState('');
     const players = useAppSelector(selectAllPlayers);
 
     const loadSessions = useCallback(() => {
+        setSessionsError('');
         fetchSessions({ orderDirection: "desc", limitCount: 60 })
             .then((s) => { setSessions(s); setSessionIndex(0); })
-            .catch(console.error);
+            .catch((err) => {
+                console.error(err);
+                setSessionsError('Failed to load recent sessions.');
+            });
     }, []);
 
     useEffect(() => { loadSessions(); }, [loadSessions]);
 
     const currentSession = sessions[sessionIndex] ?? null;
 
-    const maxDisplay = 5;
     const negativeBalancePlayers = players.filter((p) => (p.owed ?? 0) > 0);
-    const displayedPlayers = negativeBalancePlayers.slice(0, maxDisplay);
-    const remainingCount = negativeBalancePlayers.length - displayedPlayers.length;
 
     return (
         <div className="home-page">
@@ -36,6 +38,12 @@ export default function HomePage() {
                 <Row className="mb-3">
                     {/* ── Latest session summary ── */}
                     <Col md={6}>
+                        {sessionsError && (
+                            <Alert variant="danger" className="d-flex justify-content-between align-items-center">
+                                <span>{sessionsError}</span>
+                                <Button size="sm" variant="outline-danger" onClick={loadSessions}>Retry</Button>
+                            </Alert>
+                        )}
                         {currentSession && (
                             <div className="session-card">
                                 <div className="d-flex align-items-center justify-content-between">
@@ -98,9 +106,9 @@ export default function HomePage() {
                         <div className="session-card" style={{ marginTop:4 }}>
                             <h2 className="session-title">Player Balances</h2>
                             {negativeBalancePlayers.length > 0 ?
-                                <>
-                                    <ul className="list-disc list-inside">
-                                        {displayedPlayers.map((player) => (
+                                <div className="balances-list-wrap">
+                                    <ul className="list-disc list-inside mb-0">
+                                        {negativeBalancePlayers.map((player) => (
                                             <li key={player.id} className="player-balance">
                                                 <Link to={`/players?playerId=${player.id}`}>
                                                     {player.firstName} {player.lastName ?? ""}
@@ -110,12 +118,7 @@ export default function HomePage() {
                                             </li>
                                         ))}
                                     </ul>
-                                    {remainingCount > 0 && (
-                                        <p className="more-players-info">
-                                            + {remainingCount} more with outstanding balances.
-                                        </p>
-                                    )}
-                                </>
+                                </div>
                             :   <p className="no-players">No players with outstanding balances.</p>}
                         </div>
                     </Col>

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { renderWithProviders, makePlayersState } from '../../../../test-utils/renderWithProviders';
 import { resetFirebaseTestState, seedClubDoc, ts } from '../../../../test-utils/firebaseTestHelpers';
 import SessionDetailsStep from '../SessionDetailsStep';
-import type { Player, ConfirmedPlayer } from 'types';
+import type { Player, ConfirmedPlayer, Session } from 'types';
 import type { RootState } from '../../../../store';
 
 beforeEach(() => {
@@ -28,11 +28,16 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
   };
 }
 
-function renderStep(confirmedPlayers: ConfirmedPlayer[], players: Player[], props: Partial<{ onSave: jest.Mock; onCancel: jest.Mock }> = {}) {
+function renderStep(
+  confirmedPlayers: ConfirmedPlayer[],
+  players: Player[],
+  props: Partial<{ onSave: jest.Mock; onCancel: jest.Mock }> = {},
+  session?: Session
+) {
   const onSave = props.onSave ?? jest.fn().mockResolvedValue(undefined);
   const onCancel = props.onCancel ?? jest.fn();
   const result = renderWithProviders(
-    <SessionDetailsStep onSave={onSave} onCancel={onCancel} />,
+    <SessionDetailsStep session={session} onSave={onSave} onCancel={onCancel} />,
     {
       preloadedState: {
         sessionModal: { mode: 'details', playersInput: '', resolutionItems: [], confirmedPlayers, errors: {} } as RootState['sessionModal'],
@@ -116,8 +121,12 @@ describe('SessionDetailsStep', () => {
 
   it('submits with the expected session shape on save', async () => {
     const user = userEvent.setup();
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Main gym', totalCost: 80, costPerHour: 10, hoursPurchased: 20, remainingHours: 20,
+    });
     const { onSave } = renderStep([{ id: 'p1', percentage: 1 }], [makePlayer()]);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save Session' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Session' })).toBeEnabled());
 
     await user.click(screen.getByRole('button', { name: 'Save Session' }));
 
@@ -125,5 +134,66 @@ describe('SessionDetailsStep', () => {
       courtCount: 4,
       players: expect.arrayContaining([expect.objectContaining({ id: 'p1' })]),
     })));
+  });
+
+  it('preserves manual court cost and count when editing a session that did not use court credits', async () => {
+    const session: Session = {
+      id: 's1',
+      date: new Date('2026-02-01'),
+      durationHours: 2,
+      courtCount: 3,
+      totalCost: 45,
+      totalCourtCost: 45,
+      totalBirdieCost: 0,
+      totalSessionCost: 45,
+      birdieUsage: [],
+      courtCreditUsage: [],
+      players: [{ id: 'p1', percentage: 1, cost: 45, paid: false, highlighted: false }],
+      createdAt: undefined as never,
+    };
+    const { onSave } = renderStep([{ id: 'p1', percentage: 1 }], [makePlayer()], {}, session);
+
+    expect(screen.getByDisplayValue('3')).toBeInTheDocument(); // courtCount preserved
+    // Switching to credits is off by default; the manual-cost field carries the
+    // original per-court rate ($45 / 3 courts = $15/court).
+    expect(screen.getByDisplayValue('15')).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Save Session' }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      courtCount: 3,
+      totalCourtCost: 45,
+      courtCreditUsage: [],
+    })));
+  });
+
+  it('disables Save when the requested courts exceed available court credits', async () => {
+    renderStep([{ id: 'p1', percentage: 1 }], [makePlayer()]);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Session' })).toBeInTheDocument());
+
+    // Default courtCount is 4 (8 hours) with no court credits seeded — unaffordable.
+    expect(screen.getByText(/Not enough court credits/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Session' })).toBeDisabled();
+  });
+
+  it('disables Save and Cancel while a submission is in flight, preventing a double-submit', async () => {
+    const user = userEvent.setup();
+    let resolveSave: (() => void) | undefined;
+    const onSave = jest.fn(() => new Promise<void>((resolve) => { resolveSave = resolve; }));
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Main gym', totalCost: 80, costPerHour: 10, hoursPurchased: 20, remainingHours: 20,
+    });
+    renderStep([{ id: 'p1', percentage: 1 }], [makePlayer()], { onSave });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Session' })).toBeEnabled());
+
+    await user.click(screen.getByRole('button', { name: 'Save Session' }));
+
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(onSave).toHaveBeenCalledTimes(1);
+
+    resolveSave?.();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Session' })).toBeEnabled());
   });
 });

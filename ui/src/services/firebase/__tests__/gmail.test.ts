@@ -1,0 +1,380 @@
+export {}; // marks this file as a module for `isolatedModules` (only `require()`/type-only imports below)
+
+type GmailModule = typeof import('../gmail');
+type HelpersModule = typeof import('../../../test-utils/firebaseTestHelpers');
+type FakeAuthModule = typeof import('../../../test-utils/fakeAuth');
+
+const originalFetch = global.fetch;
+
+let gmail: GmailModule;
+let helpers: HelpersModule;
+let fakeAuth: FakeAuthModule;
+let firebaseApp: typeof import('firebase/app');
+
+const userOne = { uid: 'user-1', displayName: 'User One', email: 'user1@example.com' };
+
+const jsonResponse = (body: unknown, init: Partial<{ ok: boolean; status: number; statusText: string }> = {}) => ({
+  ok: init.ok ?? true,
+  status: init.status ?? 200,
+  statusText: init.statusText ?? 'OK',
+  json: async () => body,
+  text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+});
+
+function fetchMock(): jest.Mock {
+  return global.fetch as unknown as jest.Mock;
+}
+
+function expectBearerToken(callIndex: number, token: string): void {
+  const init = fetchMock().mock.calls[callIndex][1] as RequestInit;
+  const headers = init.headers as Record<string, string>;
+  expect(headers.Authorization).toBe(`Bearer ${token}`);
+}
+
+/** base64url-encodes a string the way Gmail message body parts are encoded. */
+function b64url(text: string): string {
+  return Buffer.from(text, 'utf-8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+// The plain-text body Gmail returns for a real Interac autodeposit notification
+// (extracted from a saved sample email), reformatted here as it appears once
+// base64url-decoded — this is the shape parseEtransferMessage is built against.
+const SAMPLE_PLAIN_BODY = `Hi WENDY WU,
+Funds Deposited!
+$200.00
+Your funds have been automatically deposited into your
+account at TD Canada Trust.
+TD Canada Trust
+Account ending in 8048
+Transfer Details
+Message:
+cash for shoppers
+Date:
+Aug 26, 2026
+Reference Number:
+C1AYd8eJYUcY
+Sent From:
+CAI FANG WU
+Amount:
+$200.00 (CAD)`;
+
+const SAMPLE_HTML_BODY = `<html><body>
+<p>Hi WENDY WU,</p>
+<p>Funds Deposited! <b>$200.00</b></p>
+<table>
+<tr><td>Message:</td><td>cash for shoppers</td></tr>
+<tr><td>Date:</td><td>Aug 26, 2026</td></tr>
+<tr><td>Reference Number:</td><td>C1AYd8eJYUcY</td></tr>
+<tr><td>Sent From:</td><td>CAI FANG WU</td></tr>
+<tr><td>Amount:</td><td>$200.00 (CAD)</td></tr>
+</table>
+</body></html>`;
+
+function sampleMessage(overrides: {
+  id?: string;
+  threadId?: string;
+  subject?: string;
+  from?: string;
+  replyTo?: string | null;
+  date?: string;
+  bodyData?: string;
+  mimeType?: 'text/plain' | 'text/html';
+} = {}) {
+  const {
+    id = 'msg-1',
+    threadId = 'thread-1',
+    subject = "Interac e-Transfer: You've received $200.00 from CAI FANG WU and it has been automatically deposited.",
+    from = 'CAI FANG WU <notify@payments.interac.ca>',
+    replyTo = 'CAI FANG WU <caifang1966@gmail.com>',
+    date = 'Wed, 26 Aug 2026 10:47:00 -0400',
+    bodyData = b64url(SAMPLE_PLAIN_BODY),
+    mimeType = 'text/plain',
+  } = overrides;
+
+  return {
+    id,
+    threadId,
+    payload: {
+      headers: [
+        { name: 'Subject', value: subject },
+        { name: 'From', value: from },
+        ...(replyTo ? [{ name: 'Reply-To', value: replyTo }] : []),
+        { name: 'Date', value: date },
+      ],
+      mimeType,
+      body: { data: bodyData },
+    },
+  };
+}
+
+beforeEach(() => {
+  jest.resetModules();
+  gmail = require('../gmail');
+  helpers = require('../../../test-utils/firebaseTestHelpers');
+  fakeAuth = require('../../../test-utils/fakeAuth');
+  firebaseApp = require('firebase/app');
+  helpers.resetFirebaseTestState();
+  global.fetch = jest.fn() as unknown as typeof fetch;
+});
+
+afterEach(() => {
+  global.fetch = originalFetch as typeof fetch;
+  jest.restoreAllMocks();
+});
+
+describe('parseEtransferMessage', () => {
+  it('parses sender, amount, memo, and reference number from a real autodeposit email (plain-text body)', () => {
+    const parsed = gmail.parseEtransferMessage(sampleMessage());
+
+    expect(parsed).toEqual({
+      gmailMessageId: 'msg-1',
+      gmailThreadId: 'thread-1',
+      subject: "Interac e-Transfer: You've received $200.00 from CAI FANG WU and it has been automatically deposited.",
+      senderName: 'CAI FANG WU',
+      senderEmail: 'caifang1966@gmail.com',
+      amount: 200,
+      memo: 'cash for shoppers',
+      referenceNumber: 'C1AYd8eJYUcY',
+      emailDate: new Date('Wed, 26 Aug 2026 10:47:00 -0400'),
+    });
+  });
+
+  it('falls back to stripping HTML tags when only an HTML body part is present', () => {
+    const parsed = gmail.parseEtransferMessage(
+      sampleMessage({ mimeType: 'text/html', bodyData: b64url(SAMPLE_HTML_BODY) })
+    );
+
+    expect(parsed?.senderName).toBe('CAI FANG WU');
+    expect(parsed?.memo).toBe('cash for shoppers');
+    expect(parsed?.referenceNumber).toBe('C1AYd8eJYUcY');
+    expect(parsed?.amount).toBe(200);
+  });
+
+  it('prefers the plain-text part over an accompanying HTML part in a multipart message', () => {
+    const message = sampleMessage();
+    // Turn the single-part sample into a multipart/alternative message with both
+    // an HTML part (first) and a plain-text part (second) — the parser must pick
+    // the plain-text one regardless of order.
+    (message.payload as { parts?: unknown[] }).parts = [
+      { mimeType: 'text/html', body: { data: b64url('<p>irrelevant html noise</p>') } },
+      { mimeType: 'text/plain', body: { data: b64url(SAMPLE_PLAIN_BODY) } },
+    ];
+    delete (message.payload as { body?: unknown }).body;
+
+    const parsed = gmail.parseEtransferMessage(message);
+    expect(parsed?.memo).toBe('cash for shoppers');
+  });
+
+  it('returns null for an email whose subject does not match the autodeposit format', () => {
+    const parsed = gmail.parseEtransferMessage(
+      sampleMessage({ subject: 'Interac e-Transfer: CAI FANG WU sent you money' })
+    );
+    expect(parsed).toBeNull();
+  });
+
+  it('falls back to the From header display name when Reply-To is missing', () => {
+    const message = sampleMessage({ replyTo: null });
+    const parsed = gmail.parseEtransferMessage(message);
+    expect(parsed?.senderEmail).toBeNull();
+    expect(parsed?.senderName).toBe('CAI FANG WU');
+  });
+
+  it('trusts the subject line over a memo crafted to look like real "Sent From"/"Amount" fields', () => {
+    // The sender fully controls the "Message" memo text, and it appears earlier
+    // in the body than the real "Sent From"/"Amount" labels — a memo containing
+    // those literal label strings must not be mistaken for the real fields and
+    // override the subject line's authoritative (Interac-generated) values.
+    const maliciousBody = SAMPLE_PLAIN_BODY.replace(
+      'cash for shoppers',
+      'cash for shoppers Sent From: FAKE ATTACKER Amount: $999.99'
+    );
+    const parsed = gmail.parseEtransferMessage(sampleMessage({ bodyData: b64url(maliciousBody) }));
+
+    expect(parsed?.senderName).toBe('CAI FANG WU');
+    expect(parsed?.amount).toBe(200);
+  });
+});
+
+describe('getDefaultEtransferSearchAfterDate', () => {
+  it('returns exactly one UTC calendar week before the given reference date', () => {
+    expect(gmail.getDefaultEtransferSearchAfterDate(new Date('2026-08-27T14:47:00.000Z'))).toBe('2026-08-20');
+  });
+
+  it('crosses a month/year boundary correctly', () => {
+    expect(gmail.getDefaultEtransferSearchAfterDate(new Date('2026-01-03T00:00:00.000Z'))).toBe('2025-12-27');
+  });
+
+  it('defaults to one week before the real current date when no reference is given', () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-27T08:45:55.172Z'));
+    expect(gmail.getDefaultEtransferSearchAfterDate()).toBe('2026-08-20');
+    jest.useRealTimers();
+  });
+});
+
+describe('dateDaysBeforeUtc', () => {
+  it('computes an arbitrary number of UTC calendar days back', () => {
+    const reference = new Date('2026-08-27T14:47:00.000Z');
+    expect(gmail.dateDaysBeforeUtc(14, reference)).toBe('2026-08-13');
+    expect(gmail.dateDaysBeforeUtc(30, reference)).toBe('2026-07-28');
+    expect(gmail.dateDaysBeforeUtc(90, reference)).toBe('2026-05-29');
+  });
+});
+
+describe('resolveEtransferSearchAfterDate', () => {
+  const reference = new Date('2026-08-27T14:47:00.000Z');
+
+  it('prefers a saved rolling window, recomputed from the reference date', () => {
+    expect(gmail.resolveEtransferSearchAfterDate({ etransferSearchWindowDays: 30 }, reference)).toBe('2026-07-28');
+  });
+
+  it('falls back to a saved custom absolute date when no rolling window is set', () => {
+    expect(gmail.resolveEtransferSearchAfterDate(
+      { etransferSearchWindowDays: null, etransferSearchAfterDate: '2026-01-01' },
+      reference
+    )).toBe('2026-01-01');
+  });
+
+  it('falls back to the default 1-week rolling window when neither is set', () => {
+    expect(gmail.resolveEtransferSearchAfterDate(null, reference)).toBe('2026-08-20');
+    expect(gmail.resolveEtransferSearchAfterDate({}, reference)).toBe('2026-08-20');
+  });
+});
+
+describe('searchEtransferEmails', () => {
+  it('re-authenticates with the read-only Gmail scope and parses full messages', async () => {
+    helpers.setCurrentUser(userOne);
+    const reauth = jest.fn(async (user, provider) => {
+      expect(provider.getScopes()).toEqual(['https://www.googleapis.com/auth/gmail.readonly']);
+      expect(provider.getCustomParameters()).toEqual({});
+      return { user, __credential: { accessToken: 'gmail-token' } };
+    });
+    fakeAuth.__setReauthImplementation(reauth);
+
+    const message = sampleMessage();
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ messages: [{ id: 'msg-1', threadId: 'thread-1' }] }))
+      .mockResolvedValueOnce(jsonResponse(message));
+
+    const results = await gmail.searchEtransferEmails('notify@payments.interac.ca', '2026-08-27');
+
+    expect(results).toHaveLength(1);
+    expect(results[0].senderName).toBe('CAI FANG WU');
+    expect(results[0].amount).toBe(200);
+
+    const searchUrl = fetchMock().mock.calls[0][0] as string;
+    expect(searchUrl).toContain(encodeURIComponent('from:notify@payments.interac.ca'));
+    expect(searchUrl).toContain(encodeURIComponent(`after:${Date.UTC(2026, 7, 27) / 1000}`));
+    expectBearerToken(0, 'gmail-token');
+    expectBearerToken(1, 'gmail-token');
+  });
+
+  it('authorizes Gmail access via a standalone popup that does not require the same Google account as the signed-in club member', async () => {
+    // Signed into the club app as userOne, but the queued popup "selects" a
+    // completely different Google account (different uid/email) — e.g. the
+    // club's own shared Gmail inbox rather than this admin's personal one.
+    // This must succeed with no special same-account error.
+    helpers.setCurrentUser(userOne);
+    const clubGmailAccount = { uid: 'club-gmail-account', displayName: 'Club Inbox', email: 'club@example.com' };
+    fakeAuth.__setReauthImplementation(async () => ({
+      user: clubGmailAccount,
+      __credential: { accessToken: 'club-inbox-token' },
+    }));
+
+    const message = sampleMessage();
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ messages: [{ id: 'msg-1', threadId: 'thread-1' }] }))
+      .mockResolvedValueOnce(jsonResponse(message));
+
+    const results = await gmail.searchEtransferEmails('notify@payments.interac.ca', '2026-08-27');
+
+    expect(results).toHaveLength(1);
+    expectBearerToken(0, 'club-inbox-token');
+  });
+
+  it('no longer maps auth/user-mismatch into a same-account error — the popup runs on a separate, unrestricted auth instance', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async () => {
+      throw new firebaseApp.FirebaseError('auth/user-mismatch', 'wrong account');
+    });
+
+    // Propagates as the original Firebase error rather than being rewritten
+    // into "Select the same Google account you're signed in with."
+    await expect(gmail.searchEtransferEmails('notify@payments.interac.ca')).rejects.toThrow('wrong account');
+  });
+
+  it('returns an empty array when no messages are found, without fetching any message detail', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+    fetchMock().mockResolvedValueOnce(jsonResponse({}));
+
+    const results = await gmail.searchEtransferEmails('notify@payments.interac.ca');
+    expect(results).toEqual([]);
+    expect(fetchMock()).toHaveBeenCalledTimes(1);
+  });
+
+  it('filters out emails that do not match the autodeposit subject format', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+
+    const nonAutodeposit = sampleMessage({ id: 'msg-2', subject: 'Interac e-Transfer: CAI FANG WU sent you money' });
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ messages: [{ id: 'msg-2', threadId: 'thread-1' }] }))
+      .mockResolvedValueOnce(jsonResponse(nonAutodeposit));
+
+    const results = await gmail.searchEtransferEmails('notify@payments.interac.ca');
+    expect(results).toEqual([]);
+  });
+
+  it('follows nextPageToken so a backlog past the first 100 results is not silently dropped', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+
+    const messageOne = sampleMessage({ id: 'msg-1' });
+    const messageTwo = sampleMessage({ id: 'msg-2' });
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ messages: [{ id: 'msg-1', threadId: 'thread-1' }], nextPageToken: 'page-2' }))
+      .mockResolvedValueOnce(jsonResponse({ messages: [{ id: 'msg-2', threadId: 'thread-2' }] }))
+      .mockResolvedValueOnce(jsonResponse(messageOne))
+      .mockResolvedValueOnce(jsonResponse(messageTwo));
+
+    const results = await gmail.searchEtransferEmails('notify@payments.interac.ca');
+
+    expect(results).toHaveLength(2);
+    // The first list call has no pageToken; the second one carries the token
+    // returned by the first page.
+    expect(fetchMock().mock.calls[0][0] as string).not.toContain('pageToken=');
+    expect(fetchMock().mock.calls[1][0] as string).toContain('pageToken=page-2');
+  });
+});
+
+describe('Gmail authorization reuse', () => {
+  it('shares one authorization popup across concurrent Gmail operations', async () => {
+    helpers.setCurrentUser(userOne);
+    type AuthorizationResult = {
+      user: typeof userOne;
+      __credential: { accessToken: string };
+    };
+    let finishAuthorization: ((value: AuthorizationResult) => void) | undefined;
+    const authorization = new Promise<AuthorizationResult>((resolve) => {
+      finishAuthorization = resolve;
+    });
+    const reauth = jest.fn(() => authorization);
+    fakeAuth.__setReauthImplementation(reauth);
+
+    const first = gmail.searchEtransferEmails('notify@payments.interac.ca');
+    const second = gmail.searchEtransferEmails('other@example.com');
+    expect(reauth).toHaveBeenCalledTimes(1);
+
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(jsonResponse({}));
+    finishAuthorization?.({ user: userOne, __credential: { accessToken: 'gmail-token' } });
+
+    await expect(Promise.all([first, second])).resolves.toEqual([[], []]);
+    expect(reauth).toHaveBeenCalledTimes(1);
+  });
+});

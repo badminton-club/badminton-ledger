@@ -3,6 +3,7 @@ import { GoogleAuthProvider, reauthenticateWithPopup } from 'firebase/auth';
 import { auth } from './client';
 import { serviceCall } from './utils';
 import { exportAllData, restoreAllData, type ClearSummary, type BackupData } from './admin';
+import { encryptBackupPayload, decryptBackupPayload, isEncryptedBackupPayload } from '../backupCrypto';
 
 // This app only supports Google sign-in, so every signed-in user already has a
 // Google identity linked to their Firebase account. Re-authenticating with an
@@ -164,10 +165,17 @@ async function uploadJsonFile(
  * "Badminton Ledger Backups" folder (created if it doesn't exist yet). No
  * server/Cloud Function required — the browser talks directly to the Drive API
  * with a scoped OAuth token obtained via Firebase's existing Google sign-in.
+ *
+ * If `passphrase` is given, the JSON is encrypted (AES-256-GCM) before upload
+ * — see backupCrypto.ts. Anyone with access to the Drive folder can otherwise
+ * read the backup's full contents (player names, emails, balances, ledger),
+ * so this is the recommended way to protect it. There's no way to recover a
+ * forgotten passphrase; the same one must be supplied to restore.
  */
 export async function backupToGoogleDrive(options?: {
   fileName?: string;
   folderName?: string;
+  passphrase?: string;
 }): Promise<DriveBackupResult> {
   return serviceCall('backupToGoogleDrive', async () => {
     const accessToken = await getDriveAccessToken();
@@ -176,10 +184,19 @@ export async function backupToGoogleDrive(options?: {
     const folderId = await findOrCreateBackupFolder(accessToken, folderName);
     const rawFileName = options?.fileName?.trim() || defaultBackupFileName();
     const fileName = /\.json$/i.test(rawFileName) ? rawFileName : `${rawFileName}.json`;
-    const file = await uploadJsonFile(accessToken, folderId, fileName, JSON.stringify(data, null, 2));
+    const json = JSON.stringify(data, null, 2);
+    const passphrase = options?.passphrase?.trim();
+    const payload = passphrase ? JSON.stringify(await encryptBackupPayload(json, passphrase)) : json;
+    const file = await uploadJsonFile(accessToken, folderId, fileName, payload);
     return { fileName, webViewLink: file.webViewLink };
   });
 }
+
+// Drive returns at most 1000 files per page (100 by default without an
+// explicit pageSize) and can paginate further via nextPageToken — without
+// following it, a club with more backups than fit on one page would only
+// ever see/restore from the newest page, with older backups invisible.
+const DRIVE_LIST_MAX_PAGES = 20;
 
 /**
  * Lists the JSON backups in the given Drive folder (the standard
@@ -193,12 +210,21 @@ export async function listGoogleDriveBackups(folderName?: string): Promise<Drive
     if (!folderId) return [];
 
     const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
-    const { files } = await driveFetch<{ files: DriveBackupFile[] }>(
-      accessToken,
-      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,createdTime,webViewLink)` +
-        `&orderBy=createdTime desc&spaces=drive`
-    );
-    return files ?? [];
+    const files: DriveBackupFile[] = [];
+    let pageToken: string | undefined;
+    for (let page = 0; page < DRIVE_LIST_MAX_PAGES; page++) {
+      const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,createdTime,webViewLink),nextPageToken` +
+        `&orderBy=createdTime desc&spaces=drive&pageSize=100`
+        + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
+      const { files: pageFiles, nextPageToken } = await driveFetch<{ files: DriveBackupFile[]; nextPageToken?: string }>(
+        accessToken,
+        url
+      );
+      if (pageFiles?.length) files.push(...pageFiles);
+      if (!nextPageToken) break;
+      pageToken = nextPageToken;
+    }
+    return files;
   });
 }
 
@@ -219,11 +245,31 @@ async function downloadDriveFile(accessToken: string, fileId: string): Promise<s
  * Firestore, upserting documents by their original ID — the same semantics as
  * the manual "Restore from file" flow, just sourced from Drive instead of a
  * local file picker. Returns a per-collection write count.
+ *
+ * If the downloaded file is an encrypted envelope (see backupCrypto.ts), the
+ * matching `passphrase` must be supplied — throws a clear error either way
+ * (missing entirely, or wrong/corrupted) rather than a raw decryption error.
+ * A `passphrase` given for a backup that ISN'T encrypted is simply ignored.
  */
-export async function restoreFromGoogleDrive(fileId: string): Promise<ClearSummary> {
+export async function restoreFromGoogleDrive(fileId: string, passphrase?: string): Promise<ClearSummary> {
   return serviceCall('restoreFromGoogleDrive', async () => {
     const accessToken = await getDriveAccessToken();
-    const json = await downloadDriveFile(accessToken, fileId);
+    const raw = await downloadDriveFile(accessToken, fileId);
+
+    let parsedRaw: unknown;
+    try {
+      parsedRaw = JSON.parse(raw);
+    } catch {
+      throw new Error('The selected Drive file is not a valid backup (invalid JSON).');
+    }
+
+    let json = raw;
+    if (isEncryptedBackupPayload(parsedRaw)) {
+      if (!passphrase?.trim()) {
+        throw new Error('This backup is encrypted — enter its passphrase to restore.');
+      }
+      json = await decryptBackupPayload(parsedRaw, passphrase.trim());
+    }
 
     let backup: BackupData;
     try {

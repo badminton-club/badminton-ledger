@@ -93,6 +93,7 @@ describe('clubSlice selectors', () => {
       clubs: [{ id: 'club-1', name: 'Club One', role: 'admin' as const }],
       disabledTabs: ['payouts'],
       signedIn: true,
+      accountName: 'Admin',
       ready: true,
     };
     const state = makeRootState(club);

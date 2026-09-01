@@ -177,6 +177,75 @@ describe('PlayersPage', () => {
     ).toBeInTheDocument();
   });
 
+  it('rejects an edited email already used by another player, without touching this one\'s own unchanged email', async () => {
+    const user = userEvent.setup();
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada', lastName: 'Lovelace', email: 'ada@example.com' }),
+      makePlayer({ id: 'p2', firstName: 'Bea', firstNameLower: 'bea', lastName: null, lastNameLower: null, email: 'bea@example.com' }),
+    ];
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    // Re-saving the player's own unchanged email must not flag itself as a duplicate.
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const emailInput = screen.getByLabelText('Email');
+    await user.clear(emailInput);
+    await user.type(emailInput, 'BEA@example.com');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText(/Another player already uses "BEA@example.com"/)).toBeInTheDocument();
+    expect(getClubDocData('players', 'p1')).toMatchObject({ email: 'ada@example.com' });
+  });
+
+  it('sorts players by owed and overdrawn status', async () => {
+    const user = userEvent.setup();
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada', lastName: null, balance: 10 }),
+      makePlayer({
+        id: 'p2',
+        firstName: 'Bea',
+        firstNameLower: 'bea',
+        lastName: null,
+        balance: -4,
+      }),
+      makePlayer({
+        id: 'p3',
+        firstName: 'Cora',
+        firstNameLower: 'cora',
+        lastName: null,
+        owed: 8,
+      }),
+      makePlayer({
+        id: 'p4',
+        firstName: 'Dina',
+        firstNameLower: 'dina',
+        lastName: null,
+        balance: -12,
+        owed: 3,
+      }),
+    ];
+
+    renderPage({ players });
+
+    const playerList = screen.getByText('Ada').closest('.list-group');
+    expect(playerList).not.toBeNull();
+    const listedNames = () =>
+      within(playerList as HTMLElement).getAllByRole('button').map(item => item.textContent);
+
+    expect(listedNames()).toEqual(['Ada', 'BeaOverdrawn $4.00', 'Cora$8.00 owed', 'DinaOverdrawn $12.00$3.00 owed']);
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Sort players' }), 'owed');
+    expect(listedNames()).toEqual(['Cora$8.00 owed', 'DinaOverdrawn $12.00$3.00 owed', 'BeaOverdrawn $4.00', 'Ada']);
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Sort players' }), 'overdrawn');
+    expect(listedNames()).toEqual(['DinaOverdrawn $12.00$3.00 owed', 'BeaOverdrawn $4.00', 'Cora$8.00 owed', 'Ada']);
+  });
+
   it('loads wallet-only balance history and the selected player’s sessions', async () => {
     const now = new Date();
     const currentMonthSession = new Date(now.getFullYear(), now.getMonth(), 14, 19, 30);
@@ -287,6 +356,89 @@ describe('PlayersPage', () => {
     expect(screen.queryByText(format(previousMonthSession, 'MMM d, yyyy'))).not.toBeInTheDocument();
   });
 
+  it('opens linked balance-history sessions in a read-only popup', async () => {
+    const user = userEvent.setup();
+    const sessionDate = new Date(2026, 2, 10, 19, 30);
+    const players = [makePlayer({ id: 'p1', balance: 30 })];
+
+    seedSession('s1', {
+      date: ts(sessionDate),
+      location: 'Community Centre',
+      players: [makeSessionPlayer({ id: 'p1', cost: 15 })],
+    });
+    seedLedgerEntry('l1', {
+      playerId: 'p1',
+      sessionId: 's1',
+      reason: 'settlement',
+      delta: -15,
+      balanceBefore: 30,
+      balanceAfter: 15,
+      note: 'Settled from prepaid balance — session on Mar 10, 2026',
+      createdAt: ts(new Date(2026, 2, 11)),
+    });
+
+    renderPage({ players, route: '/?playerId=p1' });
+
+    await user.click(await screen.findByRole('button', {
+      name: format(sessionDate, 'MMM d, yyyy'),
+    }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByText(`Session — ${format(sessionDate, 'MMMM d, yyyy')}`)).toBeInTheDocument();
+    expect(within(dialog).getByText('Community Centre')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Duration')).not.toBeInTheDocument();
+    expect(within(dialog).getByText('Ada Lovelace cost')).toBeInTheDocument();
+    expect(within(dialog).getByText('$15.00')).toBeInTheDocument();
+    expect(within(dialog).getByText('Unpaid')).toBeInTheDocument();
+    expect(within(dialog).getByRole('link', { name: 'Open in calendar' })).toHaveAttribute(
+      'href',
+      `/?date=${format(sessionDate, 'yyyy-MM-dd')}`
+    );
+
+    await user.click(within(dialog).getByText('Close'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('(Prepaid credit)')).toBeInTheDocument();
+  });
+
+  it('labels a session auto-settled from a Gmail e-Transfer as "Gmail e-Transfer" instead of plain "Balance"', async () => {
+    const now = new Date();
+    const currentMonthSession = new Date(now.getFullYear(), now.getMonth(), 14, 19, 30);
+    const players = [makePlayer({ id: 'p1', balance: 30 })];
+
+    seedSession('s1', {
+      date: ts(currentMonthSession),
+      players: [makeSessionPlayer({
+        id: 'p1', cost: 15, paid: true, paidVia: 'balance', settledByEtransferImportId: 'msg-1',
+      })],
+    });
+
+    renderPage({ players, route: '/?playerId=p1' });
+
+    expect(await screen.findByRole('button', { name: 'Gmail e-Transfer' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Balance' })).not.toBeInTheDocument();
+  });
+
+  it('warns before a Balance settlement would overdraw the selected player', async () => {
+    const user = userEvent.setup();
+    const sessionDate = new Date(new Date().getFullYear(), new Date().getMonth(), 14, 19, 30);
+    const players = [makePlayer({ id: 'p1', balance: 10, owed: 15 })];
+    seedSession('s1', {
+      date: ts(sessionDate),
+      players: [makeSessionPlayer({ id: 'p1', cost: 15, paid: false, paidVia: null })],
+    });
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await user.click(await screen.findByRole('button', { name: 'Balance' }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('will go to $-5.00 (negative)'));
+    expect(getClubDocData('sessions', 's1')?.players).toEqual([
+      expect.objectContaining({ paid: false, paidVia: null }),
+    ]);
+    confirm.mockRestore();
+  });
+
   it('validates manual balance adjustments before submitting', async () => {
     const user = userEvent.setup();
     const players = [makePlayer({ id: 'p1', balance: 20 })];
@@ -300,7 +452,7 @@ describe('PlayersPage', () => {
     await user.type(amountInput, '0');
     await user.type(reasonInput, 'Cash top-up');
     await user.click(screen.getByRole('button', { name: 'Update Balance' }));
-    expect(await screen.findByText('Enter a valid non-zero amount.')).toBeInTheDocument();
+    expect(await screen.findByText('Enter a valid positive amount.')).toBeInTheDocument();
 
     await user.clear(amountInput);
     await user.type(amountInput, '5');
@@ -309,6 +461,41 @@ describe('PlayersPage', () => {
     expect(await screen.findByText('Reason is required.')).toBeInTheDocument();
     expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 20 });
     expect(getClubDocData('balanceLedger', 'auto-id-1')).toBeUndefined();
+  });
+
+  it('rejects a negative amount instead of silently flipping credit/debit', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', balance: 20 })];
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    await user.type(screen.getByPlaceholderText('Amount'), '-5');
+    await user.type(screen.getByPlaceholderText(/Reason \(e\.g\., Cash Payment\)/), 'Oops');
+    await user.click(screen.getByRole('button', { name: 'Update Balance' }));
+
+    expect(await screen.findByText('Enter a valid positive amount.')).toBeInTheDocument();
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 20 });
+  });
+
+  it('warns before a manual debit would overdraw the player, and Cancel stops the write', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', balance: 10 })];
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    await user.click(screen.getByRole('button', { name: 'Add (+)' }));
+    await user.click(screen.getByText('Deduct from balance (-)'));
+    await user.type(screen.getByPlaceholderText('Amount'), '15');
+    await user.type(screen.getByPlaceholderText(/Reason \(e\.g\., Cash Payment\)/), 'Correction');
+    await user.click(screen.getByRole('button', { name: 'Update Balance' }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('will leave them at $-5.00 (negative)'));
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
+    expect(getClubDocData('balanceLedger', 'auto-id-1')).toBeUndefined();
+    confirm.mockRestore();
   });
 
   it('records an included-in-payout manual credit and resets the form', async () => {
@@ -402,7 +589,47 @@ describe('PlayersPage', () => {
     expect(getClubDocData('balanceLedger', 'auto-id-1')).toMatchObject({ delta: 70 });
   });
 
-  it('hides the payout checkbox when the payout tab is disabled', async () => {
+  it('fills the reason field with a quick "Cash Payment" or "E-Transfer Payment" button', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', balance: 20 })];
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    const reasonInput = screen.getByPlaceholderText(/Reason \(e\.g\., Cash Payment\)/) as HTMLInputElement;
+
+    const cashButton = screen.getByRole('button', { name: 'Cash Payment' });
+    const etransferButton = screen.getByRole('button', { name: 'E-Transfer Payment' });
+    expect(cashButton).toHaveClass('btn-outline-success');
+    expect(etransferButton).toHaveClass('btn-outline-success');
+
+    await user.click(cashButton);
+    expect(reasonInput.value).toBe('Cash Payment');
+    expect(cashButton).toHaveClass('btn-success');
+    expect(etransferButton).toHaveClass('btn-outline-success');
+
+    await user.click(etransferButton);
+    expect(reasonInput.value).toBe('E-Transfer Payment');
+    expect(cashButton).toHaveClass('btn-outline-success');
+    expect(etransferButton).toHaveClass('btn-success');
+
+    await user.type(screen.getByPlaceholderText('Amount'), '15');
+    await user.click(screen.getByRole('button', { name: 'Update Balance' }));
+
+    await waitFor(() => expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 35 }));
+    expect(getClubDocData('balanceLedger', 'auto-id-1')).toMatchObject({ note: 'E-Transfer Payment' });
+  });
+
+  it('shows the include-in-payout checkbox only when the Payout tab is enabled', async () => {
+    const { unmount } = renderPage({
+      players: [makePlayer({ id: 'p1' })],
+      route: '/?playerId=p1',
+    });
+
+    expect(await screen.findByText('No balance history yet.')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Include in owner payout' })).toBeInTheDocument();
+    unmount();
+
     renderPage({
       players: [makePlayer({ id: 'p1' })],
       route: '/?playerId=p1',
@@ -411,6 +638,22 @@ describe('PlayersPage', () => {
 
     expect(await screen.findByText('No balance history yet.')).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'Include in owner payout' })).not.toBeInTheDocument();
+  });
+
+  it('excludes a manual balance adjustment from payout when the Payout tab is disabled', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', balance: 20 })];
+
+    renderPage({ players, route: '/?playerId=p1', disabledTabs: ['payout'] });
+    await screen.findByText('No balance history yet.');
+    expect(screen.queryByRole('checkbox', { name: 'Include in owner payout' })).not.toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText('Amount'), '10');
+    await user.type(screen.getByPlaceholderText(/Reason \(e\.g\., Cash Payment\)/), 'Cash top-up');
+    await user.click(screen.getByRole('button', { name: 'Update Balance' }));
+
+    await waitFor(() => expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 30 }));
+    expect(getClubDocData('balanceLedger', 'auto-id-1')).toMatchObject({ reason: 'manual-excluded' });
   });
 
   it('adds a player through the modal and shows them once the players slice refreshes', async () => {

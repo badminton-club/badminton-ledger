@@ -87,6 +87,12 @@ describe('HomePage', () => {
       makePlayer({ id: 'p4', firstName: 'Pat', firstNameLower: 'pat', lastName: 'Kim', lastNameLower: 'kim', owed: 10 }),
       makePlayer({ id: 'p5', firstName: 'Alex', firstNameLower: 'alex', lastName: 'Yu', lastNameLower: 'yu', owed: 5 }),
       makePlayer({ id: 'p6', firstName: 'Morgan', firstNameLower: 'morgan', lastName: 'Ho', lastNameLower: 'ho', owed: 1 }),
+      makePlayer({ id: 'p7', firstName: 'Drew', firstNameLower: 'drew', lastName: 'Bell', lastNameLower: 'bell', owed: 9 }),
+      makePlayer({ id: 'p8', firstName: 'Casey', firstNameLower: 'casey', lastName: 'Fox', lastNameLower: 'fox', owed: 8 }),
+      makePlayer({ id: 'p9', firstName: 'Robin', firstNameLower: 'robin', lastName: 'Day', lastNameLower: 'day', owed: 7 }),
+      makePlayer({ id: 'p10', firstName: 'Jesse', firstNameLower: 'jesse', lastName: 'Wu', lastNameLower: 'wu', owed: 6 }),
+      makePlayer({ id: 'p11', firstName: 'Reese', firstNameLower: 'reese', lastName: 'Chan', lastNameLower: 'chan', owed: 4 }),
+      makePlayer({ id: 'p12', firstName: 'Tatum', firstNameLower: 'tatum', lastName: 'Silva', lastNameLower: 'silva', owed: 3 }),
     ];
 
     renderWithProviders(<HomePage />, {
@@ -101,8 +107,12 @@ describe('HomePage', () => {
     expect(screen.getByText('Players: 2')).toBeInTheDocument();
     expect(screen.getByText('Birdies Used: 3')).toBeInTheDocument();
     expect(screen.getByText('Jamie Lee', { selector: '.unpaid-player' })).toBeInTheDocument();
-    expect(screen.getByText('+ 1 more with outstanding balances.')).toBeInTheDocument();
+    // No artificial cap on the outstanding-balances list — every player with a
+    // balance owed renders (overflow, if any, is handled visually via CSS
+    // clipping rather than by truncating the underlying list).
     expect(screen.getByRole('link', { name: 'Chris Ng' })).toHaveAttribute('href', '/players?playerId=p2');
+    expect(screen.getByRole('link', { name: 'Tatum Silva' })).toHaveAttribute('href', '/players?playerId=p12');
+    expect(screen.queryByText(/more with outstanding balances/)).not.toBeInTheDocument();
 
     await user.click(screen.getByTitle('Older session'));
 
@@ -132,5 +142,25 @@ describe('HomePage', () => {
     await waitFor(() => expect(fetchSessions).toHaveBeenCalledTimes(1));
     await user.click(screen.getByRole('button', { name: 'Mock calendar' }));
     await waitFor(() => expect(fetchSessions).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows a visible error with a Retry button when loading sessions fails, instead of silently showing nothing', async () => {
+    const user = userEvent.setup();
+    jest.mocked(fetchSessions).mockRejectedValueOnce(new Error('network down'));
+
+    renderWithProviders(<HomePage />, {
+      preloadedState: {
+        club: makeClubState(),
+        players: makePlayersState([]),
+      },
+    });
+
+    expect(await screen.findByText('Failed to load recent sessions.')).toBeInTheDocument();
+
+    jest.mocked(fetchSessions).mockResolvedValueOnce([makeSession({ id: 'latest' })]);
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText('Latest Session')).toBeInTheDocument();
+    expect(screen.queryByText('Failed to load recent sessions.')).not.toBeInTheDocument();
   });
 });

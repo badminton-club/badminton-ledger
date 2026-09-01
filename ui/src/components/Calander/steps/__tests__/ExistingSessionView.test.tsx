@@ -94,6 +94,21 @@ describe('ExistingSessionView', () => {
     expect(screen.getByRole('button', { name: 'e-Transfer' })).toBeInTheDocument();
   });
 
+  it('warns before a Balance settlement would overdraw the player', async () => {
+    const user = userEvent.setup();
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+    const { onSessionUpdate } = renderView(
+      [makePlayer({ id: 'p1', balance: 10 })],
+      [makeSessionPlayer({ id: 'p1', cost: 20, paid: false, paidVia: null })]
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Balance' }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('will go to $-10.00 (negative)'));
+    expect(onSessionUpdate).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
   it('hides admin-only controls for non-admins', () => {
     const players = [makePlayer({ id: 'p1' })];
     renderView(players, [makeSessionPlayer()], { isAdmin: false });
@@ -145,5 +160,35 @@ describe('ExistingSessionView', () => {
     expect(ledgerPaths).toHaveLength(1);
     const ledgerEntry = getClubDocData('balanceLedger', ledgerPaths[0].split('/').pop()!)!;
     expect(ledgerEntry).toMatchObject({ reason: 'payment', delta: 20 });
+  });
+
+  it('labels a balance settlement auto-applied from a Gmail e-Transfer distinctly from a manual balance draw', () => {
+    const players = [makePlayer({ id: 'p1' })];
+    const sessionPlayers = [makeSessionPlayer({
+      id: 'p1', cost: 20, paid: true, paidVia: 'balance', settledByEtransferImportId: 'msg-1',
+    })];
+
+    renderView(players, sessionPlayers, { isAdmin: true });
+    expect(screen.getByRole('button', { name: 'Gmail e-Transfer' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Balance' })).not.toBeInTheDocument();
+  });
+
+  it('shows a plain Balance label for a manually-chosen balance draw (not from a Gmail e-Transfer)', () => {
+    const players = [makePlayer({ id: 'p1' })];
+    const sessionPlayers = [makeSessionPlayer({ id: 'p1', cost: 20, paid: true, paidVia: 'balance' })];
+
+    renderView(players, sessionPlayers, { isAdmin: true });
+    expect(screen.getByRole('button', { name: 'Balance' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Gmail e-Transfer' })).not.toBeInTheDocument();
+  });
+
+  it('shows the Gmail e-Transfer badge (not Balance) to non-admins for an auto-settled session', () => {
+    const players = [makePlayer({ id: 'p1' })];
+    const sessionPlayers = [makeSessionPlayer({
+      id: 'p1', cost: 20, paid: true, paidVia: 'balance', settledByEtransferImportId: 'msg-1',
+    })];
+
+    renderView(players, sessionPlayers, { isAdmin: false });
+    expect(screen.getByText('Gmail e-Transfer')).toBeInTheDocument();
   });
 });

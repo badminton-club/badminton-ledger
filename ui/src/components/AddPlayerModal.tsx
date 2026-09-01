@@ -35,6 +35,13 @@ export default function AddPlayerModal({
     if (form.email.trim() && !/\S+@\S+\.\S+/.test(form.email)) {
       setError('Please enter a valid email address.'); return;
     }
+    const email = form.email.trim();
+    if (email && existingPlayers.some(p => (p.email ?? '').toLowerCase() === email.toLowerCase())) {
+      // Email drives auto-matching for link requests (see clubs.ts /
+      // SettingsPage.tsx), so a duplicate would make that match ambiguous.
+      setError(`Another player already uses "${email}". Use a different email, or leave it blank.`);
+      return;
+    }
     const sameFirst = existingPlayers.filter(
       p => p.firstName.toLowerCase() === firstName.toLowerCase()
     );

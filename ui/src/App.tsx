@@ -8,6 +8,7 @@ import CourtCreditsPage from './Pages/CourtCreditsPage';
 import PlayersPage from './Pages/PlayersPage';
 import SettingsPage from './Pages/SettingsPage';
 import PayoutPage from './Pages/PayoutPage';
+import EtransfersPage from './Pages/EtransfersPage';
 import AttendancePage from './Pages/AttendancePage';
 import AuthPage from './Pages/AuthPage';
 import { Container, Spinner } from 'react-bootstrap';
@@ -71,6 +72,7 @@ export default function App() {
           <Route path="/credits"  element={<RequireClub><RequireAdmin><CourtCreditsPage /></RequireAdmin></RequireClub>} />
           <Route path="/players"  element={<RequireClub><RequireAdmin><PlayersPage /></RequireAdmin></RequireClub>} />
           <Route path="/payout"   element={<RequireClub><RequireAdmin><PayoutPage /></RequireAdmin></RequireClub>} />
+          <Route path="/etransfers" element={<RequireClub><RequireAdmin><EtransfersPage /></RequireAdmin></RequireClub>} />
           <Route path="/settings" element={<RequireClub><RequireAdmin><SettingsPage /></RequireAdmin></RequireClub>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

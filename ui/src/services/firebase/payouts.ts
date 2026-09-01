@@ -278,34 +278,63 @@ export async function voidOwnerPayout(payoutId: string, reason: string): Promise
 
 /**
  * Records a cashout to the owner. When `amount` is omitted, the full pending
- * balance is paid out; otherwise the given custom amount is recorded. Recomputes
- * pending at call time so a full payout is never stale and a custom payout can't
- * exceed what's owed. Returns the amount paid.
+ * balance is paid out; otherwise the given custom amount is recorded.
+ *
+ * Two admins clicking "Pay Owner" at almost the same moment could otherwise
+ * both read the same pending balance and both record a payout against it,
+ * double-counting the same collected money (the UI already disables the
+ * button while a payout is in flight, which covers an accidental
+ * double-click from the same admin — this guards the separate case of two
+ * different admin sessions). To close that gap without a full counter-doc
+ * redesign, every *existing* payout is re-read fresh inside a transaction
+ * immediately before writing the new one: Firestore transactions
+ * automatically retry if any of those re-read documents changes before this
+ * one commits, so a payout that wins the race is guaranteed to be reflected
+ * here. (This narrows, but can't fully close, the race — a brand-new payout
+ * doc created in the brief window between the outer read below and the
+ * transaction's re-reads isn't part of that read set; closing that
+ * completely would need a maintained running-total document updated
+ * transactionally by every payment/adjustment/payout write across the app.)
  */
 export async function payOwner(note?: string, amount?: number): Promise<number> {
   return serviceCall('payOwner', async () => {
-    const { pending } = await fetchOwnerPayoutSummary();
-    if (pending <= 0) throw new Error('Nothing to pay out — the balance is already zero.');
+    const [{ totalCollected }, payoutSnap] = await Promise.all([
+      fetchOwnerPayoutSummary(),
+      getDocs(refs.payouts),
+    ]);
+    const payoutRefs = payoutSnap.docs.map((d) => d.ref);
+    const newPayoutRef = doc(refs.payouts);
 
-    let payoutAmount = pending;
-    if (amount !== undefined) {
-      if (!Number.isFinite(amount) || amount <= 0) {
-        throw new Error('Enter a payout amount greater than zero.');
-      }
-      if (amount > pending) {
-        throw new Error(`Amount can't exceed the pending balance of $${pending.toFixed(2)}.`);
-      }
-      payoutAmount = amount;
-    }
+    return runTransaction(db, async (tx) => {
+      const freshPayoutDocs = await Promise.all(payoutRefs.map((ref) => tx.get(ref)));
+      const totalPaid = freshPayoutDocs.reduce((sum, snap) => {
+        if (!snap.exists()) return sum;
+        const data = snap.data() as { amount?: number; voided?: boolean };
+        return data.voided ? sum : sum + (data.amount ?? 0);
+      }, 0);
+      const pendingNow = totalCollected - totalPaid;
+      if (pendingNow <= 0) throw new Error('Nothing to pay out — the balance is already zero.');
 
-    await setDoc(doc(refs.payouts), {
-      amount:    payoutAmount,
-      note:      note?.trim() || null,
-      paidByUid: auth.currentUser?.uid ?? null,
-      date:      Timestamp.now(),
-      createdAt: serverTimestamp(),
+      let payoutAmount = pendingNow;
+      if (amount !== undefined) {
+        if (!Number.isFinite(amount) || amount <= 0) {
+          throw new Error('Enter a payout amount greater than zero.');
+        }
+        if (amount > pendingNow) {
+          throw new Error(`Amount can't exceed the pending balance of $${pendingNow.toFixed(2)}.`);
+        }
+        payoutAmount = amount;
+      }
+
+      tx.set(newPayoutRef, {
+        amount:    payoutAmount,
+        note:      note?.trim() || null,
+        paidByUid: auth.currentUser?.uid ?? null,
+        date:      Timestamp.now(),
+        createdAt: serverTimestamp(),
+      });
+
+      return payoutAmount;
     });
-
-    return payoutAmount;
   });
 }

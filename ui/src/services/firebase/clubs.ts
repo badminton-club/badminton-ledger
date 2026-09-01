@@ -124,10 +124,62 @@ export async function setLastVisitedClub(uid: string, clubId: string): Promise<v
   });
 }
 
-/** Adds or updates a club member with the given role. Admin-only (enforced by rules). */
+/**
+ * Adds or updates a club member with the given role (admin-only, enforced by
+ * rules). Also saves the club onto the target user's own profile so it shows
+ * up in their club switcher right away — without this, a newly added member
+ * wouldn't see the club at all until they separately opened a share link.
+ * That second write is a narrowly-scoped exception in the rules (see
+ * firestore.rules) for exactly this case, so it's safe even though the caller
+ * isn't the target user. The writes are atomic so a profile-sync failure cannot
+ * leave behind a membership that the target user cannot discover.
+ */
 export async function addClubMember(clubId: string, uid: string, role: ClubRole): Promise<void> {
   return serviceCall('addClubMember', async () => {
-    await setDoc(memberDoc(clubId, uid), { role, addedAt: serverTimestamp() }, { merge: true });
+    const batch = writeBatch(db);
+    batch.set(memberDoc(clubId, uid), { role, addedAt: serverTimestamp() }, { merge: true });
+    batch.set(userDoc(uid), { clubs: arrayUnion(clubId) }, { merge: true });
+    await batch.commit();
+  });
+}
+
+/**
+ * Persists the club's e-Transfer search cutoff as a rolling window (in days,
+ * recomputed fresh on every search) — clears any previously saved one-off
+ * absolute date, since the rolling window takes priority once set.
+ */
+export async function setClubEtransferSearchWindowDays(clubId: string, days: number): Promise<void> {
+  return serviceCall('setClubEtransferSearchWindowDays', async () => {
+    await setDoc(
+      clubDoc(clubId),
+      { etransferSearchWindowDays: days, etransferSearchAfterDate: null },
+      { merge: true }
+    );
+  });
+}
+
+/**
+ * Persists a one-off absolute cutoff date for e-Transfer searches — clears
+ * any saved rolling window, since an absolute date is a manual override.
+ */
+export async function setClubEtransferSearchAfterDate(clubId: string, date: string): Promise<void> {
+  return serviceCall('setClubEtransferSearchAfterDate', async () => {
+    await setDoc(
+      clubDoc(clubId),
+      { etransferSearchAfterDate: date, etransferSearchWindowDays: null },
+      { merge: true }
+    );
+  });
+}
+
+/** Clears any saved e-Transfer search cutoff, reverting to the default rolling window. */
+export async function resetClubEtransferSearchSetting(clubId: string): Promise<void> {
+  return serviceCall('resetClubEtransferSearchSetting', async () => {
+    await setDoc(
+      clubDoc(clubId),
+      { etransferSearchAfterDate: null, etransferSearchWindowDays: null },
+      { merge: true }
+    );
   });
 }
 
@@ -325,12 +377,20 @@ export async function deleteClub(clubId: string, uid: string): Promise<void> {
       getDocs(linkRequestsRef(clubId)),
       getDocs(profileEditRequestsRef(clubId)),
     ]);
-    const batch = writeBatch(db);
-    members.docs.forEach((d) => batch.delete(d.ref));
-    linkRequests.docs.forEach((d) => batch.delete(d.ref));
-    profileEditRequests.docs.forEach((d) => batch.delete(d.ref));
-    batch.delete(clubDoc(clubId));
-    await batch.commit();
+    // Chunked into <=500-write batches — a single batch would fail outright for
+    // any club with more members/requests than Firestore's per-batch limit.
+    const refsToDelete = [
+      ...members.docs.map((d) => d.ref),
+      ...linkRequests.docs.map((d) => d.ref),
+      ...profileEditRequests.docs.map((d) => d.ref),
+      clubDoc(clubId),
+    ];
+    const BATCH_LIMIT = 500;
+    for (let i = 0; i < refsToDelete.length; i += BATCH_LIMIT) {
+      const batch = writeBatch(db);
+      for (const ref of refsToDelete.slice(i, i + BATCH_LIMIT)) batch.delete(ref);
+      await batch.commit();
+    }
 
     await removeClubFromUser(uid, clubId);
   });

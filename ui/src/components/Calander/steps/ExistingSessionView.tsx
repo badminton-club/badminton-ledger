@@ -197,14 +197,20 @@ function PlayerRow({
     onSetPaidBy(payerId);
   };
 
-  // Clearly marks how the session was settled (shown to members).
+  // Clearly marks how the session was settled (shown to members). A 'balance'
+  // settlement that was auto-applied from a Gmail e-Transfer batch (see
+  // etransferImports.ts) is called out distinctly from a manually-chosen
+  // balance draw, since the money ultimately came from that e-Transfer.
+  const settledViaEtransferBalance = currentVia === 'balance' && !!player.settledByEtransferImportId;
   const settlement = player.comped
     ? { label: 'Comp', bg: 'info' }
     : currentVia === 'transfer'
       ? { label: payerName ? `Paid by ${payerName}` : 'Covered', bg: 'primary' }
       : player.paid
         ? (player.paidVia === 'balance'
-            ? { label: 'Balance', bg: 'primary' }
+            ? (settledViaEtransferBalance
+                ? { label: 'Gmail e-Transfer', bg: 'primary' }
+                : { label: 'Balance', bg: 'primary' })
             : { label: 'e-Transfer', bg: 'success' })
         : { label: 'Unpaid', bg: 'danger' };
 
@@ -239,13 +245,23 @@ function PlayerRow({
         {isAdmin ? (
           <div className="d-flex flex-column align-items-end">
             <ButtonGroup size="sm">
-                {options.map(o => (
+                {options.map(o => {
+                  const isActive = currentVia === o.method;
+                  const displayLabel = o.method === 'balance' && isActive && settledViaEtransferBalance
+                    ? 'Gmail e-Transfer'
+                    : o.label;
+                  return (
                   <React.Fragment key={o.label}>
                     <Button
-                      variant={currentVia === o.method ? o.activeVariant : 'outline-secondary'}
+                      variant={isActive ? o.activeVariant : 'outline-secondary'}
                       onClick={() => handleSelect(o.method)}
+                      title={
+                        o.method === 'balance' && isActive && settledViaEtransferBalance
+                          ? 'Automatically settled from balance funded by a Gmail e-Transfer'
+                          : undefined
+                      }
                     >
-                      {o.label}
+                      {displayLabel}
                     </Button>
                     {o.method === null && otherPlayers.length > 0 && (
                       <Dropdown
@@ -296,7 +312,8 @@ function PlayerRow({
                       </Dropdown>
                     )}
                   </React.Fragment>
-                ))}
+                  );
+                })}
               </ButtonGroup>
             {player.settledAt && (currentVia === 'comp' || player.paid) && (
               <div className="text-muted" style={{ fontSize: 10 }}>

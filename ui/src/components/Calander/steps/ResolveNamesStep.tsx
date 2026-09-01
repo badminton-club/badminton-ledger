@@ -122,7 +122,7 @@ function NameRow({
     const [isRematching, setIsRematching] = useState(false);
     const [showInlineAdd, setShowInlineAdd] = useState(false);
 
-    const patch = (p: Partial<NameResolutionItem>) => dispatch(updateResolutionItem({ index, patch: p }));
+    const patch = (p: Partial<NameResolutionItem>) => dispatch(updateResolutionItem({ id: item.id, patch: p }));
 
     const handleRematch = async (name: string) => {
         setIsRematching(true);

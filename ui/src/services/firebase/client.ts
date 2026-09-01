@@ -40,6 +40,8 @@ export const CLUB_DATA_COLLECTIONS = [
   'balanceLedger',
   'archivedSessions',
   'payouts',
+  'etransferImports',
+  'etransferSenderMappings',
 ] as const;
 
 export type ClubDataCollection = (typeof CLUB_DATA_COLLECTIONS)[number];
@@ -78,6 +80,8 @@ export const refs = {
   get balanceLedger()        { return clubCollection('balanceLedger'); },
   get archivedSessions()     { return clubCollection('archivedSessions'); },
   get payouts()              { return clubCollection('payouts'); },
+  get etransferImports()        { return clubCollection('etransferImports'); },
+  get etransferSenderMappings() { return clubCollection('etransferSenderMappings'); },
 };
 
 // ─── Top-level (not club-scoped) refs ──────────────────────────────────────────
@@ -109,4 +113,4 @@ export function userDoc(uid: string): DocumentReference {
   return doc(db, 'users', uid);
 }
 
-export { db, auth };
+export { db, auth, app };

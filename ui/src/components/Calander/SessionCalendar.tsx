@@ -7,7 +7,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { selectModalMode, setMode } from "../../features/SessionModal/sessionModalSlice";
-import { selectCurrentClubId } from "../../features/club/clubSlice";
+import { selectCurrentClubId, selectIsClubAdmin } from "../../features/club/clubSlice";
 import { fetchSessions, fetchSessionById, addSession, editSession, deleteSession } from "../../services/firebase";
 import { getMonthYear, getNextMonth, getPrevMonth } from "../../utils/dateUtils";
 import type { Session } from "../../types";
@@ -27,6 +27,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
     const [isLoading, setIsLoading] = useState(false);
     const modalMode = useAppSelector(selectModalMode);
     const currentClubId = useAppSelector(selectCurrentClubId);
+    const isAdmin = useAppSelector(selectIsClubAdmin);
     const dispatch = useAppDispatch();
     const [searchParams, setSearchParams] = useSearchParams();
 
@@ -78,7 +79,10 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
     const handleDayClick = (date: Date) => {
         setSelectedDate(date);
         const hasSession = sessions.some((session) => +session.date === +date);
-        if (!hasSession) openAddSession(date);
+        // Only admins can create sessions — clicking an empty day should just
+        // select it (so members can see "no session" state), not launch the
+        // admin-only paste/create flow that would fail on submit anyway.
+        if (!hasSession && isAdmin) openAddSession(date);
     };
 
     const handleOpenModal = (session: Session, dateOverride?: Date) => {
@@ -91,7 +95,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
     };
 
     const handleAddSession = () => {
-        if (!selectedDate) return;
+        if (!selectedDate || !isAdmin) return;
         openAddSession(selectedDate);
     };
 
@@ -136,6 +140,16 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
         onSessionsChanged?.();
     };
 
+    // Navigating months should deselect whatever day was picked in the
+    // previous month — otherwise a stale selectedDate lingers (invisible in
+    // the newly displayed grid) and "+ Add Session" in the quick-view panel
+    // would silently create a session back in the month the user navigated
+    // away from, instead of the month currently on screen.
+    const goToMonth = (nextDate: Date) => {
+        setCurrentDate(nextDate);
+        setSelectedDate(null);
+    };
+
     return (
         <div style={styles.outerWrap}>
             {/* ── Calendar panel ───────────────────────────────────────────── */}
@@ -144,7 +158,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
                     <DatePicker
                         selected={currentDate}
                         onChange={(d: Date | null) => {
-                            if (d) setCurrentDate(d);
+                            if (d) goToMonth(d);
                         }}
                         customInput={
                             <Button variant="outline-secondary" size="sm" className="fw-bold">
@@ -158,14 +172,14 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
                         <Button
                             variant="outline-secondary"
                             size="sm"
-                            onClick={() => setCurrentDate(getPrevMonth(currentDate))}
+                            onClick={() => goToMonth(getPrevMonth(currentDate))}
                         >
                             &lt;
                         </Button>
                         <Button
                             variant="outline-secondary"
                             size="sm"
-                            onClick={() => setCurrentDate(getNextMonth(currentDate))}
+                            onClick={() => goToMonth(getNextMonth(currentDate))}
                         >
                             &gt;
                         </Button>
