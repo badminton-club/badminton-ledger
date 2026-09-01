@@ -787,10 +787,9 @@ export default function SettingsPage() {
             </Form.Text>
           </Form.Group>
           <Form.Text className="text-muted d-block mt-2">
-            Drive backups default to a "{DEFAULT_BACKUP_FOLDER_NAME}" folder in your own Google
-            Drive, but you can name the file and choose a different folder when backing up.
-            You'll be asked to grant access the first time — sign in with the same Google account
-            you use for this app.
+            Drive backups default to a "{DEFAULT_BACKUP_FOLDER_NAME}" folder in the Google Drive
+            account you choose. That account can be different from the one used to sign into this
+            app. You can also name the file and choose a different folder when backing up.
           </Form.Text>
 
           {ioError && (
@@ -910,6 +909,9 @@ export default function SettingsPage() {
         </Modal.Header>
         <Form onSubmit={(e) => { e.preventDefault(); handleDriveBackup(); }}>
           <Modal.Body>
+            <Alert variant="info">
+              After you click Backup, choose the Google account whose Drive should store this file.
+            </Alert>
             <Form.Group className="mb-3" controlId="drive-backup-file-name">
               <Form.Label>File name</Form.Label>
               <Form.Control

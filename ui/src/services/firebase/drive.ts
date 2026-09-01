@@ -1,15 +1,14 @@
-import { FirebaseError } from 'firebase/app';
-import { GoogleAuthProvider, reauthenticateWithPopup } from 'firebase/auth';
-import { auth } from './client';
+import { FirebaseError, getApps, initializeApp } from 'firebase/app';
+import { GoogleAuthProvider, getAuth, signInWithPopup, signOut, type Auth } from 'firebase/auth';
+import { auth, app } from './client';
 import { serviceCall } from './utils';
 import { exportAllData, restoreAllData, type ClearSummary, type BackupData } from './admin';
 import { encryptBackupPayload, decryptBackupPayload, isEncryptedBackupPayload } from '../backupCrypto';
 
-// This app only supports Google sign-in, so every signed-in user already has a
-// Google identity linked to their Firebase account. Re-authenticating with an
-// added Drive scope reuses that same Google OAuth client — no separate Google
-// Cloud project/credentials need to be configured for this feature.
+// Drive authorization uses a secondary Firebase Auth instance so the selected
+// Google account is independent from the account signed into Badminton Ledger.
 const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_AUTH_APP_NAME = 'drive-oauth';
 /** Default backup destination folder, used whenever the caller doesn't specify one. */
 export const DEFAULT_BACKUP_FOLDER_NAME = 'Badminton Ledger Backups';
 const BACKUP_FOLDER_NAME = DEFAULT_BACKUP_FOLDER_NAME;
@@ -23,6 +22,7 @@ const TOKEN_TTL_MS = 45 * 60 * 1000;
 // a second user signing in during the same tab session could otherwise reuse
 // the first user's still-valid cached Drive token.
 let cachedToken: { value: string; expiresAt: number; uid: string } | null = null;
+let pendingTokenRequest: { value: Promise<string>; uid: string } | null = null;
 
 export interface DriveBackupResult {
   fileName: string;
@@ -42,11 +42,18 @@ export function defaultBackupFileName(): string {
 }
 
 /**
- * Re-authenticates the current user with the Drive "file" scope added and returns
- * a fresh OAuth access token. `prompt: 'consent'` forces a new token to be issued
- * (rather than silently reusing one that may lack Drive access). Cached briefly so
- * a sequence of Drive actions (e.g. list backups, then restore one) only prompts
- * once.
+ * Lazily creates the isolated Auth instance used only for Drive OAuth.
+ */
+function getDriveAuthInstance(): Auth {
+  const existing = getApps().find((candidate) => candidate.name === DRIVE_AUTH_APP_NAME);
+  const driveApp = existing ?? initializeApp(app.options, DRIVE_AUTH_APP_NAME);
+  return getAuth(driveApp);
+}
+
+/**
+ * Opens a standalone Google account chooser and returns a Drive access token.
+ * The secondary identity is discarded immediately and never changes the app's
+ * signed-in Firebase user.
  */
 async function getDriveAccessToken(): Promise<string> {
   const user = auth.currentUser;
@@ -55,32 +62,45 @@ async function getDriveAccessToken(): Promise<string> {
   if (cachedToken && cachedToken.uid === user.uid && cachedToken.expiresAt > Date.now()) {
     return cachedToken.value;
   }
+  if (pendingTokenRequest?.uid === user.uid) return pendingTokenRequest.value;
+  if (pendingTokenRequest) {
+    await pendingTokenRequest.value.catch(() => undefined);
+    return getDriveAccessToken();
+  }
 
-  const provider = new GoogleAuthProvider();
-  provider.addScope(DRIVE_FILE_SCOPE);
-  provider.setCustomParameters({ prompt: 'consent' });
+  const request = (async () => {
+    const driveAuth = getDriveAuthInstance();
+    const provider = new GoogleAuthProvider();
+    provider.addScope(DRIVE_FILE_SCOPE);
+    provider.setCustomParameters({ prompt: 'select_account consent' });
 
-  let result;
-  try {
-    result = await reauthenticateWithPopup(user, provider);
-  } catch (err) {
-    if (err instanceof FirebaseError) {
-      if (err.code === 'auth/user-mismatch') {
-        throw new Error("Select the same Google account you're signed in with.");
+    let result;
+    try {
+      result = await signInWithPopup(driveAuth, provider);
+    } catch (err) {
+      if (err instanceof FirebaseError) {
+        if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+          throw new Error('Google Drive authorization was cancelled.');
+        }
       }
-      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
-        throw new Error('Google Drive authorization was cancelled.');
-      }
+      throw err;
     }
-    throw err;
-  }
 
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  if (!credential?.accessToken) {
-    throw new Error('Failed to get Google Drive access — please try again.');
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    await signOut(driveAuth).catch(() => { /* best-effort cleanup */ });
+    if (!credential?.accessToken) {
+      throw new Error('Failed to get Google Drive access — please try again.');
+    }
+    cachedToken = { value: credential.accessToken, expiresAt: Date.now() + TOKEN_TTL_MS, uid: user.uid };
+    return credential.accessToken;
+  })();
+  pendingTokenRequest = { value: request, uid: user.uid };
+
+  try {
+    return await request;
+  } finally {
+    if (pendingTokenRequest?.value === request) pendingTokenRequest = null;
   }
-  cachedToken = { value: credential.accessToken, expiresAt: Date.now() + TOKEN_TTL_MS, uid: user.uid };
-  return credential.accessToken;
 }
 
 async function driveFetch<T>(accessToken: string, url: string, init: RequestInit = {}): Promise<T> {

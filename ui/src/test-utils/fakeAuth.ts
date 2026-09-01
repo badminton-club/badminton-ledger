@@ -107,9 +107,9 @@ type ReauthImplementation = (user: FakeUser | null, provider: GoogleAuthProvider
 let reauthImpl: ReauthImplementation | null = null;
 
 /**
- * Test-only control for `reauthenticateWithPopup` (used by drive.ts to get a
- * scoped Drive access token) and for `signInWithPopup` on a secondary auth
- * instance (used by gmail.ts). Queue either a resolved result — include
+ * Test-only control for `reauthenticateWithPopup` and for `signInWithPopup` on
+ * a secondary auth instance (used by drive.ts and gmail.ts). Queue either a
+ * resolved result — include
  * `__credential: { accessToken }` so `GoogleAuthProvider.credentialFromResult`
  * can read it back — or a rejection to simulate a cancelled/failed popup.
  *
