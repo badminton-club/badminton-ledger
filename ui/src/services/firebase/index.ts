@@ -8,3 +8,5 @@ export * from './payouts';
 export * from './clubs';
 export * from './attendance';
 export * from './drive';
+export * from './gmail';
+export * from './etransferImports';

@@ -150,6 +150,45 @@ describe('AttendancePage', () => {
     expect(await screen.findByText(/awaiting admin approval/)).toBeInTheDocument();
   });
 
+  it('prefills "Edit details" from the pending request, not the stale live player record, and blocks resubmitting it unchanged', async () => {
+    const user = userEvent.setup();
+    seedMemberDoc(currentUser.uid, { role: 'member', playerId: 'p1' });
+    const player = makePlayer({ firstName: 'Grace', lastName: 'Hopper', email: 'grace@old.com' });
+    __seedDoc(`clubs/${TEST_CLUB_ID}/profileEditRequests/${currentUser.uid}`, {
+      uid: currentUser.uid, playerId: 'p1', firstName: 'Grace', lastName: 'Hopper-Smith', email: 'grace@new.com',
+    });
+
+    renderPage([player]);
+    await screen.findByText(/awaiting admin approval/);
+
+    await user.click(screen.getByRole('button', { name: 'Edit details' }));
+    const textboxes = screen.getAllByRole('textbox');
+    // Prefilled from the PENDING proposal, not the live player record above.
+    expect(textboxes[0]).toHaveValue('Grace');
+    expect(textboxes[1]).toHaveValue('Hopper-Smith');
+    expect(textboxes[2]).toHaveValue('grace@new.com');
+
+    // Resubmitting the exact same (already-pending) proposal is a no-op —
+    // must be blocked rather than silently rewriting the pending request.
+    await user.click(screen.getByRole('button', { name: 'Submit for approval' }));
+    expect(await screen.findByText('Nothing has changed from your pending request.')).toBeInTheDocument();
+  });
+
+  it('blocks submitting a details-edit request with nothing actually changed from the live player record', async () => {
+    const user = userEvent.setup();
+    seedMemberDoc(currentUser.uid, { role: 'member', playerId: 'p1' });
+    const player = makePlayer({ firstName: 'Grace', lastName: 'Hopper', email: 'grace@old.com' });
+
+    renderPage([player]);
+    await screen.findByText('Grace Hopper');
+
+    await user.click(screen.getByRole('button', { name: 'Edit details' }));
+    await user.click(screen.getByRole('button', { name: 'Submit for approval' }));
+
+    expect(await screen.findByText('Nothing has changed from your current details.')).toBeInTheDocument();
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}/profileEditRequests/${currentUser.uid}`)).toBeUndefined();
+  });
+
   it('shows an error message if the initial data load fails', async () => {
     seedMemberDoc(currentUser.uid, { role: 'member', playerId: 'p1' });
     jest.mocked(fetchPlayerLedger).mockRejectedValueOnce(new Error('boom'));

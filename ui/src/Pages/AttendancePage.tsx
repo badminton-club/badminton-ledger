@@ -9,6 +9,7 @@ import { selectCurrentClubId } from '../features/club/clubSlice';
 import { selectPlayerById } from '../features/players/playersSlice';
 import type { BalanceLedgerEntry, Session, LinkRequest, ProfileEditRequest } from '../types';
 import type { RootState } from '../store';
+import { isSessionPlayerUnpaid } from '../utils/sessionPayment';
 
 const REASON_LABELS: Record<string, string> = {
   session: 'Session',
@@ -122,9 +123,14 @@ export default function AttendancePage() {
   };
 
   const startEditingProfile = () => {
-    setEdFirst(player?.firstName ?? '');
-    setEdLast(player?.lastName ?? '');
-    setEdEmail(player?.email ?? '');
+    // Prefill from the pending proposal (if any) rather than the live player
+    // record — otherwise reopening "Edit details" silently discards whatever
+    // was already proposed and awaiting approval, and resubmitting would
+    // overwrite it with values based on the stale, unedited player record.
+    const source = myProfileEditRequest ?? player;
+    setEdFirst(source?.firstName ?? '');
+    setEdLast(source?.lastName ?? '');
+    setEdEmail(source?.email ?? '');
     setEditError('');
     setIsEditingProfile(true);
   };
@@ -133,11 +139,30 @@ export default function AttendancePage() {
     if (!clubId || !uid || !playerId) return;
     const first = edFirst.trim();
     if (!first) { setEditError('Enter your first name.'); return; }
+    const last = edLast.trim() || null;
+    const email = edEmail.trim() || null;
+    // Compare against whatever's already on record for this proposal — the
+    // pending request if one exists, otherwise the live player — so a resubmit
+    // with nothing actually changed doesn't create a no-op request (and, if a
+    // request is already pending, doesn't silently replace it with an
+    // identical copy that just resets the review clock for no reason).
+    const baseline = myProfileEditRequest ?? player;
+    if (
+      baseline
+      && first === (baseline.firstName ?? '')
+      && last === (baseline.lastName ?? null)
+      && email === (baseline.email ?? null)
+    ) {
+      setEditError(
+        myProfileEditRequest
+          ? 'Nothing has changed from your pending request.'
+          : 'Nothing has changed from your current details.'
+      );
+      return;
+    }
     setEditError('');
     setSubmittingEdit(true);
     try {
-      const last = edLast.trim() || null;
-      const email = edEmail.trim() || null;
       await submitProfileEditRequest(clubId, uid, playerId, first, last, email);
       setMyProfileEditRequest({ uid, playerId, firstName: first, lastName: last, email });
       setIsEditingProfile(false);
@@ -290,7 +315,7 @@ export default function AttendancePage() {
                       const d = toJSDate(s.date);
                       const status = sp?.comped
                         ? { label: 'Comped', bg: 'warning' }
-                        : sp?.paid
+                        : sp && !isSessionPlayerUnpaid(sp)
                           ? { label: 'Paid', bg: 'success' }
                           : { label: 'Unpaid', bg: 'danger' };
                       return (
@@ -379,7 +404,7 @@ export default function AttendancePage() {
                   <span>You owe</span>
                   <span>
                     {money(sp?.cost ?? 0)}{' '}
-                    {sp?.comped ? <Badge bg="warning">Comped</Badge> : sp?.paid ? <Badge bg="success">Paid</Badge> : <Badge bg="danger">Unpaid</Badge>}
+                    {sp?.comped ? <Badge bg="warning">Comped</Badge> : sp && !isSessionPlayerUnpaid(sp) ? <Badge bg="success">Paid</Badge> : <Badge bg="danger">Unpaid</Badge>}
                   </span>
                 </ListGroup.Item>
               </ListGroup>

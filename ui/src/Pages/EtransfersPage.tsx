@@ -1,0 +1,1021 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Container, Card, Button, Table, Spinner, Alert, Form, Modal, Badge } from 'react-bootstrap';
+import { format } from 'date-fns';
+import {
+  fetchClub,
+  fetchPendingEtransferImports,
+  fetchEtransferImportHistory,
+  importEtransferEmails,
+  previewEtransferApprovalBatch,
+  applyEtransferApprovalBatch,
+  rejectEtransferImport,
+  dismissEtransferImport,
+  undoEtransferImport,
+  fetchEtransferSenderMappings,
+  saveEtransferSenderMapping,
+  deleteEtransferSenderMapping,
+  setClubEtransferSearchAfterDate,
+  setClubEtransferSearchWindowDays,
+  formatPlayerName,
+  DEFAULT_ETRANSFER_SENDER_ADDRESS,
+  DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS,
+  ETRANSFER_SEARCH_WINDOW_PRESETS,
+  resolveEtransferSearchAfterDate,
+  type EtransferBatchPreview,
+} from '../services/firebase';
+import { toJSDate } from '../services/firebase/utils';
+import { useAppSelector } from '../hooks';
+import { selectAllPlayers } from '../features/players/playersSlice';
+import { selectIsClubAdmin, selectCurrentClubId } from '../features/club/clubSlice';
+import type { EtransferImport, EtransferSenderMapping } from '../types';
+
+const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toFixed(2)}`;
+
+interface RowEdit {
+  playerId: string;
+  amount: string;
+  remember: boolean;
+  selected: boolean;
+}
+
+function initialRowEdit(imp: EtransferImport): RowEdit {
+  return {
+    playerId: imp.matchedPlayerId ?? '',
+    amount: imp.amount.toFixed(2),
+    // Only default to "remember" for a brand-new match (name lookup, or no match
+    // at all) — a mapping that was already used to find this player doesn't need
+    // to be re-saved every time.
+    remember: imp.matchSource !== 'mapping',
+    selected: !!imp.matchedPlayerId,
+  };
+}
+
+const statusBadge = (status: EtransferImport['status']) => {
+  switch (status) {
+    case 'applied': return <Badge bg="success">Applied</Badge>;
+    case 'rejected': return <Badge bg="secondary">Rejected</Badge>;
+    case 'undone': return <Badge bg="warning" text="dark">Undone</Badge>;
+    default: return <Badge bg="light" text="dark">Pending</Badge>;
+  }
+};
+
+export default function EtransfersPage() {
+  const isAdmin = useAppSelector(selectIsClubAdmin);
+  const clubId = useAppSelector(selectCurrentClubId);
+  const players = useAppSelector(selectAllPlayers);
+
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [pending, setPending] = useState<EtransferImport[]>([]);
+  const [history, setHistory] = useState<EtransferImport[]>([]);
+  const [rowEdits, setRowEdits] = useState<Record<string, RowEdit>>({});
+
+  const [senderAddress, setSenderAddress] = useState(DEFAULT_ETRANSFER_SENDER_ADDRESS);
+  // null means "custom date" mode; otherwise a rolling window in days (recomputed fresh
+  // from today on every search, so it never goes stale like a saved absolute date would).
+  const [searchWindowDays, setSearchWindowDays] = useState<number | null>(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
+  const [customSearchDate, setCustomSearchDate] = useState('');
+  const [savingSearchDate, setSavingSearchDate] = useState(false);
+  const [searchDateMessage, setSearchDateMessage] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [searchMessage, setSearchMessage] = useState('');
+
+  // Always includes the presets, plus a fallback option for whatever value is
+  // currently loaded/selected (e.g. a club's saved window from before the
+  // preset list changed, or a value only ever set via Firestore directly) —
+  // so the <select> never silently mismatches the real underlying state.
+  const searchWindowOptions = useMemo(() => {
+    const presetDays = new Set(ETRANSFER_SEARCH_WINDOW_PRESETS.map((preset) => preset.days));
+    const options = ETRANSFER_SEARCH_WINDOW_PRESETS.map((preset) => ({
+      days: preset.days,
+      label: `${preset.label} before today`,
+    }));
+    if (searchWindowDays != null && !presetDays.has(searchWindowDays)) {
+      options.push({ days: searchWindowDays, label: `${searchWindowDays} days before today` });
+    }
+    return options;
+  }, [searchWindowDays]);
+
+  const searchAfterDate = useMemo(() => {
+    // Custom mode with no date chosen yet shouldn't silently fall back to the
+    // default window — leave it blank so the Search button stays disabled.
+    if (searchWindowDays == null && !customSearchDate) return '';
+    return resolveEtransferSearchAfterDate({
+      etransferSearchWindowDays: searchWindowDays,
+      etransferSearchAfterDate: customSearchDate,
+    });
+  }, [searchWindowDays, customSearchDate]);
+
+  const [applyError, setApplyError] = useState<Record<string, string>>({});
+  const [batchPreview, setBatchPreview] = useState<EtransferBatchPreview | null>(null);
+  const [batchPreviewing, setBatchPreviewing] = useState(false);
+  const [batchApplying, setBatchApplying] = useState(false);
+  const [batchError, setBatchError] = useState('');
+  const [batchMessage, setBatchMessage] = useState('');
+
+  const [rejectTarget, setRejectTarget] = useState<EtransferImport | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectError, setRejectError] = useState('');
+
+  const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
+  const [dismissError, setDismissError] = useState<Record<string, string>>({});
+
+  const [undoTarget, setUndoTarget] = useState<EtransferImport | null>(null);
+  const [undoReason, setUndoReason] = useState('');
+  const [undoing, setUndoing] = useState(false);
+  const [undoError, setUndoError] = useState('');
+
+  const [mappings, setMappings] = useState<EtransferSenderMapping[]>([]);
+  const [mappingSavingIds, setMappingSavingIds] = useState<Set<string>>(new Set());
+  const [mappingError, setMappingError] = useState('');
+
+  const playerName = useCallback((id: string | null) => {
+    if (!id) return '';
+    const p = players.find((pl) => pl.id === id);
+    return p ? formatPlayerName(p) : 'Unknown player';
+  }, [players]);
+
+  const load = useCallback(async () => {
+    if (!isAdmin) { setLoading(false); return; }
+    setLoading(true);
+    setLoadError('');
+    try {
+      const [club, pendingList, historyList, mappingList] = await Promise.all([
+        clubId ? fetchClub(clubId) : Promise.resolve(null),
+        fetchPendingEtransferImports(),
+        fetchEtransferImportHistory(),
+        fetchEtransferSenderMappings(),
+      ]);
+      setSenderAddress(club?.etransferSenderAddress || DEFAULT_ETRANSFER_SENDER_ADDRESS);
+      if (club?.etransferSearchWindowDays != null) {
+        setSearchWindowDays(club.etransferSearchWindowDays);
+        setCustomSearchDate('');
+      } else if (club?.etransferSearchAfterDate) {
+        setSearchWindowDays(null);
+        setCustomSearchDate(club.etransferSearchAfterDate);
+      } else {
+        setSearchWindowDays(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
+        setCustomSearchDate('');
+      }
+      setPending(pendingList);
+      setHistory(historyList);
+      setMappings(mappingList);
+      setRowEdits((prev) => {
+        const next = { ...prev };
+        for (const imp of pendingList) {
+          if (!next[imp.id]) next[imp.id] = initialRowEdit(imp);
+        }
+        return next;
+      });
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load e-Transfer imports.');
+    } finally {
+      setLoading(false);
+    }
+  }, [isAdmin, clubId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  /** Persists whichever search-cutoff mode (rolling window or custom date) is active. */
+  const persistSearchSetting = async () => {
+    if (!clubId) return;
+    if (searchWindowDays != null) await setClubEtransferSearchWindowDays(clubId, searchWindowDays);
+    else await setClubEtransferSearchAfterDate(clubId, customSearchDate);
+  };
+
+  const handleSearch = async () => {
+    setSearching(true);
+    setSearchError('');
+    setSearchMessage('');
+    try {
+      await persistSearchSetting();
+      const { found, created } = await importEtransferEmails(senderAddress, searchAfterDate);
+      setSearchMessage(
+        found === 0
+          ? 'No new autodeposit emails found.'
+          : created > 0
+            ? `Found ${found} email(s) — ${created} new, added below for review.`
+            : `Found ${found} email(s) — all already reviewed.`
+      );
+      await load();
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : 'Failed to search Gmail.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleSaveSearchDate = async () => {
+    if (!clubId) return;
+    setSavingSearchDate(true);
+    setSearchError('');
+    setSearchDateMessage('');
+    try {
+      await persistSearchSetting();
+      setSearchDateMessage('Saved.');
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : 'Failed to save the search setting.');
+    } finally {
+      setSavingSearchDate(false);
+    }
+  };
+
+  const updateRowEdit = (id: string, patch: Partial<RowEdit>) => {
+    setRowEdits((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  };
+
+  const selectedCount = useMemo(
+    () => pending.filter((imp) => (rowEdits[imp.id] ?? initialRowEdit(imp)).selected).length,
+    [pending, rowEdits]
+  );
+  // Rows without a matched player can never be selected (their checkbox is
+  // disabled), so "select all" should be considered fully checked once every
+  // *selectable* row is selected — not compared against the total pending
+  // count, which would never match whenever any row is unmatched.
+  const selectableCount = useMemo(
+    () => pending.filter((imp) => !!(rowEdits[imp.id] ?? initialRowEdit(imp)).playerId).length,
+    [pending, rowEdits]
+  );
+
+  const handlePreviewBatch = async (only?: EtransferImport[]) => {
+    const selected = only
+      ?? pending.filter((imp) => (rowEdits[imp.id] ?? initialRowEdit(imp)).selected);
+    setBatchError('');
+    setBatchMessage('');
+    setApplyError({});
+    const inputs = selected.flatMap((imp) => {
+      const edit = rowEdits[imp.id] ?? initialRowEdit(imp);
+      const amount = parseFloat(edit.amount);
+      if (!edit.playerId) {
+        setApplyError((prev) => ({ ...prev, [imp.id]: 'Select which player this payment belongs to.' }));
+        return [];
+      }
+      if (!Number.isFinite(amount) || amount <= 0) {
+        setApplyError((prev) => ({ ...prev, [imp.id]: 'Enter a valid positive amount.' }));
+        return [];
+      }
+      return [{
+        importId: imp.id,
+        playerId: edit.playerId,
+        amount,
+        rememberMapping: edit.remember,
+      }];
+    });
+    if (inputs.length !== selected.length || inputs.length === 0) {
+      if (selected.length === 0) setBatchError('Select at least one pending import.');
+      return;
+    }
+
+    setBatchPreviewing(true);
+    try {
+      setBatchPreview(await previewEtransferApprovalBatch(inputs));
+    } catch (err) {
+      setBatchError(err instanceof Error ? err.message : 'Failed to prepare the batch review.');
+    } finally {
+      setBatchPreviewing(false);
+    }
+  };
+
+  const handleApproveBatch = async () => {
+    if (!batchPreview) return;
+    setBatchApplying(true);
+    setBatchError('');
+    try {
+      const result = await applyEtransferApprovalBatch(batchPreview);
+      setBatchPreview(null);
+      setBatchMessage(
+        `Approved ${result.approved} transfer${result.approved === 1 ? '' : 's'} and settled `
+        + `${result.settled} owed session${result.settled === 1 ? '' : 's'} from oldest to newest.`
+      );
+      await load();
+    } catch (err) {
+      setBatchError(err instanceof Error ? err.message : 'Failed to approve the batch.');
+      await load();
+    } finally {
+      setBatchApplying(false);
+    }
+  };
+
+  const handleConfirmReject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rejectTarget) return;
+    if (!rejectReason.trim()) { setRejectError('Enter a reason for rejecting this.'); return; }
+    setRejecting(true);
+    setRejectError('');
+    try {
+      await rejectEtransferImport(rejectTarget.id, rejectReason);
+      setRejectTarget(null);
+      setRejectReason('');
+      await load();
+    } catch (err) {
+      setRejectError(err instanceof Error ? err.message : 'Failed to reject.');
+    } finally {
+      setRejecting(false);
+    }
+  };
+
+  const handleDismiss = async (imp: EtransferImport) => {
+    if (!window.confirm(
+      `Ignore this e-Transfer from ${imp.senderName} for now? It will be picked up again next time you search Gmail.`
+    )) return;
+    setDismissError((prev) => ({ ...prev, [imp.id]: '' }));
+    setDismissingIds((prev) => new Set(prev).add(imp.id));
+    try {
+      await dismissEtransferImport(imp.id);
+      await load();
+    } catch (err) {
+      setDismissError((prev) => ({
+        ...prev,
+        [imp.id]: err instanceof Error ? err.message : 'Failed to dismiss.',
+      }));
+    } finally {
+      setDismissingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(imp.id);
+        return next;
+      });
+    }
+  };
+
+  const handleConfirmUndo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!undoTarget) return;
+    if (!undoReason.trim()) { setUndoError('Enter a reason for undoing this.'); return; }
+    setUndoing(true);
+    setUndoError('');
+    try {
+      await undoEtransferImport(undoTarget.id, undoReason);
+      setUndoTarget(null);
+      setUndoReason('');
+      await load();
+    } catch (err) {
+      setUndoError(err instanceof Error ? err.message : 'Failed to undo.');
+    } finally {
+      setUndoing(false);
+    }
+  };
+
+  const handleMappingPlayerChange = async (mapping: EtransferSenderMapping, playerId: string) => {
+    if (!playerId) return;
+    setMappingError('');
+    setMappingSavingIds((prev) => new Set(prev).add(mapping.id));
+    try {
+      await saveEtransferSenderMapping(mapping.senderEmail, mapping.senderName, playerId);
+      setMappings((prev) => prev.map((m) => (m.id === mapping.id ? { ...m, playerId } : m)));
+    } catch (err) {
+      setMappingError(err instanceof Error ? err.message : 'Failed to update mapping.');
+    } finally {
+      setMappingSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(mapping.id);
+        return next;
+      });
+    }
+  };
+
+  const handleDeleteMapping = async (mapping: EtransferSenderMapping) => {
+    setMappingError('');
+    setMappingSavingIds((prev) => new Set(prev).add(mapping.id));
+    try {
+      await deleteEtransferSenderMapping(mapping.id);
+      setMappings((prev) => prev.filter((m) => m.id !== mapping.id));
+    } catch (err) {
+      setMappingError(err instanceof Error ? err.message : 'Failed to remove mapping.');
+    } finally {
+      setMappingSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(mapping.id);
+        return next;
+      });
+    }
+  };
+
+  const sortedHistory = useMemo(
+    () => [...history].sort((a, b) => (toJSDate(b.emailDate)?.getTime() ?? 0) - (toJSDate(a.emailDate)?.getTime() ?? 0)),
+    [history]
+  );
+
+  // Group history rows sharing a batchId (i.e. approved together in one batch
+  // review) back into one expandable entry, in the order each group's newest
+  // item first appears in the (already date-desc) sorted list.
+  const historyGroups = useMemo(() => {
+    const groups = new Map<string, EtransferImport[]>();
+    for (const imp of sortedHistory) {
+      const key = imp.batchId || `single:${imp.id}`;
+      const list = groups.get(key);
+      if (list) list.push(imp);
+      else groups.set(key, [imp]);
+    }
+    return [...groups.entries()].map(([key, items]) => ({ key, items }));
+  }, [sortedHistory]);
+
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
+  const toggleBatch = (key: string) => {
+    setExpandedBatches((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const renderHistoryRow = (imp: EtransferImport, opts?: { indented?: boolean }) => {
+    const emailDate = toJSDate(imp.emailDate);
+    return (
+      <tr key={imp.id} className={opts?.indented ? 'table-active' : undefined}>
+        <td className={opts?.indented ? 'ps-4' : undefined}>
+          {emailDate ? format(emailDate, 'MMM d, yyyy') : '—'}
+        </td>
+        <td>
+          {imp.senderName}
+          {imp.referenceNumber && (
+            <div className="text-muted small">Ref: {imp.referenceNumber}</div>
+          )}
+        </td>
+        <td>{playerName(imp.matchedPlayerId)}</td>
+        <td>{money(imp.appliedAmount ?? imp.amount)}</td>
+        <td>{statusBadge(imp.status)}</td>
+        <td className="text-muted small">
+          {imp.status === 'rejected' && imp.rejectionReason}
+          {imp.status === 'undone' && imp.undoneReason}
+        </td>
+        <td>
+          {['applied', 'rejected', 'undone'].includes(imp.status) && (
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              onClick={() => { setUndoTarget(imp); setUndoReason(''); setUndoError(''); }}
+            >
+              Undo
+            </Button>
+          )}
+        </td>
+      </tr>
+    );
+  };
+
+  if (!isAdmin) {
+    return (
+      <Container className="py-4">
+        <Alert variant="warning">You must be a club admin to view this page.</Alert>
+      </Container>
+    );
+  }
+
+  if (loading) {
+    return (
+      <Container className="py-4 text-center">
+        <Spinner animation="border" />
+      </Container>
+    );
+  }
+
+  return (
+    <Container className="py-4">
+      <h2>e-Transfer Import</h2>
+      <p className="text-muted">
+        Search Gmail for Interac e-Transfer autodeposit notifications, review the suggested player
+        match and amount, then apply to credit their balance. Nothing is written to a player's
+        balance until you approve or reject each one below.
+      </p>
+
+      <Card className="mb-3">
+        <Card.Body className="d-flex flex-wrap align-items-end gap-3">
+          <Button onClick={handleSearch} disabled={searching || !searchAfterDate}>
+            {searching ? <><Spinner size="sm" animation="border" className="me-2" />Connecting to Gmail…</> : 'Connect Gmail & Search'}
+          </Button>
+          <span className="text-muted small">Searching e-Transfers from: {senderAddress}</span>
+          <Form.Group controlId="etransfer-search-window">
+            <Form.Label className="small mb-1">Search window</Form.Label>
+            <Form.Select
+              size="sm"
+              value={searchWindowDays == null ? 'custom' : String(searchWindowDays)}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === 'custom') {
+                  setSearchWindowDays(null);
+                  setCustomSearchDate((prev) => prev || searchAfterDate);
+                } else {
+                  setSearchWindowDays(Number(value));
+                }
+                setSearchDateMessage('');
+              }}
+              disabled={savingSearchDate}
+            >
+              {searchWindowOptions.map((preset) => (
+                <option key={preset.days} value={preset.days}>{preset.label}</option>
+              ))}
+              <option value="custom">Custom date…</option>
+            </Form.Select>
+          </Form.Group>
+          {searchWindowDays == null && (
+            <Form.Group controlId="etransfer-search-after">
+              <Form.Label className="small mb-1">Search emails after</Form.Label>
+              <Form.Control
+                type="date"
+                size="sm"
+                value={customSearchDate}
+                onChange={(e) => {
+                  setCustomSearchDate(e.target.value);
+                  setSearchDateMessage('');
+                }}
+                disabled={savingSearchDate}
+              />
+            </Form.Group>
+          )}
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            onClick={handleSaveSearchDate}
+            disabled={savingSearchDate || !searchAfterDate}
+          >
+            {savingSearchDate ? <Spinner size="sm" animation="border" /> : 'Save'}
+          </Button>
+          {searchDateMessage && <span className="text-success small">{searchDateMessage}</span>}
+        </Card.Body>
+        {(searchMessage || searchError) && (
+          <Card.Body className="pt-0">
+            {searchMessage && <Alert variant="info" className="mb-0 py-2">{searchMessage}</Alert>}
+            {searchError && <Alert variant="danger" className="mb-0 py-2">{searchError}</Alert>}
+          </Card.Body>
+        )}
+      </Card>
+
+      {loadError && <Alert variant="danger">{loadError}</Alert>}
+      {batchMessage && <Alert variant="success">{batchMessage}</Alert>}
+      {batchError && !batchPreview && <Alert variant="danger">{batchError}</Alert>}
+
+      <Card className="mb-4">
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span>Pending review ({pending.length})</span>
+          {pending.length > 0 && (
+            <Button
+              size="sm"
+              variant="success"
+              onClick={() => handlePreviewBatch()}
+              disabled={batchPreviewing || selectedCount === 0}
+            >
+              {batchPreviewing
+                ? <Spinner size="sm" animation="border" />
+                : `Review batch (${selectedCount})`}
+            </Button>
+          )}
+        </Card.Header>
+        <Card.Body className="p-0">
+          {pending.length === 0 ? (
+            <p className="text-muted p-3 mb-0">Nothing to review — search Gmail to find new e-Transfers.</p>
+          ) : (
+            <Table responsive hover className="mb-0 align-middle">
+              <thead>
+                <tr>
+                  <th>
+                    <Form.Check
+                      aria-label="Select all matched imports"
+                      checked={selectableCount > 0 && selectedCount === selectableCount}
+                      onChange={(e) => {
+                        const selected = e.target.checked;
+                        setRowEdits((prev) => {
+                          const next = { ...prev };
+                          for (const imp of pending) {
+                            const edit = next[imp.id] ?? initialRowEdit(imp);
+                            next[imp.id] = { ...edit, selected: selected && !!edit.playerId };
+                          }
+                          return next;
+                        });
+                      }}
+                    />
+                  </th>
+                  <th>Date</th>
+                  <th>Sender</th>
+                  <th>Memo</th>
+                  <th>Matched player</th>
+                  <th>Amount</th>
+                  <th>Remember?</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pending.map((imp) => {
+                  const edit = rowEdits[imp.id] ?? initialRowEdit(imp);
+                  const emailDate = toJSDate(imp.emailDate);
+                  return (
+                    <tr key={imp.id}>
+                      <td>
+                        <Form.Check
+                          aria-label={`Include ${imp.senderName} in batch`}
+                          checked={edit.selected}
+                          disabled={!edit.playerId || batchApplying}
+                          onChange={(e) => updateRowEdit(imp.id, { selected: e.target.checked })}
+                        />
+                      </td>
+                      <td>{emailDate ? format(emailDate, 'MMM d, yyyy') : '—'}</td>
+                      <td>
+                        {imp.senderName}
+                        {imp.matchSource === 'mapping' && (
+                          <Badge bg="info" className="ms-2">remembered match</Badge>
+                        )}
+                      </td>
+                      <td className="text-muted">
+                        {imp.memo || '—'}
+                        {imp.referenceNumber && (
+                          <div className="small">Ref: {imp.referenceNumber}</div>
+                        )}
+                      </td>
+                      <td>
+                        <Form.Select
+                          size="sm"
+                          value={edit.playerId}
+                          onChange={(e) => {
+                            const playerId = e.target.value;
+                            updateRowEdit(imp.id, {
+                              playerId,
+                              selected: !!playerId,
+                              // Correcting the match away from what a saved mapping
+                              // suggested should default to saving the correction,
+                              // since the old remembered mapping was apparently wrong.
+                              remember: playerId !== '' && playerId !== imp.matchedPlayerId
+                                ? true
+                                : edit.remember,
+                            });
+                          }}
+                          disabled={batchApplying || batchPreviewing}
+                        >
+                          <option value="">— Select player —</option>
+                          {players.map((p) => (
+                            <option key={p.id} value={p.id}>{formatPlayerName(p)}</option>
+                          ))}
+                        </Form.Select>
+                      </td>
+                      <td>
+                        <Form.Control
+                          size="sm"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          style={{ width: 100 }}
+                          value={edit.amount}
+                          onChange={(e) => updateRowEdit(imp.id, { amount: e.target.value })}
+                          disabled={batchApplying || batchPreviewing}
+                        />
+                      </td>
+                      <td title={`Remember "${imp.senderName}" → this player for future imports`}>
+                        <Form.Check
+                          type="checkbox"
+                          aria-label={`Remember "${imp.senderName}" → this player for future imports`}
+                          checked={edit.remember}
+                          onChange={(e) => updateRowEdit(imp.id, { remember: e.target.checked })}
+                          disabled={batchApplying || batchPreviewing}
+                        />
+                      </td>
+                      <td className="text-nowrap">
+                        <Button
+                          size="sm"
+                          variant="success"
+                          className="me-2"
+                          disabled={batchApplying || batchPreviewing}
+                          onClick={() => handlePreviewBatch([imp])}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline-danger"
+                          disabled={batchApplying || batchPreviewing}
+                          onClick={() => { setRejectTarget(imp); setRejectReason(''); setRejectError(''); }}
+                        >
+                          Reject
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline-secondary"
+                          className="ms-2"
+                          disabled={batchApplying || batchPreviewing || dismissingIds.has(imp.id)}
+                          onClick={() => handleDismiss(imp)}
+                          title="Ignore this time — it'll be picked up again on the next Gmail search"
+                          aria-label={`Ignore ${imp.senderName} for now`}
+                        >
+                          {dismissingIds.has(imp.id) ? <Spinner size="sm" animation="border" /> : '×'}
+                        </Button>
+                        {applyError[imp.id] && (
+                          <div className="text-danger small mt-1">{applyError[imp.id]}</div>
+                        )}
+                        {dismissError[imp.id] && (
+                          <div className="text-danger small mt-1">{dismissError[imp.id]}</div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          )}
+        </Card.Body>
+      </Card>
+
+      <Card>
+        <Card.Header>History</Card.Header>
+        <Card.Body className="p-0">
+          {sortedHistory.length === 0 ? (
+            <p className="text-muted p-3 mb-0">No reviewed imports yet.</p>
+          ) : (
+            <Table responsive hover className="mb-0 align-middle">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Sender</th>
+                  <th>Player</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Note</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyGroups.map(({ key, items }) => {
+                  if (items.length === 1) {
+                    return renderHistoryRow(items[0]);
+                  }
+
+                  const isExpanded = expandedBatches.has(key);
+                  const totalAmount = items.reduce((sum, imp) => sum + (imp.appliedAmount ?? imp.amount), 0);
+                  const senderCount = new Set(items.map((imp) => imp.senderName)).size;
+                  const playerCount = new Set(items.map((imp) => imp.matchedPlayerId).filter(Boolean)).size;
+                  const settledCount = items.reduce((sum, imp) => sum + (imp.autoSettledSessionIds?.length ?? 0), 0);
+                  const approvedAt = items
+                    .map((imp) => toJSDate(imp.reviewedAt))
+                    .filter((d): d is Date => !!d)
+                    .sort((a, b) => b.getTime() - a.getTime())[0];
+
+                  return (
+                    <React.Fragment key={key}>
+                      <tr
+                        className="table-light"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => toggleBatch(key)}
+                      >
+                        <td>{approvedAt ? format(approvedAt, 'MMM d, yyyy') : '—'}</td>
+                        <td>{senderCount} sender{senderCount === 1 ? '' : 's'}</td>
+                        <td>{playerCount} player{playerCount === 1 ? '' : 's'}</td>
+                        <td>{money(totalAmount)}</td>
+                        <td>
+                          {/* Undoing an item takes it back to "pending" (not "undone") and
+                              out of this history query entirely, so every import still
+                              grouped under a batchId here is always still applied. */}
+                          {statusBadge('applied')}
+                        </td>
+                        <td className="text-muted small">
+                          {settledCount > 0 && `${settledCount} session${settledCount === 1 ? '' : 's'} settled`}
+                        </td>
+                        <td>
+                          <Button
+                            size="sm"
+                            variant="outline-secondary"
+                            onClick={(e) => { e.stopPropagation(); toggleBatch(key); }}
+                          >
+                            {isExpanded ? '▲ Hide' : `▼ ${items.length} e-transfers`}
+                          </Button>
+                        </td>
+                      </tr>
+                      {isExpanded && items.map((imp) => renderHistoryRow(imp, { indented: true }))}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </Table>
+          )}
+        </Card.Body>
+      </Card>
+
+      <Card className="mt-4">
+        <Card.Header>Saved sender mappings</Card.Header>
+        <Card.Body className="p-0">
+          <p className="text-muted p-3 pb-0 mb-0">
+            Remembered matches between a Gmail sender (their e-Transfer name/email, which may differ
+            from their name in the app) and a player. Change the player or remove a mapping below —
+            removing one just means that sender's next email will need to be matched again, either
+            automatically by name or manually.
+          </p>
+          {mappingError && <Alert variant="danger" className="mx-3 mt-3 mb-0 py-2">{mappingError}</Alert>}
+          {mappings.length === 0 ? (
+            <p className="text-muted p-3 mb-0">No saved mappings yet.</p>
+          ) : (
+            <Table responsive hover className="mb-0 align-middle">
+              <thead>
+                <tr>
+                  <th>Gmail sender name</th>
+                  <th>Gmail sender email</th>
+                  <th>Mapped player</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {mappings.map((mapping) => (
+                  <tr key={mapping.id}>
+                    <td>{mapping.senderName}</td>
+                    <td className="text-muted">{mapping.senderEmail || '—'}</td>
+                    <td>
+                      <Form.Select
+                        size="sm"
+                        value={mapping.playerId}
+                        disabled={mappingSavingIds.has(mapping.id)}
+                        onChange={(e) => handleMappingPlayerChange(mapping, e.target.value)}
+                        style={{ maxWidth: 220 }}
+                      >
+                        {players.map((p) => (
+                          <option key={p.id} value={p.id}>{formatPlayerName(p)}</option>
+                        ))}
+                      </Form.Select>
+                    </td>
+                    <td>
+                      <Button
+                        size="sm"
+                        variant="outline-danger"
+                        disabled={mappingSavingIds.has(mapping.id)}
+                        onClick={() => handleDeleteMapping(mapping)}
+                      >
+                        {mappingSavingIds.has(mapping.id) ? <Spinner size="sm" animation="border" /> : 'Remove'}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Card.Body>
+      </Card>
+
+      <Modal
+        show={!!batchPreview}
+        onHide={() => { if (!batchApplying) setBatchPreview(null); }}
+        size="lg"
+        centered
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>Review e-Transfer batch</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {batchPreview && (
+            <>
+              <p>
+                Confirm the player and amount for every transfer. Covered unpaid sessions will be
+                settled from each player's balance in oldest-to-newest order.
+              </p>
+              <h6>Transfers to approve</h6>
+              <Table responsive size="sm">
+                <thead>
+                  <tr><th>Sender</th><th>Player</th><th>Amount</th></tr>
+                </thead>
+                <tbody>
+                  {batchPreview.approvals.map((approval) => (
+                    <tr key={approval.importId}>
+                      <td>{approval.senderName}</td>
+                      <td>{playerName(approval.playerId)}</td>
+                      <td>{money(approval.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <h6>Sessions to settle from balance</h6>
+              {batchPreview.settlements.length === 0 ? (
+                <p className="text-muted">
+                  No owed session is fully covered by the resulting balance
+                  {Object.keys(batchPreview.endingBalances).length === 1 ? '' : 's'} below.
+                </p>
+              ) : (
+                <Table responsive size="sm">
+                  <thead>
+                    <tr><th>Date</th><th>Player</th><th>Cost</th></tr>
+                  </thead>
+                  <tbody>
+                    {batchPreview.settlements.map((settlement) => (
+                      <tr key={`${settlement.sessionId}-${settlement.playerId}`}>
+                        <td>{format(settlement.sessionDate, 'MMM d, yyyy')}</td>
+                        <td>{playerName(settlement.playerId)}</td>
+                        <td>{money(settlement.cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              )}
+              {batchPreview.blockingSessions.length > 0 && (
+                <p className="text-muted small mb-0">
+                  {batchPreview.blockingSessions.map((blocking) => (
+                    <span key={`${blocking.sessionId}-${blocking.playerId}`} className="d-block">
+                      Note: {playerName(blocking.playerId)}'s oldest remaining unpaid session —
+                      {' '}{money(blocking.cost)} on {format(blocking.sessionDate, 'MMM d, yyyy')} — isn't
+                      fully covered by the resulting balance of {money(blocking.availableBalance)}, so it
+                      (and any newer unpaid sessions) will stay unsettled even if one of them is smaller.
+                    </span>
+                  ))}
+                </p>
+              )}
+              <p className="text-muted small mb-0">
+                Resulting balance{Object.keys(batchPreview.endingBalances).length === 1 ? '' : 's'}:{' '}
+                {Object.entries(batchPreview.endingBalances)
+                  .map(([playerId, balance]) => `${playerName(playerId)}: ${money(balance)}`)
+                  .join(', ')}
+              </p>
+              {batchError && <Alert variant="danger" className="mb-0 mt-2">{batchError}</Alert>}
+            </>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setBatchPreview(null)} disabled={batchApplying}>
+            Cancel
+          </Button>
+          <Button variant="success" onClick={handleApproveBatch} disabled={batchApplying}>
+            {batchApplying
+              ? <><Spinner size="sm" animation="border" className="me-2" />Approving…</>
+              : `Approve batch (${batchPreview?.approvals.length ?? 0})`}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      <Modal show={!!rejectTarget} onHide={() => { if (!rejecting) setRejectTarget(null); }} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Reject e-Transfer import</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleConfirmReject}>
+          <Modal.Body>
+            {rejectTarget && (
+              <p className="text-muted">
+                This email ({money(rejectTarget.amount)} from {rejectTarget.senderName}) will be marked
+                rejected. No balance is changed.
+              </p>
+            )}
+            <Form.Group className="mb-3" controlId="etransfer-reject-reason">
+              <Form.Label>Reason <span className="text-danger">*</span></Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={2}
+                placeholder="e.g. not a club payment"
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                disabled={rejecting}
+                autoFocus
+              />
+              <div className="mt-2">
+                <Button
+                  size="sm"
+                  variant="outline-secondary"
+                  type="button"
+                  disabled={rejecting}
+                  onClick={() => setRejectReason('Not badminton')}
+                >
+                  Not badminton
+                </Button>
+              </div>
+            </Form.Group>
+            {rejectError && <Alert variant="danger" className="py-2 mb-0">{rejectError}</Alert>}
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setRejectTarget(null)} disabled={rejecting}>Cancel</Button>
+            <Button variant="danger" type="submit" disabled={rejecting}>
+              {rejecting ? <Spinner size="sm" animation="border" /> : 'Reject'}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+
+      <Modal show={!!undoTarget} onHide={() => { if (!undoing) setUndoTarget(null); }} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Undo e-Transfer import</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleConfirmUndo}>
+          <Modal.Body>
+            {undoTarget && (
+              <p className="text-muted">
+                {undoTarget.status === 'applied'
+                  ? `${money(undoTarget.appliedAmount ?? undoTarget.amount)} will be reversed from ${playerName(undoTarget.matchedPlayerId)}'s balance. `
+                  : 'No player balance will be changed. '}
+                The import will return to pending review. The player suggestion will be matched
+                again. The original decision and ledger entries are kept for the audit record.
+              </p>
+            )}
+            <Form.Group className="mb-3" controlId="etransfer-undo-reason">
+              <Form.Label>Reason for undoing this <span className="text-danger">*</span></Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={2}
+                placeholder="e.g. wrong player matched"
+                value={undoReason}
+                onChange={(e) => setUndoReason(e.target.value)}
+                disabled={undoing}
+                autoFocus
+              />
+            </Form.Group>
+            {undoError && <Alert variant="danger" className="py-2 mb-0">{undoError}</Alert>}
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setUndoTarget(null)} disabled={undoing}>Cancel</Button>
+            <Button variant="warning" type="submit" disabled={undoing}>
+              {undoing ? <Spinner size="sm" animation="border" /> : 'Undo'}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+    </Container>
+  );
+}

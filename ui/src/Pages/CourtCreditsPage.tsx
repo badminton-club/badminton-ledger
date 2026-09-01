@@ -70,6 +70,7 @@ export default function CourtCreditsPage() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [error,            setError]            = useState<string | null>(null);
   const [formError,        setFormError]        = useState('');
+  const [historyError,     setHistoryError]     = useState('');
   const [showAddModal,     setShowAddModal]     = useState(false);
   const [sortConfig,       setSortConfig]       = useState<{ key: SortKey; direction: SortDir }>({
     key: 'purchaseDate', direction: 'desc',
@@ -99,12 +100,20 @@ export default function CourtCreditsPage() {
 
   // ── Load history when accordion opens ────────────────────────────────────────
   useEffect(() => {
-    if (!activeKey || editingId) { setHistory([]); return; }
+    setHistoryError('');
+    // Only skip loading when the batch actually being edited is the open one —
+    // an in-progress edit on a different (now-collapsed) batch shouldn't block
+    // history from loading for the one currently expanded.
+    if (!activeKey || editingId === activeKey) { setHistory([]); return; }
+    // Guards against a slower response for a previously-selected batch resolving
+    // after a newer selection and overwriting its history with stale data.
+    let cancelled = false;
     setIsLoadingHistory(true);
     Promise.all([
       fetchCourtCreditAdjustments(activeKey),
       fetchCourtCreditUsage(activeKey),
     ]).then(([adjustments, usages]) => {
+      if (cancelled) return;
       const adj = adjustments.map(a => ({
         ...a,
         type:      'adjustment' as const,
@@ -116,8 +125,9 @@ export default function CourtCreditsPage() {
         eventDate: (u as any).date?.toDate?.() ?? new Date((u as any).date ?? 0),
       }));
       setHistory([...adj, ...use].sort((a, b) => compareDesc(a.eventDate, b.eventDate)));
-    }).catch(() => setFormError('Failed to load history.'))
-      .finally(() => setIsLoadingHistory(false));
+    }).catch(() => { if (!cancelled) setHistoryError('Failed to load history.'); })
+      .finally(() => { if (!cancelled) setIsLoadingHistory(false); });
+    return () => { cancelled = true; };
   }, [activeKey, editingId]);
 
   // ── Sorting ──────────────────────────────────────────────────────────────────
@@ -189,6 +199,7 @@ export default function CourtCreditsPage() {
     if (isNaN(hours)     || hours <= 0)     { setFormError('Valid hours purchased required.');   return; }
     if (isNaN(cost)      || cost < 0)       { setFormError('Valid total cost required.');        return; }
     if (isNaN(remaining) || remaining < 0)  { setFormError('Valid remaining hours required.');   return; }
+    if (remaining > hours)                  { setFormError(`Remaining hours can't exceed the ${hours} hours purchased.`); return; }
     if (!editReason.trim())                  { setFormError('Reason for edit is required.');      return; }
 
     setIsSaving(true);
@@ -198,7 +209,17 @@ export default function CourtCreditsPage() {
       await updateCourtCreditBatch(
         editingId,
         original,
-        { ...editForm, name: editForm.name.trim(), hoursPurchased: hours, totalCost: cost, remainingHours: remaining },
+        {
+          ...editForm,
+          name: editForm.name.trim(),
+          hoursPurchased: hours,
+          totalCost: cost,
+          remainingHours: remaining,
+          // hoursPurchased/totalCost drive the per-hour rate — recompute it here
+          // so a correction to either doesn't leave future sessions billed at a
+          // stale rate.
+          costPerHour: hours > 0 ? cost / hours : original.costPerHour,
+        },
         editReason,
         auth.currentUser?.uid ?? 'admin',
         currentUserName(),
@@ -354,17 +375,31 @@ export default function CourtCreditsPage() {
                       <hr />
                       <h5>Batch History</h5>
                       {isLoadingHistory && <Spinner animation="border" size="sm" />}
-                      {!isLoadingHistory && history.length === 0 && activeKey === batch.id && (
+                      {!isLoadingHistory && historyError && activeKey === batch.id && (
+                        <Alert variant="danger" dismissible onClose={() => setHistoryError('')}>{historyError}</Alert>
+                      )}
+                      {!isLoadingHistory && !historyError && history.length === 0 && activeKey === batch.id && (
                         <p className="text-muted">No usage or adjustments recorded.</p>
                       )}
-                      {!isLoadingHistory && history.length > 0 && activeKey === batch.id && (() => {
+                      {!isLoadingHistory && !historyError && history.length > 0 && activeKey === batch.id && (() => {
                         // Remaining hours after each event, reconstructed from current
                         // remaining by walking newest → oldest and adding back usage.
+                        // A manual adjustment can also directly change remainingHours
+                        // (e.g. a recount) — reverse that too, or every row OLDER than
+                        // such an adjustment shows an incorrect remaining total.
                         const remainingByRow = new Map<HistoryItem, number>();
                         let remaining = batch.remainingHours ?? 0;
                         for (const item of history) {
                           remainingByRow.set(item, remaining);
-                          if (item.type === 'sessionUsage') remaining += (item.hoursUsed as number) ?? 0;
+                          if (item.type === 'sessionUsage') {
+                            remaining += (item.hoursUsed as number) ?? 0;
+                          } else if (item.type === 'adjustment') {
+                            const changes = item.changes as { field: string; oldValue: unknown; newValue: unknown }[] | undefined;
+                            const remainingChange = changes?.find((c) => c.field === 'remainingHours');
+                            if (remainingChange) {
+                              remaining += (Number(remainingChange.oldValue) || 0) - (Number(remainingChange.newValue) || 0);
+                            }
+                          }
                         }
                         return (
                         <Table striped bordered hover responsive size="sm">
@@ -377,7 +412,11 @@ export default function CourtCreditsPage() {
                                   <td style={style}>{format(item.eventDate, 'yyyy-MM-dd')}</td>
                                   <td style={style}>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
                                   <td style={style}>
-                                    {item.type === 'sessionUsage' && `Used: ${item.hoursUsed as number} hrs`}
+                                    {item.type === 'sessionUsage' && (
+                                      (item.hoursUsed as number) < 0
+                                        ? `Returned: ${Math.abs(item.hoursUsed as number)} hrs`
+                                        : `Used: ${item.hoursUsed as number} hrs`
+                                    )}
                                     {item.type === 'adjustment' && (
                                       <>
                                         Reason: {item.reason as string}

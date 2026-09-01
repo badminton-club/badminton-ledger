@@ -8,6 +8,7 @@ import {
   fetchMemberRole,
   fetchClub,
   addClubToUser,
+  removeClubFromUser,
   setLastVisitedClub,
 } from '../../services/firebase';
 import { auth, setCurrentClubId } from '../../services/firebase/client';
@@ -39,7 +40,15 @@ export function useClubBootstrap(): void {
 
   // Auth → club list → current club
   useEffect(() => {
+    // Tracks the most recent auth event so a slower-resolving fetch for a
+    // previous user (e.g. right after a fast sign-out/account-switch) can't
+    // overwrite state with stale data once a newer auth event has already
+    // been processed.
+    let latestUid: string | null = null;
     const unsubscribe = onAuthStateChangedListener(async (user) => {
+      const uid = user?.uid ?? null;
+      latestUid = uid;
+
       if (!user) {
         setCurrentClubId(null);
         dispatch(resetClub());
@@ -53,21 +62,35 @@ export function useClubBootstrap(): void {
       if (clubParam) {
         try { await addClubToUser(user.uid, clubParam); } catch { /* ignore */ }
       }
+      if (latestUid !== uid) return;
 
       const [clubs, profile] = await Promise.all([
         fetchUserClubs(user.uid),
         fetchUserProfile(user.uid),
       ]);
-      dispatch(setClubs(clubs));
+      if (latestUid !== uid) return;
+
+      // Self-heal: a club becomes inaccessible if this user was removed as a
+      // member (or the club itself was deleted), but nothing else can scrub
+      // it from this user's own saved list — an admin can only ever append
+      // one club id to another user's profile, never remove one (see
+      // firestore.rules) — so a dead entry would otherwise linger forever,
+      // showing up broken in the switcher and possibly auto-selected below.
+      const deadClubIds = clubs.filter((c) => c.role === null).map((c) => c.id);
+      const liveClubs = deadClubIds.length > 0 ? clubs.filter((c) => c.role !== null) : clubs;
+      if (deadClubIds.length > 0) {
+        await Promise.all(deadClubIds.map((id) => removeClubFromUser(user.uid, id).catch(() => { /* best effort */ })));
+      }
+      dispatch(setClubs(liveClubs));
 
       const stored = localStorage.getItem(LS_KEY);
       const pick =
-        (clubParam && clubs.some((c) => c.id === clubParam) ? clubParam : null) ??
-        (profile.lastVisitedClub && clubs.some((c) => c.id === profile.lastVisitedClub)
+        (clubParam && liveClubs.some((c) => c.id === clubParam) ? clubParam : null) ??
+        (profile.lastVisitedClub && liveClubs.some((c) => c.id === profile.lastVisitedClub)
           ? profile.lastVisitedClub
           : null) ??
-        (stored && clubs.some((c) => c.id === stored) ? stored : null) ??
-        clubs[0]?.id ??
+        (stored && liveClubs.some((c) => c.id === stored) ? stored : null) ??
+        liveClubs[0]?.id ??
         null;
 
       dispatch(setCurrentClub(pick));

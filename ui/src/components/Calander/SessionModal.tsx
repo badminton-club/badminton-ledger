@@ -192,7 +192,7 @@ export default function SessionModal({
 
 async function resolveAll(items: NameResolutionItem[], dispatch: ReturnType<typeof useAppDispatch>) {
     await Promise.all(
-        items.map(async (item, index) => {
+        items.map(async (item) => {
             try {
                 const candidates = await findPlayersByName(item.editableName);
                 let patch: Partial<NameResolutionItem>;
@@ -211,10 +211,10 @@ async function resolveAll(items: NameResolutionItem[], dispatch: ReturnType<type
 
                 // Import updateResolutionItem inline to avoid circular dep in the helper
                 const { updateResolutionItem } = await import("../../features/SessionModal/sessionModalSlice");
-                dispatch(updateResolutionItem({ index, patch }));
+                dispatch(updateResolutionItem({ id: item.id, patch }));
             } catch {
                 const { updateResolutionItem } = await import("../../features/SessionModal/sessionModalSlice");
-                dispatch(updateResolutionItem({ index, patch: { status: "failed" } }));
+                dispatch(updateResolutionItem({ id: item.id, patch: { status: "failed" } }));
             }
         }),
     );

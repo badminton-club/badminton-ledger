@@ -48,12 +48,11 @@ const sessionModalSlice = createSlice({
     },
     updateResolutionItem: (
       state,
-      action: PayloadAction<{ index: number; patch: Partial<NameResolutionItem> }>
+      action: PayloadAction<{ id: string; patch: Partial<NameResolutionItem> }>
     ) => {
-      const { index, patch } = action.payload;
-      if (state.resolutionItems[index]) {
-        state.resolutionItems[index] = { ...state.resolutionItems[index], ...patch };
-      }
+      const { id, patch } = action.payload;
+      const item = state.resolutionItems.find((i) => i.id === id);
+      if (item) Object.assign(item, patch);
     },
     setConfirmedPlayers: (state, action: PayloadAction<ConfirmedPlayer[]>) => {
       state.confirmedPlayers = action.payload;

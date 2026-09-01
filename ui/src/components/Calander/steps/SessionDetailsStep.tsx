@@ -61,11 +61,20 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
   const [playerToAdd, setPlayerToAdd] = useState('');
   const [showNewPlayerModal, setShowNewPlayerModal] = useState(false);
 
-  const [courtCount,      setCourtCount]      = useState(session ? String(
-    Math.round((session.courtCreditUsage?.reduce((s, c) => s + c.hoursUsed, 0) ?? 0) / 2)
-  ) : '4');
-  const [useCredits,      setUseCredits]      = useState(true);
-  const [manualCourtCost, setManualCourtCost] = useState('');
+  // When editing an existing session, an empty courtCreditUsage with a nonzero
+  // court cost means the courts were manually priced (not funded from a court
+  // credit batch) — reconstruct that mode instead of defaulting to credits,
+  // which would otherwise silently zero out the court cost/count on save.
+  const editingManualCourtCost =
+    !!session && !session.courtCreditUsage?.length && session.totalCourtCost > 0;
+
+  const [courtCount,      setCourtCount]      = useState(session ? String(session.courtCount) : '4');
+  const [useCredits,      setUseCredits]      = useState(!editingManualCourtCost);
+  const [manualCourtCost, setManualCourtCost] = useState(
+    editingManualCourtCost && session!.courtCount > 0
+      ? String(session!.totalCourtCost / session!.courtCount)
+      : ''
+  );
   const [birdieUsage,     setBirdieUsage]     = useState<BirdieUsage[]>(
     session?.birdieUsage?.length ? session.birdieUsage : [{ ...EMPTY_BIRDIE }]
   );
@@ -196,17 +205,25 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
     dispatch(setConfirmedPlayers([...confirmedPlayers, { id, percentage: 1 }]));
   };
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onSave({
-      courtCount:        parseFloat(courtCount),
-      totalCourtCost,
-      totalBirdieCost,
-      totalSessionCost,
-      birdieUsage:       birdieUsage.filter(u => u.id && u.quantity > 0),
-      courtCreditUsage:  courtCreditAllocation.map(a => ({ id: a.id, hoursUsed: a.hoursUsed })),
-      players:           playerCosts,
-    });
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await onSave({
+        courtCount:        parseFloat(courtCount),
+        totalCourtCost,
+        totalBirdieCost,
+        totalSessionCost,
+        birdieUsage:       birdieUsage.filter(u => u.id && u.quantity > 0),
+        courtCreditUsage:  courtCreditAllocation.map(a => ({ id: a.id, hoursUsed: a.hoursUsed })),
+        players:           playerCosts,
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -364,8 +381,10 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
       </div>
 
       <div className="d-flex justify-content-end gap-2">
-        <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-        <Button variant="primary"   type="submit">Save Session</Button>
+        <Button variant="secondary" onClick={onCancel} disabled={isSubmitting}>Cancel</Button>
+        <Button variant="primary"   type="submit" disabled={isSubmitting || notEnoughCredits}>
+          {isSubmitting ? 'Saving…' : 'Save Session'}
+        </Button>
       </div>
     </Form>
 

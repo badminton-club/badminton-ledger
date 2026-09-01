@@ -18,6 +18,9 @@ import {
   removeClubFromUser,
   removeClubMember,
   setClubTabEnabled,
+  setClubEtransferSearchAfterDate,
+  setClubEtransferSearchWindowDays,
+  resetClubEtransferSearchSetting,
   setLastVisitedClub,
   setMemberPlayer,
   submitLinkRequest,
@@ -31,7 +34,7 @@ import {
   seedUserDoc,
   TEST_CLUB_ID,
 } from '../../../test-utils/firebaseTestHelpers';
-import { __getDocData, __seedDoc, Timestamp } from '../../../test-utils/fakeFirestore';
+import { __getAllPaths, __getDocData, __seedDoc, Timestamp } from '../../../test-utils/fakeFirestore';
 
 beforeEach(() => {
   resetFirebaseTestState();
@@ -183,6 +186,16 @@ describe('addClubMember', () => {
       role: 'admin',
       playerId: 'player-1',
       addedAt: expect.any(Timestamp),
+    });
+  });
+
+  it("saves the club onto the new member's own profile, so it shows up in their club switcher", async () => {
+    seedUserDoc('user-1', { clubs: ['other-club'], lastVisitedClub: 'other-club' });
+
+    await addClubMember('club-a', 'user-1', 'member');
+
+    expect(__getDocData('users/user-1')).toMatchObject({
+      clubs: ['other-club', 'club-a'],
     });
   });
 });
@@ -399,6 +412,45 @@ describe('setClubTabEnabled', () => {
   });
 });
 
+describe('e-Transfer search cutoff settings', () => {
+  it('setClubEtransferSearchWindowDays saves the rolling window and clears any custom date', async () => {
+    seedClubMetaDoc('club-a', { name: 'Alpha Club', etransferSearchAfterDate: '2026-01-01' });
+
+    await setClubEtransferSearchWindowDays('club-a', 14);
+
+    expect(__getDocData('clubs/club-a')).toMatchObject({
+      etransferSearchWindowDays: 14,
+      etransferSearchAfterDate: null,
+    });
+  });
+
+  it('setClubEtransferSearchAfterDate saves a custom date and clears any rolling window', async () => {
+    seedClubMetaDoc('club-a', { name: 'Alpha Club', etransferSearchWindowDays: 30 });
+
+    await setClubEtransferSearchAfterDate('club-a', '2026-05-01');
+
+    expect(__getDocData('clubs/club-a')).toMatchObject({
+      etransferSearchAfterDate: '2026-05-01',
+      etransferSearchWindowDays: null,
+    });
+  });
+
+  it('resetClubEtransferSearchSetting clears both, reverting to the default rolling window', async () => {
+    seedClubMetaDoc('club-a', {
+      name: 'Alpha Club',
+      etransferSearchWindowDays: 30,
+      etransferSearchAfterDate: '2026-05-01',
+    });
+
+    await resetClubEtransferSearchSetting('club-a');
+
+    expect(__getDocData('clubs/club-a')).toMatchObject({
+      etransferSearchWindowDays: null,
+      etransferSearchAfterDate: null,
+    });
+  });
+});
+
 describe('deleteClub', () => {
   it('refuses to delete while any club-scoped data collection still has documents', async () => {
     seedClubMetaDoc('club-a', { name: 'Alpha Club' });
@@ -446,5 +498,19 @@ describe('deleteClub', () => {
 
     expect(__getDocData('clubs/club-a/linkRequests/pending-uid')).toBeUndefined();
     expect(__getDocData('clubs/club-a/profileEditRequests/pending-uid-2')).toBeUndefined();
+  });
+
+  it('deletes a club with more than 500 members by committing multiple batches', async () => {
+    seedClubMetaDoc('club-a', { name: 'Big Club' });
+    seedMemberDoc('owner-1', { role: 'superAdmin' }, 'club-a');
+    seedUserDoc('owner-1', { clubs: ['club-a'], lastVisitedClub: 'club-a' });
+    for (let i = 0; i < 501; i += 1) {
+      __seedDoc(`clubs/club-a/members/member-${i}`, { role: 'member' });
+    }
+
+    await deleteClub('club-a', 'owner-1');
+
+    expect(__getDocData('clubs/club-a')).toBeUndefined();
+    expect(__getAllPaths().filter((p) => p.startsWith('clubs/club-a/'))).toHaveLength(0);
   });
 });

@@ -87,6 +87,26 @@ describe('AddPlayerModal', () => {
     expect(await screen.findByText(/already exists\. Add a description/)).toBeInTheDocument();
   });
 
+  it('rejects an email already used by another player, since email drives link-request auto-matching', async () => {
+    const user = userEvent.setup();
+    const onAddPlayer = jest.fn();
+    renderWithProviders(
+      <AddPlayerModal
+        show
+        onHide={jest.fn()}
+        onAddPlayer={onAddPlayer}
+        existingPlayers={[makePlayer({ email: 'ada@example.com' })]}
+      />
+    );
+
+    await user.type(firstNameInput(), 'Grace');
+    await user.type(emailInput(), 'ADA@example.com'); // case-insensitive match
+    await user.click(screen.getByRole('button', { name: 'Add Player' }));
+
+    expect(await screen.findByText(/Another player already uses "ADA@example.com"/)).toBeInTheDocument();
+    expect(onAddPlayer).not.toHaveBeenCalled();
+  });
+
   it('submits trimmed, normalized data and closes the modal on success', async () => {
     const user = userEvent.setup();
     const onAddPlayer = jest.fn().mockResolvedValue(undefined);

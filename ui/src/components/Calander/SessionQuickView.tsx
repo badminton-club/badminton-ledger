@@ -6,6 +6,7 @@ import { useAppSelector } from "../../hooks";
 import { selectPlayerById } from "../../features/players/playersSlice";
 import { selectIsClubAdmin } from "../../features/club/clubSlice";
 import type { RootState } from "../../store";
+import { isSessionPlayerUnpaid } from "../../utils/sessionPayment";
 
 interface Props {
     date: Date;
@@ -53,7 +54,7 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
 
     const session = sessions[Math.min(activeIndex, sessions.length - 1)];
     const totalPlayers = session.players.length;
-    const unpaidPlayers = session.players.filter((p) => !p.paid && !p.comped).length;
+    const unpaidPlayers = session.players.filter(isSessionPlayerUnpaid).length;
     const totalBirds = session.birdieUsage.reduce((s, u) => s + u.quantity, 0);
     const allPaid = unpaidPlayers === 0 && totalPlayers > 0;
 
@@ -165,6 +166,7 @@ function StatCard({ label, value, sub, subColor }: { label: string; value: strin
 function PlayerRow({ playerId, cost, paid, comped }: { playerId: string; cost: number; paid: boolean; comped: boolean; }) {
     const player = useAppSelector((s: RootState) => selectPlayerById(s, playerId));
     const name = player ? [player.firstName, player.lastName].filter(Boolean).join(" ") : playerId;
+    const settled = paid || comped || cost === 0;
 
     return (
         <div style={{...styles.playerRow}}>
@@ -173,7 +175,7 @@ function PlayerRow({ playerId, cost, paid, comped }: { playerId: string; cost: n
             <span
                 style={{
                     ...styles.playerCost,
-                    color: paid||comped ? "var(--color-text-success)": "var(--color-text-danger)",
+                    color: settled ? "var(--color-text-success)": "var(--color-text-danger)",
                 }}
             >
                 ${cost.toFixed(2)}
@@ -181,11 +183,11 @@ function PlayerRow({ playerId, cost, paid, comped }: { playerId: string; cost: n
             <span
                 style={{
                     ...styles.paidPill,
-                    background: paid ||comped  ? "var(--color-background-success)" : "var(--color-background-danger)",
-                    color: paid ||comped  ? "var(--color-text-success)" : "var(--color-text-danger)",
+                    background: settled ? "var(--color-background-success)" : "var(--color-background-danger)",
+                    color: settled ? "var(--color-text-success)" : "var(--color-text-danger)",
                 }}
             >
-                {paid ||comped ? "Paid" : "Unpaid"}
+                {settled ? "Paid" : "Unpaid"}
             </span>
         </div>
     );

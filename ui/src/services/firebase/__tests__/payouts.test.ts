@@ -267,6 +267,40 @@ describe('payOwner', () => {
     const summary = await fetchOwnerPayoutSummary();
     expect(summary.pending).toBe(50);
   });
+
+  it('recomputes the pending balance from fresh data inside the transaction, not the stale snapshot read before it', async () => {
+    // $100 collected, one existing $30 payout already recorded (pending = $70
+    // from the outer, non-transactional read used to size the request).
+    seedClubDoc('balanceLedger', 'l1', { reason: 'payment', delta: 100, createdAt: ts('2026-01-01') });
+    seedClubDoc('payouts', 'o1', { amount: 30 });
+
+    const firestore = require('firebase/firestore');
+    const originalGetDocs = firestore.getDocs;
+    let triggered = false;
+    const getDocsSpy = jest.spyOn(firestore, 'getDocs').mockImplementation(async (...args: unknown[]) => {
+      // Set synchronously, before any await, so it fires on only the very
+      // first of the several concurrent getDocs calls payOwner kicks off.
+      const shouldTrigger = !triggered;
+      triggered = true;
+      const result = await originalGetDocs(...args);
+      if (shouldTrigger) {
+        // Simulate a concurrent admin voiding the existing payout —
+        // reopening that $30 — in the gap right after payOwner's outer
+        // reads but before its transaction re-reads the same payout doc.
+        await voidOwnerPayout('o1', 'recorded by mistake');
+      }
+      return result;
+    });
+
+    const paid = await payOwner(); // no custom amount — pays "the full balance"
+    getDocsSpy.mockRestore();
+
+    // Must reflect the FRESH pending ($100, since the $30 payout is now
+    // voided) rather than the stale $70 read before the concurrent void.
+    expect(paid).toBe(100);
+    const summary = await fetchOwnerPayoutSummary();
+    expect(summary.pending).toBe(0);
+  });
 });
 
 // Sanity check that the fake Firestore module is actually being used (not the real SDK).

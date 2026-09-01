@@ -6,6 +6,8 @@ import {
   CLEARABLE_COLLECTIONS,
   type BackupData,
 } from '../admin';
+import * as firestore from 'firebase/firestore';
+import { setCurrentClubId } from '../client';
 import {
   resetFirebaseTestState,
   seedClubDoc,
@@ -64,6 +66,32 @@ describe('clearAllData', () => {
 
     expect(summary.sessions).toBe(501);
     expect(__getAllPaths().filter(path => path.startsWith(`clubs/${TEST_CLUB_ID}/sessions/`))).toHaveLength(0);
+  });
+
+  it('keeps operating on the club that was current when it started, even if the user switches clubs mid-operation', async () => {
+    seedClubDoc('sessions', 'session-1', { note: 'current club session' });
+    seedClubDoc('players', 'player-1', { name: 'Jamie' });
+    __seedDoc('clubs/other-club/players/other-player', { name: 'Should not be touched' });
+
+    const originalGetDocs = firestore.getDocs;
+    let switched = false;
+    const getDocsSpy = jest.spyOn(firestore, 'getDocs').mockImplementation(async (...args: Parameters<typeof firestore.getDocs>) => {
+      const result = await originalGetDocs(...args);
+      // Simulate the admin switching clubs via the navbar in between two of
+      // clearAllData's per-collection reads.
+      if (!switched) { switched = true; setCurrentClubId('other-club'); }
+      return result;
+    });
+
+    const summary = await clearAllData();
+
+    expect(summary.sessions).toBe(1);
+    expect(summary.players).toBe(1);
+    expect(getClubDocData('players', 'player-1')).toBeUndefined();
+    // The club switched to mid-operation must be completely untouched.
+    expect(__getDocData('clubs/other-club/players/other-player')).toEqual({ name: 'Should not be touched' });
+
+    getDocsSpy.mockRestore();
   });
 });
 
@@ -185,7 +213,7 @@ describe('setUpClubFromExistingData', () => {
       createdAt: expect.any(Timestamp),
     });
     expect(__getDocData('clubs/club-a/members/owner-1')).toMatchObject({
-      role: 'admin',
+      role: 'superAdmin',
       addedAt: expect.any(Timestamp),
     });
     expect(__getDocData('users/owner-1')).toEqual({

@@ -41,6 +41,11 @@ export function seedClubMetaDoc<T extends object>(clubId: string, data: T): void
   __seedDoc(`clubs/${clubId}`, data as unknown as Record<string, unknown>);
 }
 
+/** Reads a top-level club document. */
+export function getClubMetaDocData(clubId: string): Record<string, unknown> | undefined {
+  return __getDocData(`clubs/${clubId}`);
+}
+
 /** Seeds `clubs/{clubId}/members/{uid}`. */
 export function seedMemberDoc<T extends object>(uid: string, data: T, clubId: string = TEST_CLUB_ID): void {
   __seedDoc(`clubs/${clubId}/members/${uid}`, data as unknown as Record<string, unknown>);

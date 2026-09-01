@@ -15,3 +15,15 @@ if (typeof global.TextEncoder === 'undefined') {
 if (typeof global.TextDecoder === 'undefined') {
   global.TextDecoder = TextDecoder;
 }
+
+// jsdom (Jest's default test environment) also doesn't expose the Web Crypto
+// API's `crypto.subtle`, which backupCrypto.ts uses to encrypt/decrypt Google
+// Drive and local-file backups. Polyfill from Node's own 'crypto' module —
+// its `webcrypto` export implements the same standard SubtleCrypto interface
+// real browsers provide, so tests exercise the exact same code path as
+// production instead of a separate mock.
+import { webcrypto } from 'crypto';
+
+if (typeof global.crypto === 'undefined' || typeof global.crypto.subtle === 'undefined') {
+  global.crypto = webcrypto;
+}

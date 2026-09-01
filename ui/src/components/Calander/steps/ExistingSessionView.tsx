@@ -8,6 +8,7 @@ import { selectDisabledTabs, selectIsClubAdmin } from '../../../features/club/cl
 import { setPlayerSettlement, setPlayerPaidBy } from '../../../services/firebase';
 import type { PaidVia, Session, SessionPlayer } from 'types';
 import type { RootState } from '../../../store';
+import { getSessionPlayerPaidVia, isSessionPlayerUnpaid } from '../../../utils/sessionPayment';
 
 interface Props {
   session:         Session;
@@ -46,7 +47,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
   };
 
   const paidTotal = useMemo(
-    () => session.players.filter(p => p.paid).reduce((s, p) => s + p.cost, 0),
+    () => session.players.filter(p => !isSessionPlayerUnpaid(p) && !p.comped).reduce((s, p) => s + p.cost, 0),
     [session.players]
   );
   const compedTotal = useMemo(
@@ -89,7 +90,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
         {birdiesEnabled && <SummaryRow label="Total Birdie Cost" value={`$${(session.totalBirdieCost ?? 0).toFixed(2)}`} />}
         <SummaryRow label="Total Session Cost"            value={`$${(session.totalSessionCost ?? 0).toFixed(2)}`} bold />
         <SummaryRow label="Players"                       value={String(session.players.length)} />
-        <SummaryRow label="Unpaid players"                value={String(session.players.filter(p => !p.paid && !p.comped).length)} />
+        <SummaryRow label="Unpaid players"                value={String(session.players.filter(isSessionPlayerUnpaid).length)} />
         <SummaryRow label="Total Paid"                    value={`$${paidTotal.toFixed(2)}`} />
         <SummaryRow label="Total Comped"                  value={`$${compedTotal.toFixed(2)}`} />
         <SummaryRow
@@ -156,8 +157,8 @@ function PlayerRow({
     ? [stored.firstName, stored.lastName].filter(Boolean).join(' ')
     : player.id;
 
-  const currentVia: PaidVia =
-    player.paidVia ?? (player.comped ? 'comp' : player.paid ? 'etransfer' : null);
+  const currentVia = getSessionPlayerPaidVia(player);
+  const isSettled = currentVia !== null;
 
   // Resolve the payer's name when this player's dues were covered from another's balance.
   const payer = useAppSelector((s: RootState) =>
@@ -197,13 +198,20 @@ function PlayerRow({
     onSetPaidBy(payerId);
   };
 
+  // Clearly marks how the session was settled (shown to members). A 'balance'
+  // settlement that was auto-applied from a Gmail e-Transfer batch (see
+  // etransferImports.ts) is called out distinctly from a manually-chosen
+  // balance draw, since the money ultimately came from that e-Transfer.
+  const settledViaEtransferBalance = currentVia === 'balance' && !!player.settledByEtransferImportId;
   const settlement = player.comped
     ? { label: 'Comp', bg: 'info' }
     : currentVia === 'transfer'
       ? { label: payerName ? `Paid by ${payerName}` : 'Covered', bg: 'primary' }
-      : player.paid
-        ? (player.paidVia === 'balance'
-            ? { label: 'Balance', bg: 'primary' }
+      : isSettled
+        ? (currentVia === 'balance'
+            ? (settledViaEtransferBalance
+                ? { label: 'Gmail e-Transfer', bg: 'primary' }
+                : { label: 'Balance', bg: 'primary' })
             : { label: 'e-Transfer', bg: 'success' })
         : { label: 'Unpaid', bg: 'danger' };
 
@@ -233,17 +241,27 @@ function PlayerRow({
           : name}
       </span>
       <div className="d-flex align-items-center gap-2">
-        <span className={player.paid ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
+        <span className={isSettled ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
         {isAdmin ? (
           <div className="d-flex flex-column align-items-end">
             <ButtonGroup size="sm">
-                {options.map(o => (
+                {options.map(o => {
+                  const isActive = currentVia === o.method;
+                  const displayLabel = o.method === 'balance' && isActive && settledViaEtransferBalance
+                    ? 'Gmail e-Transfer'
+                    : o.label;
+                  return (
                   <React.Fragment key={o.label}>
                     <Button
-                      variant={currentVia === o.method ? o.activeVariant : 'outline-secondary'}
+                      variant={isActive ? o.activeVariant : 'outline-secondary'}
                       onClick={() => handleSelect(o.method)}
+                      title={
+                        o.method === 'balance' && isActive && settledViaEtransferBalance
+                          ? 'Automatically settled from balance funded by a Gmail e-Transfer'
+                          : undefined
+                      }
                     >
-                      {o.label}
+                      {displayLabel}
                     </Button>
                     {o.method === null && otherPlayers.length > 0 && (
                       <Dropdown
@@ -294,9 +312,10 @@ function PlayerRow({
                       </Dropdown>
                     )}
                   </React.Fragment>
-                ))}
+                  );
+                })}
               </ButtonGroup>
-            {player.settledAt && (currentVia === 'comp' || player.paid) && (
+            {player.settledAt && isSettled && (
               <div className="text-muted" style={{ fontSize: 10 }}>
                 Updated {format(player.settledAt.toDate(), 'MMM d, yyyy h:mm a')}
               </div>
