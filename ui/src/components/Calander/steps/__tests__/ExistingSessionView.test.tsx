@@ -85,16 +85,6 @@ describe('ExistingSessionView', () => {
     expect(screen.getByText('$45.00')).toBeInTheDocument(); // totalSessionCost
   });
 
-  it('shows a zero-cost player as paid by balance and excludes them from unpaid totals', () => {
-    renderView(
-      [makePlayer({ id: 'p1', firstName: 'Ada' })],
-      [makeSessionPlayer({ id: 'p1', cost: 0, paid: false, paidVia: null })]
-    );
-
-    expect(screen.getByRole('button', { name: 'Balance' })).toHaveClass('btn-primary');
-    expect(screen.getByText('Unpaid players').parentElement).toHaveTextContent('0');
-  });
-
   it('shows Edit/Delete controls and settlement buttons for admins', () => {
     const players = [makePlayer({ id: 'p1' })];
     renderView(players, [makeSessionPlayer()], { isAdmin: true });

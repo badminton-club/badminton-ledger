@@ -131,7 +131,7 @@ export async function addSession(data: NewSessionData): Promise<string> {
       // paid automatically instead of leaving them as owing.
       const resolvedPlayers = data.players.map((player, i) => {
         const before = (playerDocs[i].data()?.balance as number) ?? 0;
-        const coveredByBalance = player.cost === 0 || (before > 0 && player.cost <= before);
+        const coveredByBalance = before > 0 && player.cost > 0 && player.cost <= before;
         return coveredByBalance && !player.paid && !player.comped
           ? { ...player, paid: true, paidVia: 'balance' as const, settledAt: Timestamp.now() }
           : player;
@@ -192,7 +192,6 @@ export async function addSession(data: NewSessionData): Promise<string> {
       const sessionDate = data.date.toLocaleDateString();
       const walletDraw = new Map<string, { amount: number; note: string }[]>();
       const addDraw = (id: string, amount: number, note: string) => {
-        if (amount === 0) return;
         const list = walletDraw.get(id) ?? [];
         list.push({ amount, note });
         walletDraw.set(id, list);
@@ -307,7 +306,7 @@ export async function editSession(
       // auto-settled from that balance, matching addSession.
       const resolvedPlayers = updatedData.players.map((player) => {
         const before = (playerMap.get(player.id)?.data()?.balance as number) ?? 0;
-        const coveredByBalance = player.cost === 0 || (before > 0 && player.cost <= before);
+        const coveredByBalance = before > 0 && player.cost > 0 && player.cost <= before;
         return coveredByBalance && !player.paid && !player.comped
           ? { ...player, paid: true, paidVia: 'balance' as const, settledAt: Timestamp.now() }
           : player;

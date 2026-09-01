@@ -7,7 +7,6 @@ import SessionCalendar from "components/Calander/SessionCalendar";
 import { fetchSessions } from "services/firebase/sessions";
 import { useAppSelector } from "../hooks";
 import { selectAllPlayers, selectPlayerById } from "../features/players/playersSlice";
-import { isSessionPlayerUnpaid } from "../utils/sessionPayment";
 import type { Session } from "../types";
 import type { RootState } from "../store";
 
@@ -88,10 +87,10 @@ export default function HomePage() {
                                 </div>
                                 <div className="mt-3">
                                     <h3 className="unpaid-title">Unpaid Players:</h3>
-                                    {(currentSession.players ?? []).filter(isSessionPlayerUnpaid).length > 0 ?
+                                    {(currentSession.players ?? []).filter((p) => !p.paid && !p.comped).length > 0 ?
                                         <ul className="list-disc list-inside">
                                             {(currentSession.players ?? [])
-                                                .filter(isSessionPlayerUnpaid)
+                                                .filter((p) => !p.paid && !p.comped)
                                                 .map((p) => (
                                                     <UnpaidPlayerItem key={p.id} playerId={p.id} />
                                                 ))}

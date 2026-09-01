@@ -8,7 +8,6 @@ import { selectDisabledTabs, selectIsClubAdmin } from '../../../features/club/cl
 import { setPlayerSettlement, setPlayerPaidBy } from '../../../services/firebase';
 import type { PaidVia, Session, SessionPlayer } from 'types';
 import type { RootState } from '../../../store';
-import { getSessionPlayerPaidVia, isSessionPlayerUnpaid } from '../../../utils/sessionPayment';
 
 interface Props {
   session:         Session;
@@ -47,7 +46,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
   };
 
   const paidTotal = useMemo(
-    () => session.players.filter(p => !isSessionPlayerUnpaid(p) && !p.comped).reduce((s, p) => s + p.cost, 0),
+    () => session.players.filter(p => p.paid).reduce((s, p) => s + p.cost, 0),
     [session.players]
   );
   const compedTotal = useMemo(
@@ -90,7 +89,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
         {birdiesEnabled && <SummaryRow label="Total Birdie Cost" value={`$${(session.totalBirdieCost ?? 0).toFixed(2)}`} />}
         <SummaryRow label="Total Session Cost"            value={`$${(session.totalSessionCost ?? 0).toFixed(2)}`} bold />
         <SummaryRow label="Players"                       value={String(session.players.length)} />
-        <SummaryRow label="Unpaid players"                value={String(session.players.filter(isSessionPlayerUnpaid).length)} />
+        <SummaryRow label="Unpaid players"                value={String(session.players.filter(p => !p.paid && !p.comped).length)} />
         <SummaryRow label="Total Paid"                    value={`$${paidTotal.toFixed(2)}`} />
         <SummaryRow label="Total Comped"                  value={`$${compedTotal.toFixed(2)}`} />
         <SummaryRow
@@ -157,8 +156,8 @@ function PlayerRow({
     ? [stored.firstName, stored.lastName].filter(Boolean).join(' ')
     : player.id;
 
-  const currentVia = getSessionPlayerPaidVia(player);
-  const isSettled = currentVia !== null;
+  const currentVia: PaidVia =
+    player.paidVia ?? (player.comped ? 'comp' : player.paid ? 'etransfer' : null);
 
   // Resolve the payer's name when this player's dues were covered from another's balance.
   const payer = useAppSelector((s: RootState) =>
@@ -207,8 +206,8 @@ function PlayerRow({
     ? { label: 'Comp', bg: 'info' }
     : currentVia === 'transfer'
       ? { label: payerName ? `Paid by ${payerName}` : 'Covered', bg: 'primary' }
-      : isSettled
-        ? (currentVia === 'balance'
+      : player.paid
+        ? (player.paidVia === 'balance'
             ? (settledViaEtransferBalance
                 ? { label: 'Gmail e-Transfer', bg: 'primary' }
                 : { label: 'Balance', bg: 'primary' })
@@ -242,7 +241,7 @@ function PlayerRow({
           : name}
       </span>
       <div className="d-flex align-items-center gap-2">
-        <span className={isSettled ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
+        <span className={player.paid ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
         {isAdmin ? (
           <div className="d-flex flex-column align-items-end">
             <ButtonGroup size="sm">
@@ -316,7 +315,7 @@ function PlayerRow({
                   );
                 })}
               </ButtonGroup>
-            {player.settledAt && isSettled && (
+            {player.settledAt && (currentVia === 'comp' || player.paid) && (
               <div className="text-muted" style={{ fontSize: 10 }}>
                 Updated {format(player.settledAt.toDate(), 'MMM d, yyyy h:mm a')}
               </div>
