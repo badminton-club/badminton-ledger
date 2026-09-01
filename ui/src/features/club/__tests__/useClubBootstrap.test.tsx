@@ -13,9 +13,9 @@ import {
   setCurrentUser,
 } from '../../../test-utils/firebaseTestHelpers';
 import { getCurrentClubId } from '../../../services/firebase/client';
-import { __getDocData } from '../../../test-utils/fakeFirestore';
+import { __getDocData, __seedDoc } from '../../../test-utils/fakeFirestore';
 
-const currentUser = { uid: 'user-1', displayName: 'Ada Lovelace', email: 'ada@example.com' };
+const currentUser = { uid: 'user-1', displayName: 'Ada Lovelace', email: 'ada@example.com', emailVerified: true };
 
 beforeEach(() => {
   resetFirebaseTestState();
@@ -85,6 +85,49 @@ describe('useClubBootstrap', () => {
     renderBootstrap(store, '/?club=club-c');
 
     await waitFor(() => expect(store.getState().club.currentClubId).toBe('club-c'));
+  });
+
+  it('accepts an email invitation, opens its club, and keeps the pre-linked player', async () => {
+    seedUserDoc(currentUser.uid, { clubs: [] });
+    seedClubMetaDoc('club-c', { name: 'Club C' });
+    __seedDoc('clubInvitations/invite-1', {
+      clubId: 'club-c',
+      email: currentUser.email,
+      role: 'member',
+      playerId: 'player-1',
+      createdBy: 'admin-1',
+    });
+
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    renderBootstrap(store, '/auth?invite=invite-1');
+
+    await waitFor(() => expect(store.getState().club.currentClubId).toBe('club-c'));
+    expect(store.getState().club.invitationError).toBeNull();
+    expect(__getDocData(`clubs/club-c/members/${currentUser.uid}`)).toMatchObject({
+      role: 'member',
+      playerId: 'player-1',
+    });
+    expect(__getDocData('clubInvitations/invite-1')).toBeUndefined();
+  });
+
+  it('surfaces an invitation email mismatch without granting access', async () => {
+    seedUserDoc(currentUser.uid, { clubs: [] });
+    __seedDoc('clubInvitations/invite-1', {
+      clubId: 'club-c',
+      email: 'someone-else@example.com',
+      role: 'member',
+      playerId: null,
+      createdBy: 'admin-1',
+    });
+
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    renderBootstrap(store, '/auth?invite=invite-1');
+
+    await waitFor(() => expect(store.getState().club.invitationError).toContain('someone-else@example.com'));
+    expect(store.getState().club.currentClubId).toBeNull();
+    expect(__getDocData(`clubs/club-c/members/${currentUser.uid}`)).toBeUndefined();
   });
 
   it('falls back to localStorage when there is no lastVisitedClub match', async () => {

@@ -8,6 +8,9 @@ import {
   updateProfile,
   sendEmailVerification,
   sendPasswordResetEmail,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
   type User,
 } from 'firebase/auth';
 import { getDoc } from 'firebase/firestore';
@@ -69,6 +72,29 @@ export async function resendVerificationEmail(): Promise<void> {
 export async function sendPasswordReset(email: string): Promise<void> {
   return serviceCall('sendPasswordReset', async () => {
     await sendPasswordResetEmail(auth, email);
+  });
+}
+
+/** Emails a passwordless sign-in link that returns to the supplied app URL. */
+export async function sendEmailSignInLink(email: string, returnUrl: string): Promise<void> {
+  return serviceCall('sendEmailSignInLink', async () => {
+    await sendSignInLinkToEmail(auth, email, {
+      url: returnUrl,
+      handleCodeInApp: true,
+    });
+  });
+}
+
+/** Returns whether the URL is a Firebase passwordless sign-in link. */
+export function isEmailSignInLink(link: string): boolean {
+  return isSignInWithEmailLink(auth, link);
+}
+
+/** Completes passwordless sign-in using the email that requested the link. */
+export async function completeEmailSignIn(email: string, link: string): Promise<User> {
+  return serviceCall('completeEmailSignIn', async () => {
+    const credential = await signInWithEmailLink(auth, email, link);
+    return credential.user;
   });
 }
 

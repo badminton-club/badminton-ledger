@@ -87,6 +87,7 @@ export const refs = {
 // ─── Top-level (not club-scoped) refs ──────────────────────────────────────────
 export const clubsRef = collection(db, 'clubs') as CollectionReference;
 export const usersRef = collection(db, 'users') as CollectionReference;
+export const clubInvitationsRef = collection(db, 'clubInvitations') as CollectionReference;
 
 export function clubDoc(clubId: string): DocumentReference {
   return doc(db, 'clubs', clubId);
@@ -111,6 +112,9 @@ export function profileEditRequestDoc(clubId: string, uid: string): DocumentRefe
 }
 export function userDoc(uid: string): DocumentReference {
   return doc(db, 'users', uid);
+}
+export function clubInvitationDoc(invitationId: string): DocumentReference {
+  return doc(db, 'clubInvitations', invitationId);
 }
 
 export { db, auth, app };

@@ -12,7 +12,7 @@ import {
   type DriveBackupFile,
 } from '../services/firebase/drive';
 import { encryptBackupPayload, decryptBackupPayload, isEncryptedBackupPayload } from '../services/backupCrypto';
-import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, updatePlayerProfile } from '../services/firebase';
+import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, createClubInvitation, fetchClubInvitations, deleteClubInvitation, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, updatePlayerProfile } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
@@ -26,7 +26,7 @@ import {
   setCurrentClub,
 } from '../features/club/clubSlice';
 import { TOGGLEABLE_TABS } from '../features/club/tabs';
-import type { ClubMember, ClubRole, LinkRequest, ProfileEditRequest, Player } from '../types';
+import type { ClubMember, ClubInvitation, ClubRole, LinkRequest, ProfileEditRequest, Player } from '../types';
 
 const CONFIRM_PHRASE = 'CLEAR ALL DATA';
 
@@ -70,6 +70,14 @@ export default function SettingsPage() {
   const [newMemberRole, setNewMemberRole] = useState<ClubRole>('member');
   const [addingMember, setAddingMember] = useState(false);
   const [assigningUid, setAssigningUid] = useState<string | null>(null);
+  const [invitations, setInvitations] = useState<ClubInvitation[]>([]);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [invitePlayerId, setInvitePlayerId] = useState('');
+  const [inviteRole, setInviteRole] = useState<Exclude<ClubRole, 'superAdmin'>>('member');
+  const [creatingInvite, setCreatingInvite] = useState(false);
+  const [cancellingInviteId, setCancellingInviteId] = useState<string | null>(null);
+  const [createdInvitation, setCreatedInvitation] = useState<ClubInvitation | null>(null);
+  const [inviteError, setInviteError] = useState('');
   const [togglingTab, setTogglingTab] = useState<string | null>(null);
   const [tabsError, setTabsError] = useState('');
 
@@ -103,6 +111,62 @@ export default function SettingsPage() {
   }, [clubId]);
 
   useEffect(() => { if (isAdmin && clubId) loadMembers(); }, [isAdmin, clubId, loadMembers]);
+
+  const loadInvitations = useCallback(async () => {
+    if (!clubId) { setInvitations([]); return; }
+    setInviteError('');
+    try {
+      setInvitations(await fetchClubInvitations(clubId));
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'Failed to load invitations.');
+    }
+  }, [clubId]);
+
+  useEffect(() => { if (isAdmin && clubId) loadInvitations(); }, [isAdmin, clubId, loadInvitations]);
+
+  const handleCreateInvitation = async () => {
+    if (!clubId || !uid) return;
+    const email = inviteEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setInviteError('Enter a valid email address.');
+      return;
+    }
+    if (invitePlayerId && members.some((member) => member.playerId === invitePlayerId)
+      && !window.confirm('This player is already linked to another member. Create the invitation anyway?')) {
+      return;
+    }
+
+    setInviteError('');
+    setMembersMessage('');
+    setCreatingInvite(true);
+    try {
+      const invitation = await createClubInvitation(clubId, email, inviteRole, invitePlayerId || null, uid);
+      setCreatedInvitation(invitation);
+      setInviteEmail('');
+      setInvitePlayerId('');
+      setInviteRole('member');
+      setMembersMessage('Invitation created. Review the player link, then send the email below.');
+      setInvitations((current) => [invitation, ...current.filter((item) => item.id !== invitation.id)]);
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'Failed to create invitation.');
+    } finally {
+      setCreatingInvite(false);
+    }
+  };
+
+  const handleCancelInvitation = async (invitationId: string) => {
+    setInviteError('');
+    setCancellingInviteId(invitationId);
+    try {
+      await deleteClubInvitation(invitationId);
+      if (createdInvitation?.id === invitationId) setCreatedInvitation(null);
+      setInvitations((current) => current.filter((invitation) => invitation.id !== invitationId));
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'Failed to cancel invitation.');
+    } finally {
+      setCancellingInviteId(null);
+    }
+  };
 
   const handleAddMember = async () => {
     if (!clubId) return;
@@ -475,6 +539,21 @@ export default function SettingsPage() {
     return `${name || p.id} ${p.email ? `(${p.email})` : `#${p.id.slice(0, 4)}`}`;
   };
 
+  const invitationUrl = (invitationId: string) => {
+    const url = new URL('/auth', window.location.origin);
+    url.searchParams.set('invite', invitationId);
+    return url.toString();
+  };
+
+  const invitationEmailHref = (invitation: ClubInvitation) => {
+    const subject = 'You are invited to join a badminton club';
+    const body = `You've been invited to join a badminton club.\n\nOpen this link and sign in with ${invitation.email}:\n${invitationUrl(invitation.id)}`;
+    return `mailto:${encodeURIComponent(invitation.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
+  const createdInvitationPlayer = createdInvitation?.playerId
+    ? players.find((player) => player.id === createdInvitation.playerId)
+    : null;
+
   if (checkingAdmin) {
     return (
       <Container className="mt-4 text-center">
@@ -655,14 +734,109 @@ export default function SettingsPage() {
         <Card.Header>Members &amp; player links</Card.Header>
         <Card.Body>
           <Card.Text className="text-muted">
-            Add people by their user ID (shown on their Account page) and link each to a player so
-            they can see their own attendance.
+            Invite someone by email and optionally link their account to a player before sending.
+            They receive access after signing in with that email and opening the one-time link.
           </Card.Text>
           <Card.Text className="text-muted small">
             Admins manage day-to-day club data. Super admins can also grant admin access, remove
             members, clear all data, and delete the club.
           </Card.Text>
 
+          <Form.Group className="mb-2" controlId="member-invite-email">
+            <Form.Label>Email</Form.Label>
+            <Form.Control
+              type="email"
+              placeholder="player@example.com"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              disabled={creatingInvite}
+            />
+          </Form.Group>
+          <div className="d-flex gap-2 flex-wrap mb-3">
+            <Form.Select
+              aria-label="Player to link"
+              value={invitePlayerId}
+              onChange={(e) => setInvitePlayerId(e.target.value)}
+              disabled={creatingInvite}
+              style={{ minWidth: 220, flex: 1 }}
+            >
+              <option value="">— no player link —</option>
+              {players.map((p) => (
+                <option key={p.id} value={p.id}>{playerLabel(p)}</option>
+              ))}
+            </Form.Select>
+            <Form.Select
+              aria-label="Invitation role"
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value as Exclude<ClubRole, 'superAdmin'>)}
+              disabled={creatingInvite}
+              style={{ maxWidth: 130 }}
+            >
+              <option value="member">Member</option>
+              {isSuperAdmin && <option value="admin">Admin</option>}
+            </Form.Select>
+            <Button variant="primary" onClick={handleCreateInvitation} disabled={creatingInvite || !inviteEmail.trim()}>
+              {creatingInvite ? <Spinner size="sm" animation="border" /> : 'Create invite'}
+            </Button>
+          </div>
+
+          {inviteError && <Alert variant="danger" className="py-2">{inviteError}</Alert>}
+          {membersMessage && <Alert variant="success" className="py-2">{membersMessage}</Alert>}
+
+          {createdInvitation && (
+            <Alert variant="info">
+              <div className="mb-2">
+                Ready for <strong>{createdInvitation.email}</strong>
+                {createdInvitation.playerId && (
+                  <> linked to <strong>{createdInvitationPlayer ? playerLabel(createdInvitationPlayer) : 'selected player'}</strong></>
+                )}.
+              </div>
+              <InputGroup size="sm">
+                <Form.Control aria-label="Invitation link" readOnly value={invitationUrl(createdInvitation.id)} />
+                <Button as="a" href={invitationEmailHref(createdInvitation)} variant="success">
+                  Send email
+                </Button>
+              </InputGroup>
+            </Alert>
+          )}
+
+          {invitations.length > 0 && (
+            <>
+              <h6>Pending invitations</h6>
+              <ListGroup variant="flush" className="mb-4">
+                {invitations.map((invitation) => {
+                  const linkedPlayer = players.find((p) => p.id === invitation.playerId);
+                  return (
+                    <ListGroup.Item key={invitation.id} className="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                      <span>
+                        <strong>{invitation.email}</strong>
+                        <Badge bg="secondary" className="ms-2">{invitation.role}</Badge>
+                        {linkedPlayer && <span className="text-muted small ms-2">{playerLabel(linkedPlayer)}</span>}
+                      </span>
+                      <span className="d-flex gap-2">
+                        <Button as="a" href={invitationEmailHref(invitation)} size="sm" variant="outline-primary">
+                          Send email
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline-danger"
+                          disabled={cancellingInviteId === invitation.id}
+                          onClick={() => handleCancelInvitation(invitation.id)}
+                        >
+                          {cancellingInviteId === invitation.id ? <Spinner size="sm" animation="border" /> : 'Cancel'}
+                        </Button>
+                      </span>
+                    </ListGroup.Item>
+                  );
+                })}
+              </ListGroup>
+            </>
+          )}
+
+          <hr />
+          <Form.Text className="text-muted d-block mb-2">
+            Already know their Firebase user ID? Add them directly.
+          </Form.Text>
           <InputGroup className="mb-3">
             <Form.Control
               placeholder="User ID"
@@ -685,7 +859,6 @@ export default function SettingsPage() {
           </InputGroup>
 
           {membersError && <Alert variant="danger" className="py-2">{membersError}</Alert>}
-          {membersMessage && <Alert variant="success" className="py-2">{membersMessage}</Alert>}
 
           {membersLoading ? (
             <Spinner animation="border" size="sm" />

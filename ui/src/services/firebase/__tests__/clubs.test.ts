@@ -1,12 +1,16 @@
 import {
   addClubMember,
+  acceptClubInvitation,
   addClubToUser,
+  createClubInvitation,
   createClub,
   deleteClub,
+  deleteClubInvitation,
   deleteLinkRequest,
   deleteProfileEditRequest,
   fetchClub,
   fetchClubMembers,
+  fetchClubInvitations,
   fetchLinkRequests,
   fetchMemberPlayerId,
   fetchMemberRole,
@@ -259,6 +263,69 @@ describe('removeClubMember', () => {
     await removeClubMember('club-a', 'user-1');
 
     expect(__getDocData('clubs/club-a/members/user-1')).toBeUndefined();
+  });
+
+  describe('club invitations', () => {
+    it('creates, lists, and cancels an invitation with a pre-linked player', async () => {
+      const invitation = await createClubInvitation(
+        'club-a',
+        '  Player@Example.com ',
+        'member',
+        'player-1',
+        'admin-1'
+      );
+
+      expect(invitation).toMatchObject({
+        id: 'auto-id-1',
+        clubId: 'club-a',
+        email: 'player@example.com',
+        role: 'member',
+        playerId: 'player-1',
+        createdBy: 'admin-1',
+      });
+      await expect(fetchClubInvitations('club-a')).resolves.toEqual([
+        expect.objectContaining(invitation),
+      ]);
+
+      await deleteClubInvitation(invitation.id);
+      await expect(fetchClubInvitations('club-a')).resolves.toEqual([]);
+    });
+
+    it('accepts an invitation atomically and preserves its player link', async () => {
+      __seedDoc('clubInvitations/invite-1', {
+        clubId: 'club-a',
+        email: 'player@example.com',
+        role: 'member',
+        playerId: 'player-1',
+        createdBy: 'admin-1',
+      });
+      seedUserDoc('user-1', { clubs: ['other-club'] });
+
+      await expect(acceptClubInvitation('invite-1', 'user-1', 'Player@Example.com', true)).resolves.toBe('club-a');
+
+      expect(__getDocData('clubs/club-a/members/user-1')).toMatchObject({
+        role: 'member',
+        playerId: 'player-1',
+        acceptedInviteId: 'invite-1',
+      });
+      expect(__getDocData('users/user-1')).toMatchObject({ clubs: ['other-club', 'club-a'] });
+      expect(__getDocData('clubInvitations/invite-1')).toBeUndefined();
+    });
+
+    it('rejects a different signed-in email without consuming the invitation', async () => {
+      __seedDoc('clubInvitations/invite-1', {
+        clubId: 'club-a',
+        email: 'invited@example.com',
+        role: 'member',
+        playerId: null,
+        createdBy: 'admin-1',
+      });
+
+      await expect(acceptClubInvitation('invite-1', 'user-1', 'other@example.com', true))
+        .rejects.toThrow('This invitation was sent to invited@example.com');
+      expect(__getDocData('clubInvitations/invite-1')).toBeDefined();
+      expect(__getDocData('clubs/club-a/members/user-1')).toBeUndefined();
+    });
   });
 });
 

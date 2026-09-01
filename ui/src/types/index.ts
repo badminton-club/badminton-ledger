@@ -242,6 +242,7 @@ export interface Club {
 export interface ClubMembership {
   role: ClubRole;
   playerId?: string | null;   // the player record this user is linked to (set by an admin)
+  acceptedInviteId?: string;  // invitation used to create this membership, when applicable
   addedAt?: Timestamp;
 }
 
@@ -250,6 +251,17 @@ export interface ClubMember {
   uid: string;
   role: ClubRole;
   playerId: string | null;
+}
+
+// clubInvitations/{id} — a one-time email invitation created by a club admin.
+export interface ClubInvitation {
+  id: string;
+  clubId: string;
+  email: string;
+  role: Exclude<ClubRole, 'superAdmin'>;
+  playerId: string | null;
+  createdBy: string;
+  createdAt?: Timestamp;
 }
 
 // clubs/{clubId}/linkRequests/{uid} — a user's request for an admin to link them to a player.

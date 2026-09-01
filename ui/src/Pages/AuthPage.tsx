@@ -6,6 +6,9 @@ import {
   signInWithGoogle,
   signUpWithEmail,
   signInWithEmail,
+  sendEmailSignInLink,
+  isEmailSignInLink,
+  completeEmailSignIn,
   sendPasswordReset,
   resendVerificationEmail,
   signOutUser,
@@ -19,9 +22,12 @@ import { useAppDispatch, useAppSelector } from '../hooks';
 import {
   selectUserClubs,
   selectCurrentClubId,
+  selectInvitationError,
   setClubs,
   setCurrentClub,
 } from '../features/club/clubSlice';
+
+const EMAIL_LINK_EMAIL_KEY = 'emailForSignIn';
 
 // Maps common Firebase Auth error codes to messages a user can actually act on.
 function mapAuthError(err: unknown): string {
@@ -68,6 +74,7 @@ export default function AuthPage() {
   const dispatch = useAppDispatch();
   const clubs = useAppSelector(selectUserClubs);
   const currentClubId = useAppSelector(selectCurrentClubId);
+  const invitationError = useAppSelector(selectInvitationError);
 
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
@@ -89,6 +96,7 @@ export default function AuthPage() {
   const [emailAuthBusy, setEmailAuthBusy] = useState(false);
   const [emailAuthError, setEmailAuthError] = useState('');
   const [resetSent, setResetSent] = useState('');
+  const [emailLinkPending, setEmailLinkPending] = useState(() => isEmailSignInLink(window.location.href));
 
   const [resendBusy, setResendBusy] = useState(false);
   const [resendSent, setResendSent] = useState(false);
@@ -98,6 +106,31 @@ export default function AuthPage() {
     const unsubscribe = onAuthStateChangedListener(setUser);
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!emailLinkPending) return;
+    const savedEmail = localStorage.getItem(EMAIL_LINK_EMAIL_KEY);
+    if (!savedEmail) return;
+
+    let cancelled = false;
+    setEmailAuthBusy(true);
+    completeEmailSignIn(savedEmail, window.location.href)
+      .then(() => {
+        if (cancelled) return;
+        localStorage.removeItem(EMAIL_LINK_EMAIL_KEY);
+        setEmailLinkPending(false);
+        const cleanUrl = new URL(window.location.href);
+        ['apiKey', 'oobCode', 'mode', 'lang', 'continueUrl'].forEach((key) => cleanUrl.searchParams.delete(key));
+        window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+      })
+      .catch((err) => {
+        if (!cancelled) setEmailAuthError(mapAuthError(err));
+      })
+      .finally(() => {
+        if (!cancelled) setEmailAuthBusy(false);
+      });
+    return () => { cancelled = true; };
+  }, [emailLinkPending]);
 
   const refreshClubs = async (uid: string) => {
     dispatch(setClubs(await fetchUserClubs(uid)));
@@ -193,6 +226,47 @@ export default function AuthPage() {
     setEmailAuthBusy(false);
   };
 
+  const handleSendEmailLink = async () => {
+    setEmailAuthError('');
+    setResetSent('');
+    const email = emailInput.trim();
+    if (!email) { setEmailAuthError('Enter your email above first.'); return; }
+
+    const returnUrl = new URL('/auth', window.location.origin);
+    const invitationId = new URL(window.location.href).searchParams.get('invite');
+    if (invitationId) returnUrl.searchParams.set('invite', invitationId);
+
+    setEmailAuthBusy(true);
+    try {
+      await sendEmailSignInLink(email, returnUrl.toString());
+      localStorage.setItem(EMAIL_LINK_EMAIL_KEY, email);
+      setResetSent(`A sign-in link has been sent to ${email}.`);
+    } catch (err) {
+      setEmailAuthError(mapAuthError(err));
+    } finally {
+      setEmailAuthBusy(false);
+    }
+  };
+
+  const handleCompleteEmailLink = async () => {
+    const email = emailInput.trim();
+    if (!email) { setEmailAuthError('Enter the email address that received this sign-in link.'); return; }
+    setEmailAuthError('');
+    setEmailAuthBusy(true);
+    try {
+      await completeEmailSignIn(email, window.location.href);
+      localStorage.removeItem(EMAIL_LINK_EMAIL_KEY);
+      setEmailLinkPending(false);
+      const cleanUrl = new URL(window.location.href);
+      ['apiKey', 'oobCode', 'mode', 'lang', 'continueUrl'].forEach((key) => cleanUrl.searchParams.delete(key));
+      window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+    } catch (err) {
+      setEmailAuthError(mapAuthError(err));
+    } finally {
+      setEmailAuthBusy(false);
+    }
+  };
+
   const handleSignOut = async () => {
     setError('');
     try {
@@ -278,6 +352,7 @@ export default function AuthPage() {
       <Card>
         <Card.Body className="text-center">
           <Card.Title>Account</Card.Title>
+          {invitationError && <Alert variant="danger">{invitationError}</Alert>}
           {user ? (
             <>
               <p className="mb-3">
@@ -330,9 +405,16 @@ export default function AuthPage() {
                 className="text-start"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (authMode === 'signup') handleEmailSignUp(); else handleEmailSignIn();
+                  if (emailLinkPending) handleCompleteEmailLink();
+                  else if (authMode === 'signup') handleEmailSignUp();
+                  else handleEmailSignIn();
                 }}
               >
+                {emailLinkPending && (
+                  <Alert variant="info" className="py-2">
+                    Enter the email address that received this link to finish signing in.
+                  </Alert>
+                )}
                 {authMode === 'signup' && (
                   <Form.Group className="mb-2" controlId="auth-email-username">
                     <Form.Label>Display name (optional)</Form.Label>
@@ -353,15 +435,17 @@ export default function AuthPage() {
                     disabled={emailAuthBusy}
                   />
                 </Form.Group>
-                <Form.Group className="mb-2" controlId="auth-email-password">
-                  <Form.Label>Password</Form.Label>
-                  <Form.Control
-                    type="password"
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                    disabled={emailAuthBusy}
-                  />
-                </Form.Group>
+                {!emailLinkPending && (
+                  <Form.Group className="mb-2" controlId="auth-email-password">
+                    <Form.Label>Password</Form.Label>
+                    <Form.Control
+                      type="password"
+                      value={passwordInput}
+                      onChange={(e) => setPasswordInput(e.target.value)}
+                      disabled={emailAuthBusy}
+                    />
+                  </Form.Group>
+                )}
                 {authMode === 'signup' && (
                   <Form.Group className="mb-2" controlId="auth-email-confirm-password">
                     <Form.Label>Confirm password</Form.Label>
@@ -376,9 +460,9 @@ export default function AuthPage() {
                 <Button variant="outline-primary" type="submit" className="w-100" disabled={emailAuthBusy}>
                   {emailAuthBusy
                     ? <Spinner size="sm" animation="border" />
-                    : (authMode === 'signup' ? 'Create account' : 'Sign in')}
+                    : (emailLinkPending ? 'Complete sign-in' : authMode === 'signup' ? 'Create account' : 'Sign in')}
                 </Button>
-                <div className="d-flex justify-content-between align-items-center mt-2">
+                {!emailLinkPending && <div className="d-flex justify-content-between align-items-center mt-2">
                   <Button
                     variant="link"
                     size="sm"
@@ -392,17 +476,29 @@ export default function AuthPage() {
                     {authMode === 'signup' ? 'Already have an account? Sign in' : 'Need an account? Sign up'}
                   </Button>
                   {authMode === 'signin' && (
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="p-0"
-                      onClick={handleForgotPassword}
-                      disabled={emailAuthBusy}
-                    >
-                      Forgot password?
-                    </Button>
+                    <span className="d-flex gap-2">
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="p-0"
+                        onClick={handleForgotPassword}
+                        disabled={emailAuthBusy}
+                      >
+                        Forgot password?
+                      </Button>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="p-0"
+                        onClick={handleSendEmailLink}
+                        disabled={emailAuthBusy}
+                      >
+                        Email me a sign-in link
+                      </Button>
+                    </span>
                   )}
                 </div>
+                }
                 {emailAuthError && <Alert variant="danger" className="mt-2 mb-0 py-2">{emailAuthError}</Alert>}
                 {resetSent && <Alert variant="success" className="mt-2 mb-0 py-2">{resetSent}</Alert>}
               </Form>

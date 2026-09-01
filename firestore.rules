@@ -54,7 +54,17 @@ service cloud.firestore {
         allow read:   if isSignedIn() && (request.auth.uid == uid || isClubAdmin(clubId));
         allow create: if isClubSuperAdmin(clubId)
           || (request.auth.uid == uid && isClubOwner(clubId))
-          || (isClubAdmin(clubId) && request.resource.data.role == 'member');
+          || (isClubAdmin(clubId) && request.resource.data.role == 'member')
+          || (
+            request.auth.uid == uid
+            && request.resource.data.acceptedInviteId is string
+            && exists(/databases/$(database)/documents/clubInvitations/$(request.resource.data.acceptedInviteId))
+            && get(/databases/$(database)/documents/clubInvitations/$(request.resource.data.acceptedInviteId)).data.clubId == clubId
+            && request.auth.token.email_verified == true
+            && get(/databases/$(database)/documents/clubInvitations/$(request.resource.data.acceptedInviteId)).data.email == request.auth.token.email.lower()
+            && request.resource.data.role == get(/databases/$(database)/documents/clubInvitations/$(request.resource.data.acceptedInviteId)).data.role
+            && request.resource.data.get('playerId', null) == get(/databases/$(database)/documents/clubInvitations/$(request.resource.data.acceptedInviteId)).data.get('playerId', null)
+          );
         allow update: if isClubSuperAdmin(clubId)
           || (isClubAdmin(clubId) && request.resource.data.role == resource.data.role);
         allow delete: if isClubSuperAdmin(clubId);
@@ -107,6 +117,33 @@ service cloud.firestore {
       // mappings — admins only, same as other financial data.
       match /etransferImports/{doc}        { allow read, write: if isClubAdmin(clubId); }
       match /etransferSenderMappings/{doc} { allow read, write: if isClubAdmin(clubId); }
+    }
+
+    // One-time email invitations. Admins manage invitations for their club; the
+    // intended recipient can read and consume only their own invitation.
+    match /clubInvitations/{invitationId} {
+      allow create: if isSignedIn()
+        && request.resource.data.clubId is string
+        && request.resource.data.email is string
+        && request.resource.data.email == request.resource.data.email.lower()
+        && request.resource.data.createdBy == request.auth.uid
+        && (
+          (request.resource.data.role == 'member' && isClubAdmin(request.resource.data.clubId))
+          || (request.resource.data.role == 'admin' && isClubSuperAdmin(request.resource.data.clubId))
+        );
+      allow read: if isSignedIn() && (
+        isClubAdmin(resource.data.clubId)
+        || (request.auth.token.email_verified == true && resource.data.email == request.auth.token.email.lower())
+      );
+      allow update: if false;
+      allow delete: if isSignedIn() && (
+        isClubAdmin(resource.data.clubId)
+        || (
+          request.auth.token.email_verified == true
+          && resource.data.email == request.auth.token.email.lower()
+          && getAfter(/databases/$(database)/documents/clubs/$(resource.data.clubId)/members/$(request.auth.uid)).data.acceptedInviteId == invitationId
+        )
+      );
     }
 
     // ── User profiles ──────────────────────────────────────────────────────────
