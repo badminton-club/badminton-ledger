@@ -283,6 +283,8 @@ export interface BalanceLedgerEntry {
   reason: string;
   note?: string;
   createdAt?: Timestamp;
+  batchId?: string | null;
+  batchSequence?: number;
   // true when this entry actually moved the player's prepaid balance (e.g. the
   // Players-page balance adjustment); false/absent for entries that only affect
   // the owner payout total (e.g. a custom payout transaction) — those are

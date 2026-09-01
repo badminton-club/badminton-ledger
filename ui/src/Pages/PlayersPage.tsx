@@ -28,6 +28,7 @@ import {
   selectPlayersStatus, selectPlayersError,
 } from '../features/players/playersSlice';
 import { selectDisabledTabs } from '../features/club/clubSlice';
+import { compareLedgerEntriesNewestFirst } from '../utils/ledgerSort';
 import type { NewPlayerInput, PaidVia, Player, Session } from '../types';
 import type { RootState } from '../store';
 import { isSessionPlayerUnpaid } from '../utils/sessionPayment';
@@ -47,6 +48,8 @@ interface LedgerEntry {
   reason:        string;
   note:          string;
   createdAt:     { toDate: () => Date } | null;
+  batchId?: string | null;
+  batchSequence?: number;
   sessionId?:    string;
   walletAdjustment?: boolean;
   voided?:       boolean;
@@ -160,7 +163,7 @@ export default function PlayersPage() {
       if (seq !== ledgerRequestSeqRef.current) return; // superseded by a newer request
       const entries = snap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry));
       // Sort client-side to avoid needing a composite (playerId + createdAt) index.
-      entries.sort((a, b) => (b.createdAt?.toDate().getTime() ?? 0) - (a.createdAt?.toDate().getTime() ?? 0));
+      entries.sort(compareLedgerEntriesNewestFirst);
       setLedger(entries);
 
       // Session details are supplementary to the ledger, so a deleted linked

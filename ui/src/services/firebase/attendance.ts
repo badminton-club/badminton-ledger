@@ -1,7 +1,8 @@
 import { getDocs, query, where } from 'firebase/firestore';
 import { refs } from './client';
-import { serviceCall, toJSDate } from './utils';
+import { serviceCall } from './utils';
 import type { BalanceLedgerEntry } from 'types';
+import { compareLedgerEntriesNewestFirst } from '../../utils/ledgerSort';
 
 /**
  * Reads a player's balance-ledger entries (their transactions) for the current club,
@@ -15,9 +16,7 @@ export async function fetchPlayerLedger(playerId: string): Promise<BalanceLedger
       (d) => ({ id: d.id, ...(d.data() as Omit<BalanceLedgerEntry, 'id'>) })
     );
     // Client-side sort avoids needing a composite (playerId + createdAt) index.
-    entries.sort(
-      (a, b) => (toJSDate(b.createdAt)?.getTime() ?? 0) - (toJSDate(a.createdAt)?.getTime() ?? 0)
-    );
+    entries.sort(compareLedgerEntriesNewestFirst);
     return entries;
   });
 }
