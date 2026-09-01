@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { getMonth, getYear, isToday } from "date-fns";
 import { getFirstDayOfMonthWeekday, getTotalDaysInMonth } from "../../utils/dateUtils";
 import type { Session } from "../../types";
+import { isSessionPlayerUnpaid } from "../../utils/sessionPayment";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -32,7 +33,7 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, onDa
         const selected = selectedDate && +selectedDate === +date;
         const allPaid =
             daySessions.length > 0 &&
-            daySessions.every((s) => s.players.length > 0 && s.players.filter((p) => !p.paid && !p.comped).length === 0);
+            daySessions.every((s) => s.players.length > 0 && !s.players.some(isSessionPlayerUnpaid));
 
         cells.push(
             <DayCell

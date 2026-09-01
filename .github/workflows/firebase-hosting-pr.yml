@@ -38,6 +38,14 @@ jobs:
           REACT_APP_FIREBASE_MEASUREMENT_ID: ${{ secrets.REACT_APP_FIREBASE_MEASUREMENT_ID }}
         run: npm run build
 
+      - name: Authenticate Firebase deployment
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Deploy Firestore rules
+        run: npx --yes firebase-tools@15.28.1 deploy --only firestore:rules --project badminton-ledger --non-interactive
+
       - name: Deploy preview channel
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:

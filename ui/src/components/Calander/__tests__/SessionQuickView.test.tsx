@@ -123,6 +123,25 @@ describe('SessionQuickView', () => {
     expect(onOpenModal).toHaveBeenCalledWith(session);
   });
 
+  it('does not count a zero-cost player as unpaid', () => {
+    const session = makeSession('session-1', new Date(2026, 7, 10), {
+      players: [{ id: 'p1', percentage: 0, cost: 0, paid: false, comped: false, highlighted: false }],
+    });
+
+    renderWithProviders(
+      <SessionQuickView date={session.date} sessions={[session]} onAddSession={jest.fn()} onOpenModal={jest.fn()} />,
+      {
+        preloadedState: {
+          club: makeClubState({ role: 'member' }),
+          players: makePlayersState([makePlayer('p1', 'Alice', 'Zhang')]),
+        },
+      }
+    );
+
+    expect(screen.getByText('Fully paid')).toBeInTheDocument();
+    expect(within(screen.getByText('Alice Zhang').parentElement as HTMLElement).getByText('Paid')).toBeInTheDocument();
+  });
+
   it('switches between multiple sessions and opens the currently selected one', async () => {
     const user = userEvent.setup();
     const onOpenModal = jest.fn();

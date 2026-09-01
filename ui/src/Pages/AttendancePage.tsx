@@ -9,6 +9,7 @@ import { selectCurrentClubId } from '../features/club/clubSlice';
 import { selectPlayerById } from '../features/players/playersSlice';
 import type { BalanceLedgerEntry, Session, LinkRequest, ProfileEditRequest } from '../types';
 import type { RootState } from '../store';
+import { isSessionPlayerUnpaid } from '../utils/sessionPayment';
 
 const REASON_LABELS: Record<string, string> = {
   session: 'Session',
@@ -314,7 +315,7 @@ export default function AttendancePage() {
                       const d = toJSDate(s.date);
                       const status = sp?.comped
                         ? { label: 'Comped', bg: 'warning' }
-                        : sp?.paid
+                        : sp && !isSessionPlayerUnpaid(sp)
                           ? { label: 'Paid', bg: 'success' }
                           : { label: 'Unpaid', bg: 'danger' };
                       return (
@@ -403,7 +404,7 @@ export default function AttendancePage() {
                   <span>You owe</span>
                   <span>
                     {money(sp?.cost ?? 0)}{' '}
-                    {sp?.comped ? <Badge bg="warning">Comped</Badge> : sp?.paid ? <Badge bg="success">Paid</Badge> : <Badge bg="danger">Unpaid</Badge>}
+                    {sp?.comped ? <Badge bg="warning">Comped</Badge> : sp && !isSessionPlayerUnpaid(sp) ? <Badge bg="success">Paid</Badge> : <Badge bg="danger">Unpaid</Badge>}
                   </span>
                 </ListGroup.Item>
               </ListGroup>
