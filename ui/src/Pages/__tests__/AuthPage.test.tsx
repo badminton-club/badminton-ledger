@@ -29,6 +29,7 @@ const currentUser = {
   uid: 'user-1',
   displayName: 'Grace Hopper',
   email: 'grace@example.com',
+  providerData: [{ providerId: 'google.com' }],
 };
 
 function renderPage(clubOverrides: Partial<ReturnType<typeof makeClubState>> = {}) {
@@ -70,7 +71,7 @@ describe('AuthPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Sign in with Google' }));
 
-    expect(await screen.findByText(/Signed in as/)).toHaveTextContent('Grace Hopper');
+    expect(await screen.findByText(/Signed in as/)).toHaveTextContent('grace@example.com');
     expect(screen.getByText(currentUser.uid)).toBeInTheDocument();
   });
 

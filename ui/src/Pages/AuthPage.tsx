@@ -12,6 +12,7 @@ import {
   sendPasswordReset,
   resendVerificationEmail,
   signOutUser,
+  getAuthAccountName,
   onAuthStateChangedListener,
   fetchUserClubs,
   addClubToUser,
@@ -23,6 +24,7 @@ import {
   selectUserClubs,
   selectCurrentClubId,
   selectInvitationError,
+  selectAccountName,
   setClubs,
   setCurrentClub,
 } from '../features/club/clubSlice';
@@ -73,6 +75,7 @@ function slugify(name: string): string {
 export default function AuthPage() {
   const dispatch = useAppDispatch();
   const clubs = useAppSelector(selectUserClubs);
+  const accountName = useAppSelector(selectAccountName);
   const currentClubId = useAppSelector(selectCurrentClubId);
   const invitationError = useAppSelector(selectInvitationError);
 
@@ -356,7 +359,7 @@ export default function AuthPage() {
           {user ? (
             <>
               <p className="mb-3">
-                Signed in as <strong>{user.displayName || user.email}</strong>
+                Signed in as <strong>{accountName || getAuthAccountName(user)}</strong>
               </p>
               <p className="text-muted small mb-3">
                 Your user ID:<br />

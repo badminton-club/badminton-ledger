@@ -17,6 +17,7 @@ import {
   userDoc,
   clubDoc,
   memberDoc,
+  playerDoc,
   membersRef,
   linkRequestsRef,
   linkRequestDoc,
@@ -28,7 +29,9 @@ import {
   CLUB_DATA_COLLECTIONS,
 } from './client';
 import { serviceCall } from './utils';
+import { formatPlayerName } from './players';
 import type { UserProfile, Club, ClubRole, ClubMember, ClubInvitation, LinkRequest, ProfileEditRequest, UserClub } from 'types';
+import type { Player } from 'types';
 
 const EMPTY_PROFILE: UserProfile = { clubs: [], lastVisitedClub: null };
 
@@ -198,6 +201,23 @@ export async function fetchMemberPlayerId(clubId: string, uid: string): Promise<
     } catch {
       return null;
     }
+  });
+}
+
+/** Returns the linked player's name for the member in a club, or null when unlinked. */
+export async function fetchMemberDisplayName(clubId: string, uid: string): Promise<string | null> {
+  return serviceCall('fetchMemberDisplayName', async () => {
+    const memberSnap = await getDoc(memberDoc(clubId, uid));
+    if (!memberSnap.exists()) return null;
+
+    const playerId = memberSnap.data().playerId;
+    if (typeof playerId !== 'string' || !playerId) return null;
+
+    const playerSnap = await getDoc(playerDoc(clubId, playerId));
+    if (!playerSnap.exists()) return null;
+
+    const name = formatPlayerName(playerSnap.data() as Pick<Player, 'firstName' | 'lastName'>).trim();
+    return name || null;
   });
 }
 

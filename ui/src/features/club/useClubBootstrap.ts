@@ -6,11 +6,13 @@ import {
   fetchUserClubs,
   fetchUserProfile,
   fetchMemberRole,
+  fetchMemberDisplayName,
   fetchClub,
   addClubToUser,
   removeClubFromUser,
   setLastVisitedClub,
   acceptClubInvitation,
+  getAuthAccountName,
 } from '../../services/firebase';
 import { auth, setCurrentClubId } from '../../services/firebase/client';
 import {
@@ -58,7 +60,7 @@ export function useClubBootstrap(): void {
       }
 
       dispatch(setSignedIn(true));
-      dispatch(setAccountName(user.displayName?.trim() || user.email || null));
+      dispatch(setAccountName(getAuthAccountName(user)));
       dispatch(setInvitationError(null));
 
       const clubParam = searchParams.get('club');
@@ -146,10 +148,15 @@ export function useClubBootstrap(): void {
     Promise.all([
       fetchMemberRole(currentClubId, user.uid),
       fetchClub(currentClubId),
-    ]).then(([role, club]) => {
+      fetchMemberDisplayName(currentClubId, user.uid).catch((err) => {
+        console.error('[useClubBootstrap] Failed to load linked player name', err);
+        return null;
+      }),
+    ]).then(([role, club, memberDisplayName]) => {
       if (cancelled) return;
       dispatch(setRole(role));
       dispatch(setDisabledTabs(club?.disabledTabs ?? []));
+      dispatch(setAccountName(memberDisplayName || getAuthAccountName(user)));
       dispatch(setReady(true));
     });
     return () => { cancelled = true; };

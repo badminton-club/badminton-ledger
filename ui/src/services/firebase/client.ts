@@ -98,6 +98,9 @@ export function membersRef(clubId: string): CollectionReference {
 export function memberDoc(clubId: string, uid: string): DocumentReference {
   return doc(db, 'clubs', clubId, 'members', uid);
 }
+export function playerDoc(clubId: string, playerId: string): DocumentReference {
+  return doc(db, 'clubs', clubId, 'players', playerId);
+}
 export function linkRequestsRef(clubId: string): CollectionReference {
   return collection(db, 'clubs', clubId, 'linkRequests') as CollectionReference;
 }

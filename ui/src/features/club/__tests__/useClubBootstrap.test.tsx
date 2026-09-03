@@ -15,7 +15,13 @@ import {
 import { getCurrentClubId } from '../../../services/firebase/client';
 import { __getDocData, __seedDoc } from '../../../test-utils/fakeFirestore';
 
-const currentUser = { uid: 'user-1', displayName: 'Ada Lovelace', email: 'ada@example.com', emailVerified: true };
+const currentUser = {
+  uid: 'user-1',
+  displayName: 'Ada Lovelace',
+  email: 'ada@example.com',
+  emailVerified: true,
+  providerData: [{ providerId: 'google.com' }],
+};
 
 beforeEach(() => {
   resetFirebaseTestState();
@@ -97,6 +103,10 @@ describe('useClubBootstrap', () => {
       playerId: 'player-1',
       createdBy: 'admin-1',
     });
+    __seedDoc('clubs/club-c/players/player-1', {
+      firstName: 'Grace',
+      lastName: 'Hopper',
+    });
 
     const store = makeTestStore();
     setCurrentUser(currentUser);
@@ -108,6 +118,7 @@ describe('useClubBootstrap', () => {
       role: 'member',
       playerId: 'player-1',
     });
+    await waitFor(() => expect(store.getState().club.accountName).toBe('Grace Hopper'));
     expect(__getDocData('clubInvitations/invite-1')).toBeUndefined();
   });
 

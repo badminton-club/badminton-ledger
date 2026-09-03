@@ -17,6 +17,12 @@ import { getDoc } from 'firebase/firestore';
 import { auth, memberDoc } from './client';
 import { serviceCall } from './utils';
 
+/** Uses an explicit app username when available, but never imports a Google profile name. */
+export function getAuthAccountName(user: Pick<User, 'displayName' | 'email' | 'providerData'>): string | null {
+  const isGoogleUser = user.providerData?.some((provider) => provider.providerId === 'google.com');
+  return (isGoogleUser ? null : user.displayName?.trim()) || user.email || null;
+}
+
 /** Opens the Google sign-in popup and resolves with the signed-in user. */
 export async function signInWithGoogle(): Promise<User> {
   return serviceCall('signInWithGoogle', async () => {
