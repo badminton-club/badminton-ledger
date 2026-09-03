@@ -55,10 +55,13 @@ beforeEach(() => {
   setCurrentUser(currentUser);
 });
 
-function renderPage(players: Parameters<typeof makePlayersState>[0] = []) {
+function renderPage(
+  players: Parameters<typeof makePlayersState>[0] = [],
+  role: 'member' | 'admin' = 'member'
+) {
   return renderWithProviders(<AttendancePage />, {
     preloadedState: {
-      club: makeClubState({ currentClubId: TEST_CLUB_ID }),
+      club: makeClubState({ currentClubId: TEST_CLUB_ID, role }),
       players: makePlayersState(players),
     },
   });
@@ -112,6 +115,45 @@ describe('AttendancePage', () => {
 
     expect(await screen.findByText('Marked paid')).toBeInTheDocument();
     expect(screen.queryByText(/not linked to a player/)).not.toBeInTheDocument();
+  });
+
+  it('lets an admin select any player and view that player\'s attendance', async () => {
+    const user = userEvent.setup();
+    const grace = makePlayer();
+    const ada = makePlayer({
+      id: 'p2',
+      firstName: 'Ada',
+      firstNameLower: 'ada',
+      lastName: 'Lovelace',
+      lastNameLower: 'lovelace',
+      email: 'ada@example.com',
+    });
+    seedMemberDoc(currentUser.uid, { role: 'admin', playerId: 'p1' });
+    seedClubDoc('sessions', 'grace-session', {
+      date: ts('2026-01-05'),
+      players: [{ id: 'p1', percentage: 100, cost: 20, paid: true, highlighted: false }],
+      birdieUsage: [], courtCreditUsage: [],
+    });
+    seedClubDoc('sessions', 'ada-session', {
+      date: ts('2026-02-10T12:00:00'),
+      players: [{ id: 'p2', percentage: 100, cost: 15, paid: false, highlighted: false }],
+      birdieUsage: [], courtCreditUsage: [],
+    });
+    seedClubDoc('balanceLedger', 'ada-ledger', {
+      playerId: 'p2', delta: -15, reason: 'session', note: 'Ada session charge',
+      balanceBefore: 20, balanceAfter: 5, createdAt: ts('2026-02-10T12:00:00'),
+    });
+
+    // Ada appears first, but the signed-in admin is linked to Grace.
+    renderPage([ada, grace], 'admin');
+
+    const selector = await screen.findByRole('combobox', { name: 'View attendance for' });
+    expect(selector).toHaveValue('p1');
+    await user.selectOptions(selector, 'p2');
+
+    expect(await screen.findByText('Ada session charge')).toBeInTheDocument();
+    expect(screen.getByText('Feb 10, 2026')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument();
   });
 
   it('lets an already-linked member submit a details-edit request for admin approval', async () => {

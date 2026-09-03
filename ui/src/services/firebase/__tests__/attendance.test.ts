@@ -81,4 +81,48 @@ describe('fetchPlayerLedger', () => {
 
     await expect(fetchPlayerLedger('p1')).resolves.toEqual([]);
   });
+
+  it('orders an automatic settlement above its same-timestamp e-Transfer credit', async () => {
+    const recordedAt = ts('2026-09-01T07:54:00Z');
+    seedClubDoc('balanceLedger', 'credit', {
+      playerId: 'p1',
+      sessionId: null,
+      delta: 64,
+      balanceBefore: 0,
+      balanceAfter: 64,
+      reason: 'etransfer-import',
+      batchId: 'batch-1',
+      batchSequence: 0,
+      createdAt: recordedAt,
+    });
+    seedClubDoc('balanceLedger', 'settlement', {
+      playerId: 'p1',
+      sessionId: 'session-1',
+      delta: -64,
+      balanceBefore: 64,
+      balanceAfter: 0,
+      reason: 'settlement',
+      batchId: 'batch-1',
+      batchSequence: 1,
+      createdAt: recordedAt,
+    });
+
+    const ledger = await fetchPlayerLedger('p1');
+
+    expect(ledger.map((entry) => entry.id)).toEqual(['settlement', 'credit']);
+  });
+
+  it('repairs display order for legacy same-timestamp approval entries', async () => {
+    const recordedAt = ts('2026-09-01T07:54:00Z');
+    seedClubDoc('balanceLedger', 'credit', {
+      playerId: 'p1', reason: 'etransfer-import', delta: 64, createdAt: recordedAt,
+    });
+    seedClubDoc('balanceLedger', 'settlement', {
+      playerId: 'p1', reason: 'settlement', delta: -64, createdAt: recordedAt,
+    });
+
+    const ledger = await fetchPlayerLedger('p1');
+
+    expect(ledger.map((entry) => entry.id)).toEqual(['settlement', 'credit']);
+  });
 });

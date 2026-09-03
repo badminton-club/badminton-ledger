@@ -87,8 +87,8 @@ describe('backupToGoogleDrive', () => {
     });
     const reauth = jest.fn(async (user, provider) => {
       expect(provider.getScopes()).toEqual(['https://www.googleapis.com/auth/drive.file']);
-      expect(provider.getCustomParameters()).toEqual({ prompt: 'consent' });
-      return { user, __credential: { accessToken: 'drive-token' } };
+      expect(provider.getCustomParameters()).toEqual({ prompt: 'select_account consent' });
+      return { user: userTwo, __credential: { accessToken: 'drive-token' } };
     });
     fakeAuth.__setReauthImplementation(reauth);
     fetchMock()
@@ -202,9 +202,13 @@ describe('listGoogleDriveBackups', () => {
     expectBearerToken(1, 'cached-token');
   });
 
-  it('invalidates the cached token when the signed-in uid changes', async () => {
+  it('invalidates the cached token when the signed-in app uid changes', async () => {
     helpers.setCurrentUser(userOne);
-    const reauth = jest.fn(async user => ({ user, __credential: { accessToken: `token-for-${user.uid}` } }));
+    const tokens = ['token-for-user-1', 'token-for-user-2'];
+    const reauth = jest.fn(async () => ({
+      user: userTwo,
+      __credential: { accessToken: tokens[reauth.mock.calls.length - 1] },
+    }));
     fakeAuth.__setReauthImplementation(reauth);
     fetchMock().mockResolvedValue(jsonResponse({ files: [] }));
 
@@ -213,8 +217,8 @@ describe('listGoogleDriveBackups', () => {
     await drive.listGoogleDriveBackups('Shared Folder');
 
     expect(reauth).toHaveBeenCalledTimes(2);
-    expect(reauth.mock.calls[0][0]).toMatchObject({ uid: 'user-1' });
-    expect(reauth.mock.calls[1][0]).toMatchObject({ uid: 'user-2' });
+    expect(reauth.mock.calls[0][0]).toBeNull();
+    expect(reauth.mock.calls[1][0]).toBeNull();
     expectBearerToken(0, 'token-for-user-1');
     expectBearerToken(1, 'token-for-user-2');
   });
@@ -265,17 +269,17 @@ describe('listGoogleDriveBackups', () => {
     expect(fetchMock().mock.calls[2][0] as string).toContain('pageToken=page-2');
   });
 
-  it('maps auth/user-mismatch into a friendly account-selection error', async () => {
-    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  it('authorizes a different Google account without changing the app user', async () => {
     helpers.setCurrentUser(userOne);
-    fakeAuth.__setReauthImplementation(async () => {
-      throw new firebaseApp.FirebaseError('auth/user-mismatch', 'wrong account');
-    });
+    fakeAuth.__setReauthImplementation(async () => ({
+      user: userTwo,
+      __credential: { accessToken: 'other-account-token' },
+    }));
+    fetchMock().mockResolvedValue(jsonResponse({ files: [] }));
 
-    await expect(drive.listGoogleDriveBackups()).rejects.toThrow(
-      "Select the same Google account you're signed in with."
-    );
-    expect(consoleSpy).toHaveBeenCalledWith('[listGoogleDriveBackups]', expect.any(Error));
+    await expect(drive.listGoogleDriveBackups()).resolves.toEqual([]);
+    expect(fakeAuth.getAuth().currentUser).toMatchObject(userOne);
+    expectBearerToken(0, 'other-account-token');
   });
 
   it.each(['auth/popup-closed-by-user', 'auth/cancelled-popup-request'])(

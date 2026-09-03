@@ -10,7 +10,12 @@ import {
   setCurrentUser,
 } from '../../test-utils/firebaseTestHelpers';
 import { __getDocData } from '../../test-utils/fakeFirestore';
-import { __registerAccount, __getVerificationEmailsSent, __getPasswordResetsSent } from '../../test-utils/fakeAuth';
+import {
+  __registerAccount,
+  __getVerificationEmailsSent,
+  __getPasswordResetsSent,
+  __getEmailSignInLinksSent,
+} from '../../test-utils/fakeAuth';
 import { signInWithGoogle } from '../../services/firebase';
 
 jest.mock('../../services/firebase', () => ({
@@ -24,6 +29,7 @@ const currentUser = {
   uid: 'user-1',
   displayName: 'Grace Hopper',
   email: 'grace@example.com',
+  providerData: [{ providerId: 'google.com' }],
 };
 
 function renderPage(clubOverrides: Partial<ReturnType<typeof makeClubState>> = {}) {
@@ -43,6 +49,8 @@ function renderPage(clubOverrides: Partial<ReturnType<typeof makeClubState>> = {
 
 beforeEach(() => {
   resetFirebaseTestState();
+  localStorage.clear();
+  window.history.replaceState({}, '', '/');
   jest.mocked(signInWithGoogle).mockReset();
   jest.mocked(signInWithGoogle).mockImplementation(actualFirebase.signInWithGoogle);
 });
@@ -63,7 +71,7 @@ describe('AuthPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Sign in with Google' }));
 
-    expect(await screen.findByText(/Signed in as/)).toHaveTextContent('Grace Hopper');
+    expect(await screen.findByText(/Signed in as/)).toHaveTextContent('grace@example.com');
     expect(screen.getByText(currentUser.uid)).toBeInTheDocument();
   });
 
@@ -287,5 +295,48 @@ describe('AuthPage', () => {
 
     expect(await screen.findByText(/password reset link has been sent/)).toBeInTheDocument();
     expect(__getPasswordResetsSent()).toEqual(['jamie@example.com']); // unchanged — nothing actually sent
+  });
+
+  it('sends a passwordless sign-in link and preserves a pending club invitation', async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({}, '', '/auth?invite=invite-1');
+    renderPage();
+
+    await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
+    await user.click(screen.getByRole('button', { name: 'Email me a sign-in link' }));
+
+    expect(await screen.findByText('A sign-in link has been sent to jamie@example.com.')).toBeInTheDocument();
+    expect(__getEmailSignInLinksSent()).toEqual([{
+      email: 'jamie@example.com',
+      returnUrl: 'http://localhost/auth?invite=invite-1',
+    }]);
+    expect(localStorage.getItem('emailForSignIn')).toBe('jamie@example.com');
+  });
+
+  it('automatically completes a same-device passwordless sign-in link', async () => {
+    __registerAccount('jamie@example.com', 'hunter22');
+    localStorage.setItem('emailForSignIn', 'jamie@example.com');
+    window.history.replaceState({}, '', '/auth?mode=signIn&oobCode=valid-code');
+
+    renderPage();
+
+    expect(await screen.findByText(/Signed in as/)).toHaveTextContent('jamie@example.com');
+    expect(localStorage.getItem('emailForSignIn')).toBeNull();
+    expect(window.location.search).toBe('');
+  });
+
+  it('asks for the email when a sign-in link is opened on another device', async () => {
+    const user = userEvent.setup();
+    __registerAccount('jamie@example.com', 'hunter22');
+    window.history.replaceState({}, '', '/auth?mode=signIn&oobCode=valid-code');
+    renderPage();
+
+    expect(screen.getByText(/Enter the email address that received this link/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
+    await user.click(screen.getByRole('button', { name: 'Complete sign-in' }));
+
+    expect(await screen.findByText(/Signed in as/)).toHaveTextContent('jamie@example.com');
   });
 });

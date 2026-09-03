@@ -29,6 +29,7 @@ describe('clubSlice reducer', () => {
       disabledTabs: [],
       signedIn: false,
       accountName: null,
+      invitationError: null,
       ready: false,
     });
   });
@@ -76,6 +77,7 @@ describe('clubSlice reducer', () => {
       disabledTabs: [],
       signedIn: false,
       accountName: null,
+      invitationError: null,
       ready: true,
     });
   });
@@ -94,6 +96,7 @@ describe('clubSlice selectors', () => {
       disabledTabs: ['payouts'],
       signedIn: true,
       accountName: 'Admin',
+      invitationError: null,
       ready: true,
     };
     const state = makeRootState(club);

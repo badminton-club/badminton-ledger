@@ -59,6 +59,7 @@ export function makeClubState(overrides: Partial<RootState['club']> = {}): RootS
     disabledTabs: [],
     signedIn: true,
     accountName: null,
+    invitationError: null,
     ready: true,
     ...overrides,
   };

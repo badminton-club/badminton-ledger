@@ -9,6 +9,7 @@ interface ClubState {
   disabledTabs: string[];     // tab keys hidden for the current club
   signedIn: boolean;          // an authenticated user is present
   accountName: string | null; // display name, falling back to email
+  invitationError: string | null;
   ready: boolean;             // club bootstrap has finished
 }
 
@@ -19,6 +20,7 @@ const initialState: ClubState = {
   disabledTabs: [],
   signedIn: false,
   accountName: null,
+  invitationError: null,
   ready: false,
 };
 
@@ -44,6 +46,9 @@ const clubSlice = createSlice({
     setAccountName(state, action: PayloadAction<string | null>) {
       state.accountName = action.payload;
     },
+    setInvitationError(state, action: PayloadAction<string | null>) {
+      state.invitationError = action.payload;
+    },
     setReady(state, action: PayloadAction<boolean>) {
       state.ready = action.payload;
     },
@@ -60,6 +65,7 @@ export const {
   setDisabledTabs,
   setSignedIn,
   setAccountName,
+  setInvitationError,
   setReady,
   resetClub,
 } = clubSlice.actions;
@@ -71,6 +77,7 @@ export const selectUserClubs     = (s: RootState) => s.club.clubs;
 export const selectDisabledTabs  = (s: RootState) => s.club.disabledTabs;
 export const selectSignedIn      = (s: RootState) => s.club.signedIn;
 export const selectAccountName   = (s: RootState) => s.club.accountName;
+export const selectInvitationError = (s: RootState) => s.club.invitationError;
 export const selectClubReady     = (s: RootState) => s.club.ready;
 export const selectIsClubAdmin   = (s: RootState) => s.club.role === 'admin' || s.club.role === 'superAdmin';
 export const selectIsClubSuperAdmin = (s: RootState) => s.club.role === 'superAdmin';
