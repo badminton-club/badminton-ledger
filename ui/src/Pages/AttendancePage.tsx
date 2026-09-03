@@ -5,8 +5,8 @@ import { fetchMemberPlayerId, fetchPlayerLedger, fetchMyLinkRequest, submitLinkR
 import { auth } from '../services/firebase/client';
 import { toJSDate } from '../services/firebase/utils';
 import { useAppSelector } from '../hooks';
-import { selectCurrentClubId } from '../features/club/clubSlice';
-import { selectPlayerById } from '../features/players/playersSlice';
+import { selectCurrentClubId, selectIsClubAdmin } from '../features/club/clubSlice';
+import { selectAllPlayers, selectPlayerById } from '../features/players/playersSlice';
 import type { BalanceLedgerEntry, Session, LinkRequest, ProfileEditRequest } from '../types';
 import type { RootState } from '../store';
 import { isSessionPlayerUnpaid } from '../utils/sessionPayment';
@@ -39,7 +39,10 @@ const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toFixed(2)}`;
 
 export default function AttendancePage() {
   const clubId = useAppSelector(selectCurrentClubId);
+  const isAdmin = useAppSelector(selectIsClubAdmin);
+  const players = useAppSelector(selectAllPlayers);
   const uid = auth.currentUser?.uid ?? null;
+  const [linkedPlayerId, setLinkedPlayerId] = useState<string | null>(null);
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [ledger, setLedger] = useState<BalanceLedgerEntry[]>([]);
   const [attended, setAttended] = useState<Session[]>([]);
@@ -76,16 +79,13 @@ export default function AttendancePage() {
       try {
         const pid = await fetchMemberPlayerId(clubId, uid);
         if (cancelled) return;
+        setLinkedPlayerId(pid);
         setPlayerId(pid);
         if (pid) {
-          const [entries, sessions, editReq] = await Promise.all([
-            fetchPlayerLedger(pid), fetchSessions({}), fetchMyProfileEditRequest(clubId, uid),
-          ]);
+          const editReq = await fetchMyProfileEditRequest(clubId, uid);
           if (cancelled) return;
-          setLedger(entries);
-          setAttended(sessions.filter((s) => (s.players ?? []).some((p) => p.id === pid)));
           setMyProfileEditRequest(editReq);
-        } else {
+        } else if (!isAdmin) {
           const req = await fetchMyLinkRequest(clubId, uid);
           if (cancelled) return;
           setMyRequest(req);
@@ -103,7 +103,41 @@ export default function AttendancePage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [clubId, uid]);
+  }, [clubId, uid, isAdmin]);
+
+  useEffect(() => {
+    if (isAdmin && !playerId && players.length > 0) {
+      setPlayerId(players[0].id);
+    }
+  }, [isAdmin, playerId, players]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!playerId) {
+      setLedger([]);
+      setAttended([]);
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    Promise.all([fetchPlayerLedger(playerId), fetchSessions({})])
+      .then(([entries, sessions]) => {
+        if (cancelled) return;
+        setLedger(entries);
+        setAttended(sessions.filter((session) =>
+          (session.players ?? []).some((sessionPlayer) => sessionPlayer.id === playerId)
+        ));
+      })
+      .catch(() => {
+        if (!cancelled) setError(isAdmin ? 'Failed to load attendance.' : 'Failed to load your attendance.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [playerId, isAdmin]);
 
   const handleSubmitRequest = async () => {
     if (!clubId || !uid) return;
@@ -183,10 +217,35 @@ export default function AttendancePage() {
 
   return (
     <Container className="py-4" style={{ maxWidth: 840 }}>
-      <h3>My attendance</h3>
+      <h3>{isAdmin ? 'Attendance' : 'My attendance'}</h3>
       {error && <Alert variant="danger">{error}</Alert>}
 
+      {isAdmin && (
+        <Form.Group className="mb-3" controlId="attendance-player">
+          <Form.Label>View attendance for</Form.Label>
+          <Form.Select
+            value={playerId ?? ''}
+            onChange={(event) => {
+              setSelectedSession(null);
+              setPlayerId(event.target.value || null);
+            }}
+            disabled={players.length === 0}
+          >
+            {players.length === 0
+              ? <option value="">No players</option>
+              : players.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {[option.firstName, option.lastName].filter(Boolean).join(' ') || option.id}
+                  </option>
+                ))}
+          </Form.Select>
+        </Form.Group>
+      )}
+
       {!playerId ? (
+        isAdmin ? (
+          <Alert variant="info">There are no players in this club yet.</Alert>
+        ) :
         myRequest ? (
           <Alert variant="success">
             Your request to be linked was sent. An admin will match you to a player soon.
@@ -245,7 +304,7 @@ export default function AttendancePage() {
                       )}
                     </span>
                   )}
-                  {!isEditingProfile && (
+                  {playerId === linkedPlayerId && !isEditingProfile && (
                     <Button variant="outline-secondary" size="sm" onClick={startEditingProfile}>
                       Edit details
                     </Button>
@@ -253,13 +312,13 @@ export default function AttendancePage() {
                 </div>
               </div>
 
-              {myProfileEditRequest && !isEditingProfile && (
+              {playerId === linkedPlayerId && myProfileEditRequest && !isEditingProfile && (
                 <Alert variant="info" className="mt-3 mb-0 py-2">
                   Your request to update your details is awaiting admin approval.
                 </Alert>
               )}
 
-              {isEditingProfile && (
+              {playerId === linkedPlayerId && isEditingProfile && (
                 <div className="mt-3 p-3 border rounded">
                   {editError && <Alert variant="danger" className="py-1 small">{editError}</Alert>}
                   <Row>

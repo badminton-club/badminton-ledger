@@ -28,9 +28,9 @@ import {
   selectPlayersStatus, selectPlayersError,
 } from '../features/players/playersSlice';
 import { selectDisabledTabs } from '../features/club/clubSlice';
-import { compareLedgerEntriesNewestFirst } from '../utils/ledgerSort';
 import type { NewPlayerInput, PaidVia, Player, Session } from '../types';
 import type { RootState } from '../store';
+import { compareLedgerEntriesNewestFirst } from '../utils/ledgerSort';
 import { isSessionPlayerUnpaid } from '../utils/sessionPayment';
 
 interface BalanceAdjustment {
@@ -48,10 +48,10 @@ interface LedgerEntry {
   reason:        string;
   note:          string;
   createdAt:     { toDate: () => Date } | null;
-  batchId?: string | null;
-  batchSequence?: number;
   sessionId?:    string;
   walletAdjustment?: boolean;
+  batchId?: string | null;
+  batchSequence?: number;
   voided?:       boolean;
   voidedNote?:   string;
 }
