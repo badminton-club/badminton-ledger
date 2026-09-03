@@ -21,6 +21,11 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
       - name: Install dependencies
         working-directory: ui
         run: npm ci
@@ -37,6 +42,9 @@ jobs:
           REACT_APP_FIREBASE_APP_ID: ${{ secrets.REACT_APP_FIREBASE_APP_ID }}
           REACT_APP_FIREBASE_MEASUREMENT_ID: ${{ secrets.REACT_APP_FIREBASE_MEASUREMENT_ID }}
         run: npm run build
+
+      - name: Validate Firestore rules
+        run: npx --yes firebase-tools@15.28.1 emulators:exec --only firestore --project demo-badminton-ledger "true"
 
       - name: Authenticate Firebase deployment
         uses: google-github-actions/auth@v2

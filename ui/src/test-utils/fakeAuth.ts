@@ -107,9 +107,9 @@ type ReauthImplementation = (user: FakeUser | null, provider: GoogleAuthProvider
 let reauthImpl: ReauthImplementation | null = null;
 
 /**
- * Test-only control for `reauthenticateWithPopup` (used by drive.ts to get a
- * scoped Drive access token) and for `signInWithPopup` on a secondary auth
- * instance (used by gmail.ts). Queue either a resolved result — include
+ * Test-only control for `reauthenticateWithPopup` and for `signInWithPopup` on
+ * a secondary auth instance (used by drive.ts and gmail.ts). Queue either a
+ * resolved result — include
  * `__credential: { accessToken }` so `GoogleAuthProvider.credentialFromResult`
  * can read it back — or a rejection to simulate a cancelled/failed popup.
  *
@@ -143,6 +143,7 @@ export function __resetAuth(): void {
   registeredAccounts.clear();
   verificationEmailsSent.length = 0;
   passwordResetsSent.length = 0;
+  emailSignInLinksSent.length = 0;
   uidCounter = 0;
 }
 
@@ -172,6 +173,7 @@ interface RegisteredAccount {
 const registeredAccounts = new Map<string, RegisteredAccount>();
 const verificationEmailsSent: string[] = [];
 const passwordResetsSent: string[] = [];
+const emailSignInLinksSent: Array<{ email: string; returnUrl: string }> = [];
 let uidCounter = 0;
 
 function toFakeUser(account: RegisteredAccount): FakeUser {
@@ -249,6 +251,54 @@ export async function sendPasswordResetEmail(_authInstance: FakeAuth, email: str
   passwordResetsSent.push(email);
 }
 
+export async function sendSignInLinkToEmail(
+  _authInstance: FakeAuth,
+  email: string,
+  settings: { url: string; handleCodeInApp: boolean }
+): Promise<void> {
+  if (!settings.handleCodeInApp) {
+    throw new FirebaseAuthError('auth/invalid-action-code-settings', 'Email links must be handled in the app.');
+  }
+  emailSignInLinksSent.push({ email, returnUrl: settings.url });
+}
+
+export function isSignInWithEmailLink(_authInstance: FakeAuth, link: string): boolean {
+  try {
+    const params = new URL(link).searchParams;
+    return params.get('mode') === 'signIn' && !!params.get('oobCode');
+  } catch {
+    return false;
+  }
+}
+
+export async function signInWithEmailLink(
+  authInstance: FakeAuth,
+  email: string,
+  link: string
+): Promise<{ user: FakeUser }> {
+  if (!isSignInWithEmailLink(authInstance, link)) {
+    throw new FirebaseAuthError('auth/invalid-action-code', 'The sign-in link is invalid or expired.');
+  }
+  const key = email.toLowerCase();
+  let account = registeredAccounts.get(key);
+  if (!account) {
+    uidCounter += 1;
+    account = {
+      uid: `email-user-${uidCounter}`,
+      email,
+      password: '',
+      displayName: null,
+      emailVerified: true,
+    };
+    registeredAccounts.set(key, account);
+  } else {
+    account.emailVerified = true;
+  }
+  const user = toFakeUser(account);
+  authInstance.__setCurrentUser(user);
+  return { user };
+}
+
 /** Test-only: marks a registered account's email as verified (simulating the user clicking the emailed link). */
 export function __markEmailVerified(email: string): void {
   const account = registeredAccounts.get(email.toLowerCase());
@@ -276,4 +326,9 @@ export function __getVerificationEmailsSent(): string[] {
 /** Test-only: the list of email addresses a password-reset email was "sent" to, in order. */
 export function __getPasswordResetsSent(): string[] {
   return [...passwordResetsSent];
+}
+
+/** Test-only: passwordless sign-in emails requested through the fake SDK. */
+export function __getEmailSignInLinksSent(): Array<{ email: string; returnUrl: string }> {
+  return [...emailSignInLinksSent];
 }

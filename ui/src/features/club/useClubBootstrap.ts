@@ -6,10 +6,13 @@ import {
   fetchUserClubs,
   fetchUserProfile,
   fetchMemberRole,
+  fetchMemberDisplayName,
   fetchClub,
   addClubToUser,
   removeClubFromUser,
   setLastVisitedClub,
+  acceptClubInvitation,
+  getAuthAccountName,
 } from '../../services/firebase';
 import { auth, setCurrentClubId } from '../../services/firebase/client';
 import {
@@ -19,6 +22,7 @@ import {
   setDisabledTabs,
   setSignedIn,
   setAccountName,
+  setInvitationError,
   setReady,
   resetClub,
   selectCurrentClubId,
@@ -56,9 +60,22 @@ export function useClubBootstrap(): void {
       }
 
       dispatch(setSignedIn(true));
-      dispatch(setAccountName(user.displayName?.trim() || user.email || null));
+      dispatch(setAccountName(getAuthAccountName(user)));
+      dispatch(setInvitationError(null));
 
       const clubParam = searchParams.get('club');
+      const invitationParam = searchParams.get('invite');
+      let invitedClubId: string | null = null;
+      if (invitationParam) {
+        try {
+          invitedClubId = await acceptClubInvitation(invitationParam, user.uid, user.email, user.emailVerified);
+        } catch (err) {
+          if (latestUid === uid) {
+            dispatch(setInvitationError(err instanceof Error ? err.message : 'Failed to accept invitation.'));
+          }
+        }
+      }
+      if (latestUid !== uid) return;
       if (clubParam) {
         try { await addClubToUser(user.uid, clubParam); } catch { /* ignore */ }
       }
@@ -85,6 +102,7 @@ export function useClubBootstrap(): void {
 
       const stored = localStorage.getItem(LS_KEY);
       const pick =
+        (invitedClubId && liveClubs.some((c) => c.id === invitedClubId) ? invitedClubId : null) ??
         (clubParam && liveClubs.some((c) => c.id === clubParam) ? clubParam : null) ??
         (profile.lastVisitedClub && liveClubs.some((c) => c.id === profile.lastVisitedClub)
           ? profile.lastVisitedClub
@@ -98,9 +116,10 @@ export function useClubBootstrap(): void {
       // and flips `ready`. Only mark ready here when there's nothing to load.
       if (!pick) dispatch(setReady(true));
 
-      if (clubParam) {
+      if (clubParam || (invitationParam && invitedClubId)) {
         const next = new URLSearchParams(searchParams);
         next.delete('club');
+        if (invitedClubId) next.delete('invite');
         setSearchParams(next, { replace: true });
       }
     });
@@ -129,10 +148,15 @@ export function useClubBootstrap(): void {
     Promise.all([
       fetchMemberRole(currentClubId, user.uid),
       fetchClub(currentClubId),
-    ]).then(([role, club]) => {
+      fetchMemberDisplayName(currentClubId, user.uid).catch((err) => {
+        console.error('[useClubBootstrap] Failed to load linked player name', err);
+        return null;
+      }),
+    ]).then(([role, club, memberDisplayName]) => {
       if (cancelled) return;
       dispatch(setRole(role));
       dispatch(setDisabledTabs(club?.disabledTabs ?? []));
+      dispatch(setAccountName(memberDisplayName || getAuthAccountName(user)));
       dispatch(setReady(true));
     });
     return () => { cancelled = true; };

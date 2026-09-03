@@ -13,7 +13,7 @@ import {
   TEST_CLUB_ID,
   ts,
 } from '../../test-utils/firebaseTestHelpers';
-import { __getDocData, __seedDoc } from '../../test-utils/fakeFirestore';
+import { __getAllPaths, __getDocData, __seedDoc } from '../../test-utils/fakeFirestore';
 import type { Player } from '../../types';
 
 jest.mock('../../services/firebase/drive', () => ({
@@ -220,6 +220,32 @@ describe('SettingsPage', () => {
     // The new admin's own profile is updated too, so the club shows up in
     // their club switcher without them needing a separate join link.
     expect(__getDocData('users/new-admin')).toMatchObject({ clubs: [TEST_CLUB_ID] });
+  });
+
+  it('creates an email invitation with the selected player before offering to send it', async () => {
+    const user = userEvent.setup();
+    const player = makePlayer({ id: 'p1', firstName: 'Jamie', lastName: 'Lee' });
+    renderPage({ role: 'admin', players: [player] });
+
+    await user.type(screen.getByLabelText('Email'), 'invitee@example.com');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Player to link' }), 'p1');
+    await user.click(screen.getByRole('button', { name: 'Create invite' }));
+
+    await waitFor(() => {
+      const invitationPath = __getAllPaths().find((path) => path.startsWith('clubInvitations/'));
+      expect(invitationPath).toBeDefined();
+      expect(__getDocData(invitationPath as string)).toMatchObject({
+        clubId: TEST_CLUB_ID,
+        email: 'invitee@example.com',
+        role: 'member',
+        playerId: 'p1',
+        createdBy: superAdminUser.uid,
+      });
+    });
+
+    const sendEmail = screen.getAllByRole('button', { name: 'Send email' })[0];
+    expect(sendEmail).toHaveAttribute('href', expect.stringContaining('mailto:invitee%40example.com'));
+    expect(sendEmail).toHaveAttribute('href', expect.stringContaining('invite%3Dauto-id-1'));
   });
 
   it('approves pending link requests using the auto-suggested player match', async () => {

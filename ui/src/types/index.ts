@@ -242,6 +242,7 @@ export interface Club {
 export interface ClubMembership {
   role: ClubRole;
   playerId?: string | null;   // the player record this user is linked to (set by an admin)
+  acceptedInviteId?: string;  // invitation used to create this membership, when applicable
   addedAt?: Timestamp;
 }
 
@@ -250,6 +251,17 @@ export interface ClubMember {
   uid: string;
   role: ClubRole;
   playerId: string | null;
+}
+
+// clubInvitations/{id} — a one-time email invitation created by a club admin.
+export interface ClubInvitation {
+  id: string;
+  clubId: string;
+  email: string;
+  role: Exclude<ClubRole, 'superAdmin'>;
+  playerId: string | null;
+  createdBy: string;
+  createdAt?: Timestamp;
 }
 
 // clubs/{clubId}/linkRequests/{uid} — a user's request for an admin to link them to a player.
@@ -283,6 +295,8 @@ export interface BalanceLedgerEntry {
   reason: string;
   note?: string;
   createdAt?: Timestamp;
+  batchId?: string | null;
+  batchSequence?: number;
   // true when this entry actually moved the player's prepaid balance (e.g. the
   // Players-page balance adjustment); false/absent for entries that only affect
   // the owner payout total (e.g. a custom payout transaction) — those are

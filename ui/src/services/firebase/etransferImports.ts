@@ -547,6 +547,8 @@ export async function applyEtransferApprovalBatch(
           reason: 'etransfer-import',
           note: `Gmail e-Transfer from ${(importData.senderName as string) ?? 'unknown sender'}`,
           walletAdjustment: true,
+          batchId,
+          batchSequence: index,
           createdAt: serverTimestamp(),
         });
         tx.update(importRefs[index], {
@@ -572,7 +574,7 @@ export async function applyEtransferApprovalBatch(
       });
 
       const updatedSessionPlayers = new Map<string, SessionPlayer[]>();
-      for (const settlement of fresh.settlements) {
+      for (const [settlementIndex, settlement] of fresh.settlements.entries()) {
         const snap = sessionSnapById.get(settlement.sessionId)!;
         const players = updatedSessionPlayers.get(settlement.sessionId)
           ?? (snap.data().players as SessionPlayer[]);
@@ -602,6 +604,8 @@ export async function applyEtransferApprovalBatch(
           reason: 'settlement',
           note: `Settled from prepaid balance — session on ${settlement.sessionDate.toLocaleDateString()}`,
           walletAdjustment: true,
+          batchId,
+          batchSequence: fresh.inputs.length + settlementIndex,
           createdAt: serverTimestamp(),
         });
       }

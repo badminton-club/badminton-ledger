@@ -8,11 +8,20 @@ import {
   updateProfile,
   sendEmailVerification,
   sendPasswordResetEmail,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
   type User,
 } from 'firebase/auth';
 import { getDoc } from 'firebase/firestore';
 import { auth, memberDoc } from './client';
 import { serviceCall } from './utils';
+
+/** Uses an explicit app username when available, but never imports a Google profile name. */
+export function getAuthAccountName(user: Pick<User, 'displayName' | 'email' | 'providerData'>): string | null {
+  const isGoogleUser = user.providerData?.some((provider) => provider.providerId === 'google.com');
+  return (isGoogleUser ? null : user.displayName?.trim()) || user.email || null;
+}
 
 /** Opens the Google sign-in popup and resolves with the signed-in user. */
 export async function signInWithGoogle(): Promise<User> {
@@ -69,6 +78,29 @@ export async function resendVerificationEmail(): Promise<void> {
 export async function sendPasswordReset(email: string): Promise<void> {
   return serviceCall('sendPasswordReset', async () => {
     await sendPasswordResetEmail(auth, email);
+  });
+}
+
+/** Emails a passwordless sign-in link that returns to the supplied app URL. */
+export async function sendEmailSignInLink(email: string, returnUrl: string): Promise<void> {
+  return serviceCall('sendEmailSignInLink', async () => {
+    await sendSignInLinkToEmail(auth, email, {
+      url: returnUrl,
+      handleCodeInApp: true,
+    });
+  });
+}
+
+/** Returns whether the URL is a Firebase passwordless sign-in link. */
+export function isEmailSignInLink(link: string): boolean {
+  return isSignInWithEmailLink(auth, link);
+}
+
+/** Completes passwordless sign-in using the email that requested the link. */
+export async function completeEmailSignIn(email: string, link: string): Promise<User> {
+  return serviceCall('completeEmailSignIn', async () => {
+    const credential = await signInWithEmailLink(auth, email, link);
+    return credential.user;
   });
 }
 

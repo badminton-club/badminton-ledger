@@ -1,10 +1,13 @@
 import {
   getDoc,
   getDocs,
+  addDoc,
   setDoc,
   updateDoc,
   deleteDoc,
   writeBatch,
+  query,
+  where,
   arrayUnion,
   arrayRemove,
   serverTimestamp,
@@ -14,16 +17,21 @@ import {
   userDoc,
   clubDoc,
   memberDoc,
+  playerDoc,
   membersRef,
   linkRequestsRef,
   linkRequestDoc,
   profileEditRequestsRef,
   profileEditRequestDoc,
   clubCollection,
+  clubInvitationsRef,
+  clubInvitationDoc,
   CLUB_DATA_COLLECTIONS,
 } from './client';
 import { serviceCall } from './utils';
-import type { UserProfile, Club, ClubRole, ClubMember, LinkRequest, ProfileEditRequest, UserClub } from 'types';
+import { formatPlayerName } from './players';
+import type { UserProfile, Club, ClubRole, ClubMember, ClubInvitation, LinkRequest, ProfileEditRequest, UserClub } from 'types';
+import type { Player } from 'types';
 
 const EMPTY_PROFILE: UserProfile = { clubs: [], lastVisitedClub: null };
 
@@ -196,6 +204,23 @@ export async function fetchMemberPlayerId(clubId: string, uid: string): Promise<
   });
 }
 
+/** Returns the linked player's name for the member in a club, or null when unlinked. */
+export async function fetchMemberDisplayName(clubId: string, uid: string): Promise<string | null> {
+  return serviceCall('fetchMemberDisplayName', async () => {
+    const memberSnap = await getDoc(memberDoc(clubId, uid));
+    if (!memberSnap.exists()) return null;
+
+    const playerId = memberSnap.data().playerId;
+    if (typeof playerId !== 'string' || !playerId) return null;
+
+    const playerSnap = await getDoc(playerDoc(clubId, playerId));
+    if (!playerSnap.exists()) return null;
+
+    const name = formatPlayerName(playerSnap.data() as Pick<Player, 'firstName' | 'lastName'>).trim();
+    return name || null;
+  });
+}
+
 /** Lists all members of a club (admin-only). */
 export async function fetchClubMembers(clubId: string): Promise<ClubMember[]> {
   return serviceCall('fetchClubMembers', async () => {
@@ -224,6 +249,97 @@ export async function setMemberPlayer(clubId: string, uid: string, playerId: str
 export async function removeClubMember(clubId: string, uid: string): Promise<void> {
   return serviceCall('removeClubMember', async () => {
     await deleteDoc(memberDoc(clubId, uid));
+  });
+}
+
+// ─── Email invitations ──────────────────────────────────────────────────────
+
+/** Creates a one-time invitation, optionally pre-linked to a player. */
+export async function createClubInvitation(
+  clubId: string,
+  email: string,
+  role: Exclude<ClubRole, 'superAdmin'>,
+  playerId: string | null,
+  createdBy: string
+): Promise<ClubInvitation> {
+  return serviceCall('createClubInvitation', async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) throw new Error('Enter an email address.');
+
+    const ref = await addDoc(clubInvitationsRef, {
+      clubId,
+      email: normalizedEmail,
+      role,
+      playerId,
+      createdBy,
+      createdAt: serverTimestamp(),
+    });
+    return { id: ref.id, clubId, email: normalizedEmail, role, playerId, createdBy };
+  });
+}
+
+/** Lists outstanding invitations for a club (admin-only). */
+export async function fetchClubInvitations(clubId: string): Promise<ClubInvitation[]> {
+  return serviceCall('fetchClubInvitations', async () => {
+    const snap = await getDocs(query(clubInvitationsRef, where('clubId', '==', clubId)));
+    return snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        clubId: data.clubId as string,
+        email: data.email as string,
+        role: data.role as Exclude<ClubRole, 'superAdmin'>,
+        playerId: (data.playerId as string | null | undefined) ?? null,
+        createdBy: data.createdBy as string,
+        createdAt: data.createdAt,
+      };
+    });
+  });
+}
+
+/** Cancels an outstanding invitation. */
+export async function deleteClubInvitation(invitationId: string): Promise<void> {
+  return serviceCall('deleteClubInvitation', async () => {
+    await deleteDoc(clubInvitationDoc(invitationId));
+  });
+}
+
+/**
+ * Accepts an invitation for the signed-in email. The membership, saved club,
+ * and invitation deletion are committed atomically.
+ */
+export async function acceptClubInvitation(
+  invitationId: string,
+  uid: string,
+  email: string | null,
+  emailVerified: boolean
+): Promise<string> {
+  return serviceCall('acceptClubInvitation', async () => {
+    if (!email) throw new Error('Sign in with the email address that received this invitation.');
+    if (!emailVerified) throw new Error('Verify your email address before accepting this invitation.');
+
+    const invitationRef = clubInvitationDoc(invitationId);
+    const snap = await getDoc(invitationRef);
+    if (!snap.exists()) throw new Error('This invitation is invalid or has already been used.');
+
+    const invitation = snap.data();
+    const normalizedEmail = email.trim().toLowerCase();
+    if (invitation.email !== normalizedEmail) {
+      throw new Error(`This invitation was sent to ${invitation.email}. Sign in with that email to accept it.`);
+    }
+
+    const clubId = invitation.clubId as string;
+    const batch = writeBatch(db);
+    batch.set(memberDoc(clubId, uid), {
+      role: invitation.role,
+      playerId: invitation.playerId ?? null,
+      acceptedInviteId: invitationId,
+      addedAt: serverTimestamp(),
+    });
+    batch.set(userDoc(uid), { clubs: arrayUnion(clubId) }, { merge: true });
+    batch.delete(invitationRef);
+    await batch.commit();
+    return clubId;
   });
 }
 
@@ -372,8 +488,9 @@ export async function deleteClub(clubId: string, uid: string): Promise<void> {
       }
     }
 
-    const [members, linkRequests, profileEditRequests] = await Promise.all([
+    const [members, invitations, linkRequests, profileEditRequests] = await Promise.all([
       getDocs(membersRef(clubId)),
+      getDocs(query(clubInvitationsRef, where('clubId', '==', clubId))),
       getDocs(linkRequestsRef(clubId)),
       getDocs(profileEditRequestsRef(clubId)),
     ]);
@@ -381,6 +498,7 @@ export async function deleteClub(clubId: string, uid: string): Promise<void> {
     // any club with more members/requests than Firestore's per-batch limit.
     const refsToDelete = [
       ...members.docs.map((d) => d.ref),
+      ...invitations.docs.map((d) => d.ref),
       ...linkRequests.docs.map((d) => d.ref),
       ...profileEditRequests.docs.map((d) => d.ref),
       clubDoc(clubId),
