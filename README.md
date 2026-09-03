@@ -102,11 +102,11 @@ npm run build    # production build
 
 ## Deployment
 
-Two GitHub Actions workflows handle Hosting deploys only (Firestore rules are always deployed
-manually, as above):
+Two GitHub Actions workflows deploy Hosting and the matching Firestore rules:
 
-- `firebase-hosting-pr.yml` — builds and deploys a preview channel for every pull request
-- `firebase-hosting-live.yml` — builds and deploys to the live site on every push to `main`
+- `firebase-hosting-pr.yml` — validates and deploys rules to the development project, then
+  builds and deploys a preview channel for every pull request
+- `firebase-hosting-live.yml` — deploys rules and the live site on every push to `main`
 
 ## License
 
