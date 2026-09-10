@@ -86,7 +86,7 @@ describe('importEtransferEmails', () => {
     const result = await etransfer.importEtransferEmails();
 
     expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca', '2026-08-27');
-    expect(result).toEqual({ found: 3, created: 3 });
+    expect(result).toEqual({ found: 3, created: 3, autoSettled: 0 });
 
     const mapped = helpers.getClubDocData('etransferImports', 'msg-2');
     expect(mapped).toMatchObject({
@@ -114,7 +114,7 @@ describe('importEtransferEmails', () => {
 
     const result = await etransfer.importEtransferEmails('custom@bank.example');
 
-    expect(result).toEqual({ found: 1, created: 0 });
+    expect(result).toEqual({ found: 1, created: 0, autoSettled: 0 });
     expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'applied' });
   });
 
@@ -162,6 +162,83 @@ describe('importEtransferEmails', () => {
       matchedPlayerId: null,
       matchSource: null,
     });
+  });
+
+  it('automatically applies a matched transfer that exactly covers all unpaid sessions', async () => {
+    seedPlayer('p1', { balance: 0, owed: 30 });
+    helpers.seedClubDoc('sessions', 'oldest', {
+      date: helpers.ts('2026-08-01'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 10, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    helpers.seedClubDoc('sessions', 'newest', {
+      date: helpers.ts('2026-08-08'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 20, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([
+      makeParsedEmail({ amount: 30 }),
+    ]);
+
+    const result = await etransfer.importEtransferEmails();
+
+    expect(result).toEqual({ found: 1, created: 1, autoSettled: 1 });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
+      status: 'applied',
+      applicationMethod: 'auto-exact-owed',
+      autoSettledSessionIds: ['oldest', 'newest'],
+    });
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
+  });
+
+  it('leaves a matched transfer pending when it does not equal the full unpaid-session debt', async () => {
+    seedPlayer('p1', { balance: 0, owed: 30 });
+    helpers.seedClubDoc('sessions', 'oldest', {
+      date: helpers.ts('2026-08-01'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 30, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([
+      makeParsedEmail({ amount: 20 }),
+    ]);
+
+    const result = await etransfer.importEtransferEmails();
+
+    expect(result).toEqual({ found: 1, created: 1, autoSettled: 0 });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
+      status: 'pending',
+    });
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 30 });
+  });
+
+  it('does not auto-settle when the player debt and unpaid session records do not reconcile', async () => {
+    seedPlayer('p1', { balance: 0, owed: 30 });
+    helpers.seedClubDoc('sessions', 'only-session', {
+      date: helpers.ts('2026-08-01'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 20, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([
+      makeParsedEmail({ amount: 30 }),
+    ]);
+
+    const result = await etransfer.importEtransferEmails();
+
+    expect(result).toEqual({ found: 1, created: 1, autoSettled: 0 });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
+      status: 'pending',
+    });
+    expect(helpers.getClubDocData('sessions', 'only-session')?.players).toEqual([
+      expect.objectContaining({ paid: false, paidVia: null }),
+    ]);
   });
 });
 
@@ -302,7 +379,7 @@ describe('dismissEtransferImport', () => {
       gmailMessageId: 'msg-1', senderName: 'CAI FANG WU',
     })]);
     const result = await etransfer.importEtransferEmails();
-    expect(result).toEqual({ found: 1, created: 1 });
+    expect(result).toEqual({ found: 1, created: 1, autoSettled: 0 });
     expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'pending' });
   });
 

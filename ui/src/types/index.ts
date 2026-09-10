@@ -309,6 +309,7 @@ export interface BalanceLedgerEntry {
 // ─── Gmail e-Transfer autodeposit import ────────────────────────────────────────
 
 export type EtransferImportStatus = 'pending' | 'applied' | 'rejected' | 'undone';
+export type EtransferApplicationMethod = 'manual' | 'auto-exact-owed';
 
 // clubs/{clubId}/etransferImports/{id} — one Interac autodeposit notification email
 // found in Gmail, its parsed details, and (once reviewed) what was done about it.
@@ -339,6 +340,7 @@ export interface EtransferImport {
   appliedAmount?: number | null;         // amount actually credited (may differ if edited)
   balanceLedgerEntryId?: string | null;  // the balanceLedger entry this created, for undo
   autoSettledSessionIds?: string[];       // sessions automatically paid from this import's credited balance
+  applicationMethod?: EtransferApplicationMethod | null;
   // Shared by every import approved together in the same batch-approval call, so
   // the review history can group them back into one expandable entry. Null/absent
   // for imports that were only ever rejected/dismissed (never part of an apply batch).

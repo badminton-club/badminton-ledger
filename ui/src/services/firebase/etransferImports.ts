@@ -21,7 +21,13 @@ import {
   getDefaultEtransferSearchAfterDate,
   type ParsedEtransferEmail,
 } from './gmail';
-import type { EtransferImport, EtransferSenderMapping, Player, SessionPlayer } from 'types';
+import type {
+  EtransferApplicationMethod,
+  EtransferImport,
+  EtransferSenderMapping,
+  Player,
+  SessionPlayer,
+} from 'types';
 
 export interface EtransferBatchApprovalInput {
   importId: string;
@@ -65,6 +71,12 @@ export interface EtransferBatchPreview {
 export interface EtransferBatchResult {
   approved: number;
   settled: number;
+}
+
+export interface EtransferImportResult {
+  found: number;
+  created: number;
+  autoSettled: number;
 }
 
 /**
@@ -186,6 +198,7 @@ function toEtransferImport(id: string, data: Record<string, unknown>): Etransfer
     appliedAmount: (data.appliedAmount as number | null) ?? null,
     balanceLedgerEntryId: (data.balanceLedgerEntryId as string | null) ?? null,
     autoSettledSessionIds: (data.autoSettledSessionIds as string[] | undefined) ?? [],
+    applicationMethod: (data.applicationMethod as EtransferApplicationMethod | null) ?? null,
     batchId: (data.batchId as string | null) ?? null,
     rejectionReason: (data.rejectionReason as string | null) ?? null,
     undoneByUid: (data.undoneByUid as string | null) ?? null,
@@ -248,16 +261,17 @@ export async function deleteEtransferSenderMapping(id: string): Promise<void> {
  * one not already seen as a `pending` import — using the Gmail message id as the
  * Firestore doc id makes this naturally idempotent, so it's always safe to
  * re-run. Each new import is pre-matched to a player, preferring a remembered
- * sender mapping over a plain name lookup, but always left for an admin to
- * confirm or correct before anything touches a balance.
+ * sender mapping over a plain name lookup. A newly found, matched transfer is
+ * automatically applied only when its amount exactly equals the player's full
+ * unpaid-session debt and the session records reconcile with that debt.
  */
 export async function importEtransferEmails(
   senderAddress: string = DEFAULT_ETRANSFER_SENDER_ADDRESS,
   searchAfterDate: string = getDefaultEtransferSearchAfterDate()
-): Promise<{ found: number; created: number }> {
+): Promise<EtransferImportResult> {
   return serviceCall('importEtransferEmails', async () => {
     const parsed = await searchEtransferEmails(senderAddress, searchAfterDate);
-    if (parsed.length === 0) return { found: 0, created: 0 };
+    if (parsed.length === 0) return { found: 0, created: 0, autoSettled: 0 };
 
     // A club's search results are a handful of emails at a time, so checking
     // each message id individually keeps this simple and avoids Firestore's
@@ -268,15 +282,53 @@ export async function importEtransferEmails(
     const toCreate = parsed.filter((_, i) => !existsChecks[i].exists());
     const players = toCreate.length > 0 ? await fetchPlayersForMatching() : [];
 
-    for (const email of toCreate) {
-      await createPendingImport(email, players);
+    const newImports: EtransferImport[] = [];
+    const orderedToCreate = [...toCreate].sort(
+      (a, b) => a.emailDate.getTime() - b.emailDate.getTime()
+    );
+    for (const email of orderedToCreate) {
+      newImports.push(await createPendingImport(email, players));
     }
 
-    return { found: parsed.length, created: toCreate.length };
+    let autoSettled = 0;
+    const playerById = new Map(players.map((player) => [player.id, player]));
+    for (const etransferImport of newImports) {
+      const matchedPlayer = etransferImport.matchedPlayerId
+        ? playerById.get(etransferImport.matchedPlayerId)
+        : null;
+      if (
+        !matchedPlayer
+        || toCents(etransferImport.amount) <= 0
+        || toCents(etransferImport.amount) !== toCents(matchedPlayer.owed ?? 0)
+      ) {
+        continue;
+      }
+
+      const preview = await previewEtransferApprovalBatch([{
+        importId: etransferImport.id,
+        playerId: matchedPlayer.id,
+        amount: etransferImport.amount,
+        rememberMapping: false,
+      }]);
+      const startingOwedCents = toCents(preview.startingOwed[matchedPlayer.id] ?? 0);
+      const settledCents = preview.settlements
+        .filter((settlement) => settlement.playerId === matchedPlayer.id)
+        .reduce((sum, settlement) => sum + toCents(settlement.cost), 0);
+      const stillExact = startingOwedCents > 0
+        && toCents(etransferImport.amount) === startingOwedCents
+        && settledCents === startingOwedCents
+        && !preview.blockingSessions.some((session) => session.playerId === matchedPlayer.id);
+      if (!stillExact) continue;
+
+      await applyEtransferApprovalBatch(preview, { applicationMethod: 'auto-exact-owed' });
+      autoSettled += 1;
+    }
+
+    return { found: parsed.length, created: toCreate.length, autoSettled };
   });
 }
 
-async function createPendingImport(email: ParsedEtransferEmail, players: Player[]): Promise<void> {
+async function createPendingImport(email: ParsedEtransferEmail, players: Player[]): Promise<EtransferImport> {
   const match = await resolveSenderMatch(email.senderEmail, email.senderName, players);
 
   await setDoc(doc(refs.etransferImports, email.gmailMessageId), {
@@ -294,6 +346,21 @@ async function createPendingImport(email: ParsedEtransferEmail, players: Player[
     matchSource: match.source,
     createdAt: serverTimestamp(),
   });
+  return {
+    id: email.gmailMessageId,
+    gmailMessageId: email.gmailMessageId,
+    gmailThreadId: email.gmailThreadId,
+    subject: email.subject,
+    senderName: email.senderName,
+    senderEmail: email.senderEmail,
+    amount: email.amount,
+    memo: email.memo,
+    referenceNumber: email.referenceNumber,
+    emailDate: Timestamp.fromDate(email.emailDate),
+    status: 'pending',
+    matchedPlayerId: match.playerId,
+    matchSource: match.source,
+  };
 }
 
 /** The pending review queue, newest email first. */
@@ -436,7 +503,8 @@ export async function previewEtransferApprovalBatch(
  * starts until the admin reviews a fresh plan.
  */
 export async function applyEtransferApprovalBatch(
-  reviewed: EtransferBatchPreview
+  reviewed: EtransferBatchPreview,
+  options: { applicationMethod?: EtransferApplicationMethod } = {}
 ): Promise<EtransferBatchResult> {
   return serviceCall('applyEtransferApprovalBatch', async () => {
     const fresh = await previewEtransferApprovalBatch(reviewed.inputs);
@@ -557,6 +625,7 @@ export async function applyEtransferApprovalBatch(
           appliedAmount: input.amount,
           balanceLedgerEntryId: ledgerRef.id,
           autoSettledSessionIds: settledSessionIds,
+          applicationMethod: options.applicationMethod ?? 'manual',
           batchId,
           reviewedByUid,
           reviewedAt: serverTimestamp(),
@@ -685,6 +754,7 @@ export async function applyEtransferImport(
         matchedPlayerId: options.playerId,
         appliedAmount: amount,
         balanceLedgerEntryId: ledgerRef.id,
+        applicationMethod: 'manual',
         reviewedByUid: uid,
         reviewedAt: serverTimestamp(),
       });
@@ -896,6 +966,7 @@ export async function undoEtransferImport(importId: string, reason: string): Pro
         matchedPlayerId: rematch.playerId,
         matchSource: rematch.source,
         autoSettledSessionIds: [],
+        applicationMethod: null,
         // Clear apply-only bookkeeping so a reopened import that's later
         // rejected (rather than re-applied) doesn't keep looking like it's
         // still part of its old approval batch in history — see the history

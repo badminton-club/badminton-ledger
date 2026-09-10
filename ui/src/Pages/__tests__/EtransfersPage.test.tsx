@@ -104,6 +104,53 @@ describe('EtransfersPage', () => {
     expect(screen.getByRole('combobox', { name: '' })).toHaveValue('p1');
   });
 
+  it('shows newly fetched exact-debt payments in a separate auto-settled list', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 30 }));
+    seedClubDoc('sessions', 'oldest', {
+      date: ts('2026-08-01T12:00:00'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 10, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    seedClubDoc('sessions', 'newer', {
+      date: ts('2026-08-08T12:00:00'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 20, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    jest.mocked(searchEtransferEmails).mockResolvedValue([{
+      gmailMessageId: 'msg-exact',
+      gmailThreadId: 'thread-exact',
+      subject: 'Exact payment received',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'caifang1966@gmail.com',
+      amount: 30,
+      memo: null,
+      referenceNumber: 'EXACT30',
+      emailDate: new Date('2026-08-26T14:47:00.000Z'),
+    }]);
+
+    renderPage();
+    await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+
+    expect(await screen.findByText(/1 exact payment automatically settled/i)).toBeInTheDocument();
+    const autoSettledCard = screen.getByText('Auto-settled exact payments (1)').closest('.card') as HTMLElement;
+    expect(within(autoSettledCard).getByText('CAI FANG WU')).toBeInTheDocument();
+    expect(within(autoSettledCard).getByText('$30.00')).toBeInTheDocument();
+    expect(within(autoSettledCard).getByText('2')).toBeInTheDocument();
+    expect(within(autoSettledCard).getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+    expect(screen.getByText('No manually reviewed imports yet.')).toBeInTheDocument();
+    expect(getClubDocData('etransferImports', 'msg-exact')).toMatchObject({
+      status: 'applied',
+      applicationMethod: 'auto-exact-owed',
+    });
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
+  });
+
   it('loads a saved rolling window and lets an admin switch presets and save', async () => {
     const user = userEvent.setup();
     seedClubMetaDoc('test-club', { name: 'Test Club', etransferSearchWindowDays: 30 });
@@ -180,7 +227,7 @@ describe('EtransfersPage', () => {
     await waitFor(() => expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 210 }));
     expect(await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.')).toBeInTheDocument();
 
-    const historyCard = screen.getByText('History').closest('.card') as HTMLElement;
+    const historyCard = screen.getByText('Manually reviewed').closest('.card') as HTMLElement;
     expect(within(historyCard).getByText('Applied')).toBeInTheDocument();
     expect(within(historyCard).getByRole('button', { name: /undo/i })).toBeInTheDocument();
   });
@@ -268,7 +315,7 @@ describe('EtransfersPage', () => {
 
     await waitFor(() => expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 8 }));
 
-    const historyCard = screen.getByText('History').closest('.card') as HTMLElement;
+    const historyCard = screen.getByText('Manually reviewed').closest('.card') as HTMLElement;
     // Collapsed: one summary row for the batch, not two individual rows.
     expect(within(historyCard).queryByText('CAI FANG WU')).not.toBeInTheDocument();
     expect(within(historyCard).queryByText('PAT SMITH')).not.toBeInTheDocument();
@@ -458,7 +505,7 @@ describe('EtransfersPage', () => {
     // No balance change for a rejected import.
     expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 10 });
 
-    const historyCard = screen.getByText('History').closest('.card') as HTMLElement;
+    const historyCard = screen.getByText('Manually reviewed').closest('.card') as HTMLElement;
     expect(within(historyCard).getByText('Rejected')).toBeInTheDocument();
     expect(within(historyCard).getByText('not a club payment')).toBeInTheDocument();
   });
@@ -506,7 +553,7 @@ describe('EtransfersPage', () => {
     });
 
     renderPage();
-    const historyCard = (await screen.findByText('History')).closest('.card') as HTMLElement;
+    const historyCard = (await screen.findByText('Manually reviewed')).closest('.card') as HTMLElement;
     await user.click(within(historyCard).getByRole('button', { name: 'Undo' }));
     const dialog = screen.getByRole('dialog');
     await user.type(within(dialog).getByLabelText(/reason for undoing this/i), 'review again');

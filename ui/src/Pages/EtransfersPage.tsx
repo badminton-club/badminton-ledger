@@ -191,12 +191,17 @@ export default function EtransfersPage() {
     setSearchMessage('');
     try {
       await persistSearchSetting();
-      const { found, created } = await importEtransferEmails(senderAddress, searchAfterDate);
+      const { found, created, autoSettled } = await importEtransferEmails(senderAddress, searchAfterDate);
+      const pendingCreated = created - autoSettled;
       setSearchMessage(
         found === 0
           ? 'No new autodeposit emails found.'
           : created > 0
-            ? `Found ${found} email(s) — ${created} new, added below for review.`
+            ? autoSettled > 0
+              ? `Found ${found} email(s) — ${created} new; ${autoSettled} exact payment`
+                + `${autoSettled === 1 ? '' : 's'} automatically settled`
+                + `${pendingCreated > 0 ? ` and ${pendingCreated} added below for review` : ''}.`
+              : `Found ${found} email(s) — ${created} new, added below for review.`
             : `Found ${found} email(s) — all already reviewed.`
       );
       await load();
@@ -396,20 +401,28 @@ export default function EtransfersPage() {
     () => [...history].sort((a, b) => (toJSDate(b.emailDate)?.getTime() ?? 0) - (toJSDate(a.emailDate)?.getTime() ?? 0)),
     [history]
   );
+  const autoSettledHistory = useMemo(
+    () => sortedHistory.filter((imp) => imp.applicationMethod === 'auto-exact-owed'),
+    [sortedHistory]
+  );
+  const manualHistory = useMemo(
+    () => sortedHistory.filter((imp) => imp.applicationMethod !== 'auto-exact-owed'),
+    [sortedHistory]
+  );
 
   // Group history rows sharing a batchId (i.e. approved together in one batch
   // review) back into one expandable entry, in the order each group's newest
   // item first appears in the (already date-desc) sorted list.
   const historyGroups = useMemo(() => {
     const groups = new Map<string, EtransferImport[]>();
-    for (const imp of sortedHistory) {
+    for (const imp of manualHistory) {
       const key = imp.batchId || `single:${imp.id}`;
       const list = groups.get(key);
       if (list) list.push(imp);
       else groups.set(key, [imp]);
     }
     return [...groups.entries()].map(([key, items]) => ({ key, items }));
-  }, [sortedHistory]);
+  }, [manualHistory]);
 
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
   const toggleBatch = (key: string) => {
@@ -476,8 +489,9 @@ export default function EtransfersPage() {
       <h2>e-Transfer Import</h2>
       <p className="text-muted">
         Search Gmail for Interac e-Transfer autodeposit notifications, review the suggested player
-        match and amount, then apply to credit their balance. Nothing is written to a player's
-        balance until you approve or reject each one below.
+        match and amount, then apply to credit their balance. A confidently matched transfer is
+        applied automatically when its amount exactly equals all of that player's unpaid sessions;
+        everything else waits for review below.
       </p>
 
       <Card className="mb-3">
@@ -713,11 +727,57 @@ export default function EtransfersPage() {
         </Card.Body>
       </Card>
 
-      <Card>
-        <Card.Header>History</Card.Header>
+      <Card className="mb-4">
+        <Card.Header>Auto-settled exact payments ({autoSettledHistory.length})</Card.Header>
         <Card.Body className="p-0">
-          {sortedHistory.length === 0 ? (
-            <p className="text-muted p-3 mb-0">No reviewed imports yet.</p>
+          {autoSettledHistory.length === 0 ? (
+            <p className="text-muted p-3 mb-0">No exact payments have been auto-settled yet.</p>
+          ) : (
+            <Table responsive hover className="mb-0 align-middle">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Sender</th>
+                  <th>Player</th>
+                  <th>Amount</th>
+                  <th>Sessions settled</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {autoSettledHistory.map((imp) => {
+                  const emailDate = toJSDate(imp.emailDate);
+                  const settledCount = imp.autoSettledSessionIds?.length ?? 0;
+                  return (
+                    <tr key={imp.id}>
+                      <td>{emailDate ? format(emailDate, 'MMM d, yyyy') : '—'}</td>
+                      <td>{imp.senderName}</td>
+                      <td>{playerName(imp.matchedPlayerId)}</td>
+                      <td>{money(imp.appliedAmount ?? imp.amount)}</td>
+                      <td>{settledCount}</td>
+                      <td>
+                        <Button
+                          size="sm"
+                          variant="outline-secondary"
+                          onClick={() => { setUndoTarget(imp); setUndoReason(''); setUndoError(''); }}
+                        >
+                          Undo
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          )}
+        </Card.Body>
+      </Card>
+
+      <Card>
+        <Card.Header>Manually reviewed</Card.Header>
+        <Card.Body className="p-0">
+          {manualHistory.length === 0 ? (
+            <p className="text-muted p-3 mb-0">No manually reviewed imports yet.</p>
           ) : (
             <Table responsive hover className="mb-0 align-middle">
               <thead>
