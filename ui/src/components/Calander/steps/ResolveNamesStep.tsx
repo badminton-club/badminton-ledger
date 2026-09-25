@@ -18,14 +18,35 @@ interface Props {
     onBack: () => void;
 }
 
+interface NewPlayerDraft {
+    firstName: string;
+    lastName: string;
+    isGuest: boolean;
+}
+
+function draftFromName(name: string): NewPlayerDraft {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    return {
+        firstName: parts[0] ?? "",
+        lastName: parts.slice(1).join(" "),
+        isGuest: false,
+    };
+}
+
 export default function ResolveNamesStep({ onComplete, onBack }: Props) {
     const dispatch = useAppDispatch();
     const items = useAppSelector(selectResolutionItems);
     const formError = useAppSelector(selectFormError);
     const allDone = useAppSelector(selectAllResolved);
+    const existingPlayers = useAppSelector(selectAllPlayers);
+    const [isSavingAll, setIsSavingAll] = useState(false);
+    const [newPlayerDrafts, setNewPlayerDrafts] = useState<Record<string, NewPlayerDraft>>({});
 
     const pendingCount = items.filter((i) => i.status === "pending").length;
     const unresolvedCount = items.filter((i) => !i.resolvedPlayerId).length;
+    const saveableItems = items.filter((i) =>
+        i.isEditing || !!newPlayerDrafts[i.id] || (i.status === "unmatched" && !i.resolvedPlayerId)
+    );
 
     const resolvedIds = items.map((i) => i.resolvedPlayerId).filter(Boolean);
     const duplicateIds = new Set(resolvedIds.filter((id, _, arr) => arr.filter((x) => x === id).length > 1));
@@ -33,7 +54,85 @@ export default function ResolveNamesStep({ onComplete, onBack }: Props) {
     // Drops the whole row — used when a suggested/matched player is wrong for
     // this session and the attendee should just be excluded, not re-matched.
     const handleRemove = (index: number) => {
+        const itemId = items[index]?.id;
+        if (itemId) {
+            setNewPlayerDrafts((current) => {
+                const next = { ...current };
+                delete next[itemId];
+                return next;
+            });
+        }
         dispatch(setResolutionItems(items.filter((_, i) => i !== index)));
+    };
+
+    const handleSaveAll = async () => {
+        const knownFirstNames = new Set(existingPlayers.map((player) => player.firstName.trim().toLowerCase()));
+        const knownFullNames = new Set(existingPlayers.map((player) =>
+            `${player.firstName.trim().toLowerCase()} ${(player.lastName ?? "").trim().toLowerCase()}`.trim()
+        ));
+        const plans: Array<{ item: NameResolutionItem; input: NewPlayerInput }> = [];
+
+        for (const item of saveableItems) {
+            const draft = newPlayerDrafts[item.id] ?? draftFromName(item.editableName);
+            const firstName = draft.firstName.trim();
+            const lastName = draft.lastName.trim();
+            const firstKey = firstName.toLowerCase();
+            const fullKey = `${firstKey} ${lastName.toLowerCase()}`.trim();
+
+            if (!firstName) {
+                dispatch(setFormError(`"${item.rawName}" needs a first name before it can be saved.`));
+                return;
+            }
+            if (!lastName && knownFirstNames.has(firstKey)) {
+                dispatch(setFormError(`"${firstName}" already exists — add a last name to differentiate.`));
+                return;
+            }
+            if (knownFullNames.has(fullKey)) {
+                dispatch(setFormError(`"${[firstName, lastName].filter(Boolean).join(" ")}" already exists.`));
+                return;
+            }
+
+            knownFirstNames.add(firstKey);
+            knownFullNames.add(fullKey);
+            plans.push({
+                item,
+                input: {
+                    firstName,
+                    lastName: lastName || null,
+                    email: null,
+                    balance: 0,
+                    description: "",
+                    isGuest: draft.isGuest,
+                },
+            });
+        }
+
+        dispatch(setFormError(""));
+        setIsSavingAll(true);
+        try {
+            for (const { item, input } of plans) {
+                const id = await addPlayer(input);
+                const player = { id, ...input } as unknown as Player;
+                dispatch(updateResolutionItem({
+                    id: item.id,
+                    patch: {
+                        status: "matched",
+                        candidates: [player],
+                        resolvedPlayerId: id,
+                        isEditing: false,
+                    },
+                }));
+                setNewPlayerDrafts((current) => {
+                    const next = { ...current };
+                    delete next[item.id];
+                    return next;
+                });
+            }
+        } catch (err: unknown) {
+            dispatch(setFormError(err instanceof Error ? err.message : "Failed to save all players."));
+        } finally {
+            setIsSavingAll(false);
+        }
     };
 
     return (
@@ -53,6 +152,16 @@ export default function ResolveNamesStep({ onComplete, onBack }: Props) {
                     dispatch={dispatch}
                     isDuplicate={!!item.resolvedPlayerId && duplicateIds.has(item.resolvedPlayerId)}
                     onRemove={() => handleRemove(index)}
+                    newPlayerDraft={newPlayerDrafts[item.id]}
+                    onNewPlayerDraftChange={(draft) => setNewPlayerDrafts((current) => ({
+                        ...current,
+                        [item.id]: draft,
+                    }))}
+                    onNewPlayerDraftClear={() => setNewPlayerDrafts((current) => {
+                        const next = { ...current };
+                        delete next[item.id];
+                        return next;
+                    })}
                 />
             ))}
 
@@ -72,6 +181,15 @@ export default function ResolveNamesStep({ onComplete, onBack }: Props) {
                         <span className="text-muted small">
                             {items.length - unresolvedCount} / {items.length} confirmed
                         </span>
+                    )}
+                    {saveableItems.length > 0 && (
+                        <Button
+                            variant="success"
+                            disabled={pendingCount > 0 || isSavingAll}
+                            onClick={handleSaveAll}
+                        >
+                            {isSavingAll ? <Spinner size="sm" animation="border" /> : "Save All"}
+                        </Button>
                     )}
                     {duplicateIds.size > 0 ?
                         <OverlayTrigger
@@ -112,12 +230,18 @@ function NameRow({
     dispatch,
     isDuplicate,
     onRemove,
+    newPlayerDraft,
+    onNewPlayerDraftChange,
+    onNewPlayerDraftClear,
 }: {
     item: NameResolutionItem;
     index: number;
     dispatch: ReturnType<typeof useAppDispatch>;
     isDuplicate: boolean;
     onRemove: () => void;
+    newPlayerDraft?: NewPlayerDraft;
+    onNewPlayerDraftChange: (draft: NewPlayerDraft) => void;
+    onNewPlayerDraftClear: () => void;
 }) {
     const [isRematching, setIsRematching] = useState(false);
     const [showInlineAdd, setShowInlineAdd] = useState(false);
@@ -149,7 +273,13 @@ function NameRow({
             candidates: [newPlayer],
             resolvedPlayerId: newPlayer.id,
         });
+        onNewPlayerDraftClear();
         setShowInlineAdd(false);
+    };
+
+    const handleOpenAdd = () => {
+        if (!newPlayerDraft) onNewPlayerDraftChange(draftFromName(item.editableName));
+        setShowInlineAdd(true);
     };
 
     return (
@@ -219,17 +349,22 @@ function NameRow({
                                         : "unmatched",
                                 })
                             }
-                            onOpenAdd={() => setShowInlineAdd(true)}
+                            onOpenAdd={handleOpenAdd}
                         />
                     </Col>
                 </Row>
 
                 {/* Inline create player */}
-                {showInlineAdd && (
+                {showInlineAdd && !item.resolvedPlayerId && (
                     <InlineAddPlayer
-                        initialName={item.editableName}
+                        idSuffix={item.id}
+                        draft={newPlayerDraft ?? draftFromName(item.editableName)}
+                        onDraftChange={onNewPlayerDraftChange}
                         onCreated={handlePlayerCreated}
-                        onCancel={() => setShowInlineAdd(false)}
+                        onCancel={() => {
+                            onNewPlayerDraftClear();
+                            setShowInlineAdd(false);
+                        }}
                     />
                 )}
             </Card.Body>
@@ -326,25 +461,26 @@ function StatusContent({
 // ─── Inline new player form ───────────────────────────────────────────────────
 
 function InlineAddPlayer({
-    initialName,
+    idSuffix,
+    draft,
+    onDraftChange,
     onCreated,
     onCancel,
 }: {
-    initialName: string;
+    idSuffix: string;
+    draft: NewPlayerDraft;
+    onDraftChange: (draft: NewPlayerDraft) => void;
     onCreated: (player: Player) => void;
     onCancel: () => void;
 }) {
     const existingPlayers = useAppSelector(selectAllPlayers);
 
-    const parts = initialName.trim().split(/\s+/);
-    const [firstName, setFirstName] = useState(parts[0] ?? "");
-    const [lastName, setLastName] = useState(parts.slice(1).join(" "));
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState("");
 
     const validate = (): string | null => {
-        const first = firstName.trim().toLowerCase();
-        const last = lastName.trim().toLowerCase();
+        const first = draft.firstName.trim().toLowerCase();
+        const last = draft.lastName.trim().toLowerCase();
 
         if (!first) return "First name is required.";
 
@@ -352,12 +488,12 @@ function InlineAddPlayer({
         const sameFirst = existingPlayers.filter((p) => p.firstName.toLowerCase() === first);
 
         if (sameFirst.length > 0 && !last) {
-            return `"${firstName.trim()}" already exists — add a last name to differentiate.`;
+            return `"${draft.firstName.trim()}" already exists — add a last name to differentiate.`;
         }
 
         // Check for exact first + last name match
         if (sameFirst.some((p) => (p.lastName ?? "").toLowerCase() === last)) {
-            return `"${firstName.trim()} ${lastName.trim()}" already exists. Check the player list — they may already be in the system.`;
+            return `"${draft.firstName.trim()} ${draft.lastName.trim()}" already exists. Check the player list — they may already be in the system.`;
         }
 
         return null;
@@ -371,11 +507,12 @@ function InlineAddPlayer({
         setIsSaving(true);
         try {
             const input: NewPlayerInput = {
-                firstName: firstName.trim(),
-                lastName: lastName.trim() || null,
+                firstName: draft.firstName.trim(),
+                lastName: draft.lastName.trim() || null,
                 email: null,
                 balance: 0,
                 description: "",
+                isGuest: draft.isGuest,
             };
             const id = await addPlayer(input);
             onCreated({ id, ...input } as unknown as Player);
@@ -399,16 +536,16 @@ function InlineAddPlayer({
                     <Form.Control
                         size="sm"
                         placeholder="First name *"
-                        value={firstName}
-                        onChange={(e) => setFirstName(e.target.value)}
+                        value={draft.firstName}
+                        onChange={(e) => onDraftChange({ ...draft, firstName: e.target.value })}
                     />
                 </Col>
                 <Col>
                     <Form.Control
                         size="sm"
                         placeholder="Last name"
-                        value={lastName}
-                        onChange={(e) => setLastName(e.target.value)}
+                        value={draft.lastName}
+                        onChange={(e) => onDraftChange({ ...draft, lastName: e.target.value })}
                     />
                 </Col>
                 <Col xs="auto">
@@ -424,6 +561,14 @@ function InlineAddPlayer({
                     </Button>
                 </Col>
             </Row>
+            <Form.Check
+                type="checkbox"
+                id={`guest-checkbox-${idSuffix}`}
+                className="mt-2 small"
+                label="Guest (one-time attendee — won't show on the Players tab, but their balance is still tracked)"
+                checked={draft.isGuest}
+                onChange={(e) => onDraftChange({ ...draft, isGuest: e.target.checked })}
+            />
         </div>
     );
 }

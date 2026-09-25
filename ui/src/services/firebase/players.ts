@@ -72,6 +72,7 @@ export async function addPlayer(input: NewPlayerInput): Promise<string> {
       owed:           0,
       description:    input.description ?? '',
       sessionCount:   0,
+      isGuest:        input.isGuest ?? false,
       createdAt:      serverTimestamp(),
     });
     return docRef.id;
@@ -83,10 +84,16 @@ export function formatPlayerName(player: Pick<Player, 'firstName' | 'lastName'>)
   return [player.firstName, player.lastName].filter(Boolean).join(' ');
 }
 
-/** Updates a player's name and email (keeps the lowercase search fields in sync). */
+/** Updates a player's profile (keeps the lowercase search fields in sync). */
 export async function updatePlayerProfile(
   playerId: string,
-  input: { firstName: string; lastName: string | null; email: string | null }
+  input: {
+    firstName: string;
+    lastName: string | null;
+    email: string | null;
+    defaultPayerId?: string | null;
+    isGuest?: boolean;
+  }
 ): Promise<void> {
   return serviceCall('updatePlayerProfile', async () => {
     await updateDoc(doc(refs.players, playerId), {
@@ -95,6 +102,8 @@ export async function updatePlayerProfile(
       lastName:       input.lastName ?? null,
       lastNameLower:  input.lastName ? input.lastName.toLowerCase() : null,
       email:          input.email ?? null,
+      ...(input.defaultPayerId !== undefined ? { defaultPayerId: input.defaultPayerId } : {}),
+      ...(input.isGuest !== undefined ? { isGuest: input.isGuest } : {}),
     });
   });
 }
@@ -113,14 +122,16 @@ export async function deletePlayer(playerId: string): Promise<void> {
     const clubId = getCurrentClubId();
     if (!clubId) throw new Error('No club selected — set a current club before deleting a player.');
 
-    const [memberSnap, editRequestSnap] = await Promise.all([
+    const [memberSnap, editRequestSnap, dependentPlayerSnap] = await Promise.all([
       getDocs(query(membersRef(clubId), where('playerId', '==', playerId))),
       getDocs(query(profileEditRequestsRef(clubId), where('playerId', '==', playerId))),
+      getDocs(query(refs.players, where('defaultPayerId', '==', playerId))),
     ]);
 
     const batch = writeBatch(db);
     memberSnap.docs.forEach((d) => batch.update(d.ref, { playerId: null }));
     editRequestSnap.docs.forEach((d) => batch.delete(d.ref));
+    dependentPlayerSnap.docs.forEach((d) => batch.update(d.ref, { defaultPayerId: null }));
     batch.delete(doc(refs.players, playerId));
     await batch.commit();
   });

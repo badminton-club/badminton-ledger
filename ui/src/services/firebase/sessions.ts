@@ -882,6 +882,10 @@ export async function togglePlayerHighlightStatus(
 export async function deleteSession(sessionId: string): Promise<void> {
   return serviceCall('deleteSession', async () => {
     const sessionRef = doc(refs.sessions, sessionId);
+    const transactionSnap = await getDocs(query(
+      refs.transactions,
+      where('sessionId', '==', sessionId)
+    ));
 
     await runTransaction(db, async (tx) => {
       const sessionSnap = await tx.get(sessionRef);
@@ -997,6 +1001,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
         ...session,
         archivedAt: serverTimestamp(),
       });
+      transactionSnap.docs.forEach(snapshot => tx.delete(snapshot.ref));
       tx.delete(sessionRef);
     });
   });

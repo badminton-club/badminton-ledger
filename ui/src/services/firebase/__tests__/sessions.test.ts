@@ -1,4 +1,4 @@
-import { addSession, editSession, fetchSessions } from '../sessions';
+import { addSession, deleteSession, editSession, fetchSessions } from '../sessions';
 import type { NewSessionData } from '../sessions';
 import {
   resetFirebaseTestState,
@@ -335,6 +335,36 @@ describe('editSession', () => {
 
     expect(getClubDocData('players', 'p2')?.sessionCount).toBe(1); // newly added
     expect(getClubDocData('players', 'p1')?.sessionCount).toBe(2); // unchanged — still a member
+  });
+});
+
+describe('deleteSession', () => {
+  it('removes resource transactions so deleted sessions disappear from batch history', async () => {
+    seedBirdieBatch('b1');
+    seedCourtBatch('c1');
+    const sessionId = await addSession(baseSessionData({
+      birdieUsage: [{ id: 'b1', quantity: 12 }],
+      courtCreditUsage: [{ id: 'c1', hoursUsed: 2 }],
+    }));
+
+    const unrelatedTransaction = 'unrelated-tx';
+    seedClubDoc('transactions', unrelatedTransaction, {
+      resourceType: 'birdie',
+      batchId: 'b1',
+      quantityUsed: 1,
+      sessionId: 'another-session',
+      date: ts('2026-08-28'),
+    });
+
+    await deleteSession(sessionId);
+
+    const transactions = __getAllPaths()
+      .filter(path => path.includes('/transactions/'))
+      .map(path => getClubDocData('transactions', path.split('/').pop()!)!);
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0].sessionId).toBe('another-session');
+    expect(getClubDocData('sessions', sessionId)).toBeUndefined();
+    expect(getClubDocData('archivedSessions', sessionId)).toBeDefined();
   });
 });
 

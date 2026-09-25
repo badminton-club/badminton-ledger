@@ -21,6 +21,7 @@ import {
   fetchUserProfile,
   removeClubFromUser,
   removeClubMember,
+  setClubDefaultCourtCount,
   setClubTabEnabled,
   setClubEtransferSearchAfterDate,
   setClubEtransferSearchWindowDays,
@@ -53,6 +54,7 @@ describe('createClub', () => {
     expect(__getDocData('clubs/club-a')).toMatchObject({
       name: 'Alpha Club',
       ownerUid: 'owner-1',
+      defaultCourtCount: 4,
       createdAt: expect.any(Timestamp),
     });
     expect(__getDocData('clubs/club-a/members/owner-1')).toMatchObject({
@@ -476,6 +478,28 @@ describe('setClubTabEnabled', () => {
       name: 'Alpha Club',
       disabledTabs: ['ledger'],
     });
+  });
+});
+
+describe('setClubDefaultCourtCount', () => {
+  it('persists a positive whole-number session default', async () => {
+    seedClubMetaDoc('club-a', { name: 'Alpha Club' });
+
+    await setClubDefaultCourtCount('club-a', 6);
+
+    expect(__getDocData('clubs/club-a')).toMatchObject({
+      name: 'Alpha Club',
+      defaultCourtCount: 6,
+    });
+  });
+
+  it('rejects invalid court counts without updating the club', async () => {
+    seedClubMetaDoc('club-a', { name: 'Alpha Club', defaultCourtCount: 4 });
+
+    await expect(setClubDefaultCourtCount('club-a', 1.5)).rejects.toThrow(
+      'Default court count must be a positive whole number.'
+    );
+    expect(__getDocData('clubs/club-a')?.defaultCourtCount).toBe(4);
   });
 });
 

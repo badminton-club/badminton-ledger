@@ -1,8 +1,9 @@
 import React from 'react';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { renderWithProviders, makePlayersState } from '../../../../test-utils/renderWithProviders';
-import { resetFirebaseTestState, seedClubDoc, ts } from '../../../../test-utils/firebaseTestHelpers';
+import { renderWithProviders, makeClubState, makePlayersState } from '../../../../test-utils/renderWithProviders';
+import { resetFirebaseTestState, seedClubDoc, seedClubMetaDoc, getClubDocData, ts, TEST_CLUB_ID } from '../../../../test-utils/firebaseTestHelpers';
+import { __getAllPaths } from '../../../../test-utils/fakeFirestore';
 import SessionDetailsStep from '../SessionDetailsStep';
 import type { Player, ConfirmedPlayer, Session } from 'types';
 import type { RootState } from '../../../../store';
@@ -42,6 +43,7 @@ function renderStep(
       preloadedState: {
         sessionModal: { mode: 'details', playersInput: '', resolutionItems: [], confirmedPlayers, errors: {} } as RootState['sessionModal'],
         players: makePlayersState(players),
+        club: makeClubState({ currentClubId: TEST_CLUB_ID }),
       },
     }
   );
@@ -69,6 +71,30 @@ describe('SessionDetailsStep', () => {
     await user.click(screen.getByRole('button', { name: 'Add' }));
 
     expect(store.getState().sessionModal.confirmedPlayers.map(p => p.id)).toEqual(['p1', 'p2']);
+  });
+
+  it('creates a guest player via the "+ New player" modal and adds them to the session', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', firstName: 'Ada' })];
+    const { store } = renderStep([{ id: 'p1', percentage: 1 }], players);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Session' })).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: '+ New player' }));
+    await user.type(screen.getByLabelText(/First Name/), 'Random');
+    await user.type(screen.getByLabelText(/Last Name/), 'Guest');
+    await user.click(screen.getByRole('checkbox', { name: /Guest \(one-time attendee/ }));
+    await user.click(screen.getByRole('button', { name: 'Add Player' }));
+
+    await waitFor(() => {
+      expect(store.getState().sessionModal.confirmedPlayers.map(p => p.id)).toEqual(['p1', expect.any(String)]);
+    });
+    const newPlayerPath = __getAllPaths().find((path) => path.includes('/players/') && !path.includes('p1'));
+    expect(newPlayerPath).toBeDefined();
+    expect(getClubDocData('players', newPlayerPath!.split('/').pop()!)).toMatchObject({
+      firstName: 'Random',
+      lastName: 'Guest',
+      isGuest: true,
+    });
   });
 
   it('removes a player from the session', async () => {
@@ -133,6 +159,88 @@ describe('SessionDetailsStep', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       courtCount: 4,
       players: expect.arrayContaining([expect.objectContaining({ id: 'p1' })]),
+    })));
+  });
+
+  it('uses the club default court count for a new session', async () => {
+    seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club', defaultCourtCount: 6 });
+    renderStep([{ id: 'p1', percentage: 1 }], [makePlayer()]);
+
+    expect(await screen.findByDisplayValue('6')).toBeInTheDocument();
+  });
+
+  it('defaults a new session player to transfer payment from their configured payer', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Main gym', totalCost: 80, costPerHour: 10, hoursPurchased: 20, remainingHours: 20,
+    });
+    const player = makePlayer({ id: 'p1', defaultPayerId: 'p2' });
+    const payer = makePlayer({
+      id: 'p2',
+      firstName: 'Grace',
+      firstNameLower: 'grace',
+      lastName: 'Hopper',
+      lastNameLower: 'hopper',
+      balance: 100,
+    });
+    const { onSave } = renderStep([{ id: 'p1', percentage: 1 }], [player, payer]);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Session' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Save Session' }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      players: [expect.objectContaining({
+        id: 'p1',
+        paid: true,
+        paidVia: 'transfer',
+        paidBy: 'p2',
+      })],
+    })));
+  });
+
+  it('does not retroactively apply a default payer when editing an unpaid session', async () => {
+    const user = userEvent.setup();
+    const player = makePlayer({ id: 'p1', defaultPayerId: 'p2' });
+    const payer = makePlayer({
+      id: 'p2',
+      firstName: 'Grace',
+      firstNameLower: 'grace',
+      lastName: 'Hopper',
+      lastNameLower: 'hopper',
+    });
+    const session: Session = {
+      id: 's1',
+      date: new Date('2026-02-01'),
+      durationHours: 2,
+      courtCount: 1,
+      totalCost: 20,
+      totalCourtCost: 20,
+      totalBirdieCost: 0,
+      totalSessionCost: 20,
+      birdieUsage: [],
+      courtCreditUsage: [],
+      players: [{
+        id: 'p1',
+        percentage: 1,
+        cost: 20,
+        paid: false,
+        paidVia: null,
+        paidBy: null,
+        highlighted: false,
+      }],
+      createdAt: undefined as never,
+    };
+    const { onSave } = renderStep([{ id: 'p1', percentage: 1 }], [player, payer], {}, session);
+
+    await user.click(screen.getByRole('button', { name: 'Save Session' }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      players: [expect.objectContaining({
+        id: 'p1',
+        paid: false,
+        paidVia: null,
+        paidBy: null,
+      })],
     })));
   });
 

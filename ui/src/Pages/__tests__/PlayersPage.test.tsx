@@ -177,6 +177,80 @@ describe('PlayersPage', () => {
     ).toBeInTheDocument();
   });
 
+  it('hides guests from the main roster, lists them in a collapsible Guests section, and excludes them from the default payer dropdown', async () => {
+    const user = userEvent.setup();
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada', lastName: 'Lovelace' }),
+      makePlayer({ id: 'p2', firstName: 'Random', lastName: 'Guest', isGuest: true }),
+    ];
+
+    renderPage({ players });
+
+    // The guest is hidden from the main list until the section is expanded.
+    expect(screen.queryByText('Random Guest')).not.toBeInTheDocument();
+    expect(screen.getByText(/Guests \(1\)/)).toBeInTheDocument();
+
+    await user.click(screen.getByText(/Guests \(1\)/));
+    expect(screen.getByText('Random Guest')).toBeInTheDocument();
+
+    // Guests still have their own balance page like any other player.
+    await user.click(screen.getByText('Random Guest'));
+    expect(await screen.findByText('No balance history yet.')).toBeInTheDocument();
+
+    // But a guest can never be picked as someone else's default payer.
+    await user.click(screen.getByText('Ada Lovelace'));
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const defaultPayerSelect = screen.getByLabelText('Default payer');
+    expect(within(defaultPayerSelect).queryByText('Random Guest')).not.toBeInTheDocument();
+  });
+
+  it('lets an admin convert a guest into a regular player via the edit-form checkbox, keeping their balance and history', async () => {
+    const user = userEvent.setup();
+    const players = [
+      makePlayer({ id: 'p2', firstName: 'Random', lastName: 'Guest', isGuest: true, balance: 15 }),
+    ];
+
+    renderPage({ players, route: '/?playerId=p2' });
+    await screen.findByText('No balance history yet.');
+
+    expect(screen.getByText('Guest')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const guestCheckbox = screen.getByRole('checkbox', { name: /Guest \/ non-regular player/ });
+    expect(guestCheckbox).toBeChecked();
+    await user.click(guestCheckbox);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(getClubDocData('players', 'p2')).toMatchObject({
+        isGuest: false,
+        firstName: 'Random',
+        lastName: 'Guest',
+        balance: 15,
+      });
+    });
+  });
+
+  it('lets an admin mark a regular player as a guest via the edit-form checkbox', async () => {
+    const user = userEvent.setup();
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada', lastName: 'Lovelace' }),
+    ];
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    expect(screen.queryByText('Guest')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const guestCheckbox = screen.getByRole('checkbox', { name: /Guest \/ non-regular player/ });
+    expect(guestCheckbox).not.toBeChecked();
+    await user.click(guestCheckbox);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(getClubDocData('players', 'p1')).toMatchObject({ isGuest: true });
+    });
+  });
+
   it('rejects an edited email already used by another player, without touching this one\'s own unchanged email', async () => {
     const user = userEvent.setup();
     const players = [
@@ -200,6 +274,27 @@ describe('PlayersPage', () => {
 
     expect(await screen.findByText(/Another player already uses "BEA@example.com"/)).toBeInTheDocument();
     expect(getClubDocData('players', 'p1')).toMatchObject({ email: 'ada@example.com' });
+  });
+
+  it('assigns another player as the selected player default payer', async () => {
+    const user = userEvent.setup();
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada', lastName: 'Lovelace' }),
+      makePlayer({ id: 'p2', firstName: 'Grace', firstNameLower: 'grace', lastName: 'Hopper', lastNameLower: 'hopper' }),
+    ];
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const payerSelect = screen.getByRole('combobox', { name: 'Default payer' });
+    expect(screen.queryByRole('option', { name: 'Ada Lovelace' })).not.toBeInTheDocument();
+    await user.selectOptions(payerSelect, 'p2');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(getClubDocData('players', 'p1')).toMatchObject({
+      defaultPayerId: 'p2',
+    }));
   });
 
   it('sorts players by owed and overdrawn status', async () => {

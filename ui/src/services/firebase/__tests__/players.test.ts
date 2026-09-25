@@ -262,17 +262,47 @@ describe('updatePlayerProfile', () => {
       sessionCount: 1,
     });
   });
+
+  it('updates and clears a player default payer', async () => {
+    seedClubDoc('players', 'p1', {
+      firstName: 'Jamie',
+      firstNameLower: 'jamie',
+      lastName: null,
+      lastNameLower: null,
+      email: null,
+    });
+
+    await updatePlayerProfile('p1', {
+      firstName: 'Jamie',
+      lastName: null,
+      email: null,
+      defaultPayerId: 'payer-1',
+    });
+    expect(getClubDocData('players', 'p1')?.defaultPayerId).toBe('payer-1');
+
+    await updatePlayerProfile('p1', {
+      firstName: 'Jamie',
+      lastName: null,
+      email: null,
+      defaultPayerId: null,
+    });
+    expect(getClubDocData('players', 'p1')?.defaultPayerId).toBeNull();
+  });
 });
 
 describe('deletePlayer', () => {
   it('deletes the player and unlinks any members pointing at them', async () => {
     seedClubDoc('players', 'p1', { firstName: 'Jamie' });
+    seedClubDoc('players', 'dependent', { firstName: 'Sam', defaultPayerId: 'p1' });
+    seedClubDoc('players', 'unrelated', { firstName: 'Pat', defaultPayerId: 'p2' });
     __seedDoc(`clubs/${TEST_CLUB_ID}/members/member-1`, { role: 'member', playerId: 'p1' });
     __seedDoc(`clubs/${TEST_CLUB_ID}/members/member-2`, { role: 'member', playerId: 'p2' }); // unrelated — must survive untouched
 
     await deletePlayer('p1');
 
     expect(getClubDocData('players', 'p1')).toBeUndefined();
+    expect(getClubDocData('players', 'dependent')?.defaultPayerId).toBeNull();
+    expect(getClubDocData('players', 'unrelated')?.defaultPayerId).toBe('p2');
     expect(__getDocData(`clubs/${TEST_CLUB_ID}/members/member-1`)).toMatchObject({ role: 'member', playerId: null });
     expect(__getDocData(`clubs/${TEST_CLUB_ID}/members/member-2`)).toMatchObject({ role: 'member', playerId: 'p2' });
   });

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Button, Col, Form, InputGroup, Row,
 } from 'react-bootstrap';
@@ -13,8 +13,9 @@ import {
 } from '../../../features/SessionModal/sessionModalSlice';
 
 import { selectPlayerById, selectAllPlayers } from '../../../features/players/playersSlice';
-import { fetchBirdieInventory, fetchCourtCredits } from '../../../services/firebase';
+import { fetchBirdieInventory, fetchClub, fetchCourtCredits } from '../../../services/firebase';
 import { addPlayer } from '../../../services/firebase/players';
+import { selectCurrentClubId } from '../../../features/club/clubSlice';
 import AddPlayerModal from '../../AddPlayerModal';
 import type {
   BirdieBatch, CourtCreditBatch, Session,
@@ -58,8 +59,10 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
   const confirmedPlayers  = useAppSelector(selectConfirmedPlayers);
   const addError          = useAppSelector(selectAddError);
   const allPlayers        = useAppSelector(selectAllPlayers);
+  const currentClubId     = useAppSelector(selectCurrentClubId);
   const [playerToAdd, setPlayerToAdd] = useState('');
   const [showNewPlayerModal, setShowNewPlayerModal] = useState(false);
+  const courtCountEdited = useRef(false);
 
   // When editing an existing session, an empty courtCreditUsage with a nonzero
   // court cost means the courts were manually priced (not funded from a court
@@ -86,6 +89,19 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
     fetchBirdieInventory().then(setBirdieInventory).catch(console.error);
     fetchCourtCredits().then(setCourtCredits).catch(console.error);
   }, []);
+
+  useEffect(() => {
+    if (session || !currentClubId) return;
+    let cancelled = false;
+    fetchClub(currentClubId)
+      .then((club) => {
+        if (!cancelled && !courtCountEdited.current) {
+          setCourtCount(String(club?.defaultCourtCount ?? 4));
+        }
+      })
+      .catch(console.error);
+    return () => { cancelled = true; };
+  }, [currentClubId, session]);
 
   // Pre-fill when editing
   useEffect(() => {
@@ -145,19 +161,25 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
     const perUnit         = totalPercentage > 0 ? totalSessionCost / totalPercentage : 0;
     return confirmedPlayers.map(p => {
       const existing = session?.players.find(sp => sp.id === p.id);
+      const player = allPlayers.find(candidate => candidate.id === p.id);
+      const defaultPayerId = !session && player?.defaultPayerId &&
+        player.defaultPayerId !== p.id &&
+        allPlayers.some(candidate => candidate.id === player.defaultPayerId)
+          ? player.defaultPayerId
+          : null;
       return {
         id:          p.id,
         percentage:  p.percentage,
         cost:        parseFloat((perUnit * p.percentage).toFixed(2)),
-        paid:        existing?.paid ?? false,
-        paidVia:     existing?.paidVia ?? null,
-        paidBy:      existing?.paidBy ?? null,
+        paid:        existing?.paid ?? !!defaultPayerId,
+        paidVia:     existing ? existing.paidVia ?? null : defaultPayerId ? 'transfer' : null,
+        paidBy:      existing ? existing.paidBy ?? null : defaultPayerId,
         comped:      existing?.comped ?? false,
         highlighted: existing?.highlighted ?? false,
         settledAt:   existing?.settledAt ?? null,
       };
     });
-  }, [confirmedPlayers, totalSessionCost, session]);
+  }, [confirmedPlayers, totalSessionCost, session, allPlayers]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -284,7 +306,10 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
           <Form.Control
             type="number" min="1"
             value={courtCount}
-            onChange={e => setCourtCount(e.target.value)}
+            onChange={e => {
+              courtCountEdited.current = true;
+              setCourtCount(e.target.value);
+            }}
             style={{ maxWidth: 100 }}
           />
           {!useCredits && (
@@ -393,6 +418,7 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
       onHide={() => setShowNewPlayerModal(false)}
       onAddPlayer={handleCreatePlayer}
       existingPlayers={allPlayers}
+      allowGuest
     />
     </>
   );

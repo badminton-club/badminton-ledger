@@ -102,6 +102,8 @@ describe('CourtCreditsPage', () => {
     expect(screen.getByText('Grace Hopper')).toBeInTheDocument();
     expect(screen.getByText('4.5 hrs')).toBeInTheDocument();
     expect(screen.getByText('6.5 hrs')).toBeInTheDocument();
+    expect(screen.getByText('Used: 2 hrs').closest('tr')).toHaveClass('inventory-history-session');
+    expect(screen.getByText(/Reason: Manual correction/).closest('tr')).toHaveClass('inventory-history-adjustment');
     expect(screen.getByRole('link', { name: 'View on calendar' })).toHaveAttribute('href', '/?date=2026-03-03');
   });
 
@@ -294,6 +296,40 @@ describe('CourtCreditsPage', () => {
       remainingHours: 4,
       notes: 'Evening courts',
     });
+  });
+
+  it('deletes an opened court credit batch after confirmation', async () => {
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Expired court block',
+      totalCost: 100,
+      costPerHour: 20,
+      hoursPurchased: 5,
+      remainingHours: 0,
+      purchaserName: 'Pat',
+      purchaseDate: ts('2026-01-01'),
+      createdAt: ts('2026-01-01'),
+    });
+    seedClubDoc('transactions', 'tx-1', {
+      resourceType: 'court',
+      batchId: 'c1',
+      hoursUsed: 5,
+      sessionId: 's1',
+      date: ts('2026-02-01'),
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /Expired court block/ }));
+    await user.click(screen.getByRole('button', { name: 'Delete Batch' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/Session records will remain/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Delete Batch' }));
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Expired court block/ })).not.toBeInTheDocument());
+    expect(getClubDocData('courtCredits', 'c1')).toBeUndefined();
+    expect(getClubDocData('transactions', 'tx-1')).toBeUndefined();
   });
 
   it('shows the actual error instead of silently claiming no history when loading history fails', async () => {

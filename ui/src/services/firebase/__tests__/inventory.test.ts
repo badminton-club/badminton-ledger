@@ -1,6 +1,8 @@
 import {
   addBirdieBatch,
   addCourtCreditBatch,
+  deleteBirdieBatch,
+  deleteCourtCreditBatch,
   fetchBirdieBatchById,
   fetchBirdieInventory,
   fetchBirdieUsageForBatch,
@@ -130,6 +132,38 @@ describe('birdie inventory service', () => {
     });
     expect(stored.purchaseDate).toBeInstanceOf(Timestamp);
     expect(stored.createdAt).toBeInstanceOf(Timestamp);
+  });
+
+  it('deletes a birdie batch and its related history without touching other batches', async () => {
+    seedClubDoc('birdieInventory', 'b1', { name: 'Delete me' });
+    seedClubDoc('birdieInventory', 'b2', { name: 'Keep me' });
+    seedClubDoc('inventoryAdjustments', 'adj-b1', {
+      batchId: 'b1',
+      resourceType: 'birdieBatch',
+    });
+    seedClubDoc('inventoryAdjustments', 'adj-b2', {
+      batchId: 'b2',
+      resourceType: 'birdieBatch',
+    });
+    seedClubDoc('transactions', 'tx-b1', {
+      batchId: 'b1',
+      resourceType: 'birdie',
+      sessionId: 's1',
+    });
+    seedClubDoc('transactions', 'tx-b2', {
+      batchId: 'b2',
+      resourceType: 'birdie',
+      sessionId: 's2',
+    });
+
+    await deleteBirdieBatch('b1');
+
+    expect(getClubDocData('birdieInventory', 'b1')).toBeUndefined();
+    expect(getClubDocData('inventoryAdjustments', 'adj-b1')).toBeUndefined();
+    expect(getClubDocData('transactions', 'tx-b1')).toBeUndefined();
+    expect(getClubDocData('birdieInventory', 'b2')).toBeDefined();
+    expect(getClubDocData('inventoryAdjustments', 'adj-b2')).toBeDefined();
+    expect(getClubDocData('transactions', 'tx-b2')).toBeDefined();
   });
 
   it('updates a birdie batch and logs a filtered adjustment history entry', async () => {
@@ -449,6 +483,38 @@ describe('court credit inventory service', () => {
     });
     expect(stored.purchaseDate).toBeInstanceOf(Timestamp);
     expect(stored.createdAt).toBeInstanceOf(Timestamp);
+  });
+
+  it('deletes a court credit batch and its related history without touching other batches', async () => {
+    seedClubDoc('courtCredits', 'c1', { name: 'Delete me' });
+    seedClubDoc('courtCredits', 'c2', { name: 'Keep me' });
+    seedClubDoc('inventoryAdjustments', 'adj-c1', {
+      batchId: 'c1',
+      resourceType: 'courtCreditBatch',
+    });
+    seedClubDoc('inventoryAdjustments', 'adj-c2', {
+      batchId: 'c2',
+      resourceType: 'courtCreditBatch',
+    });
+    seedClubDoc('transactions', 'tx-c1', {
+      batchId: 'c1',
+      resourceType: 'court',
+      sessionId: 's1',
+    });
+    seedClubDoc('transactions', 'tx-c2', {
+      batchId: 'c2',
+      resourceType: 'court',
+      sessionId: 's2',
+    });
+
+    await deleteCourtCreditBatch('c1');
+
+    expect(getClubDocData('courtCredits', 'c1')).toBeUndefined();
+    expect(getClubDocData('inventoryAdjustments', 'adj-c1')).toBeUndefined();
+    expect(getClubDocData('transactions', 'tx-c1')).toBeUndefined();
+    expect(getClubDocData('courtCredits', 'c2')).toBeDefined();
+    expect(getClubDocData('inventoryAdjustments', 'adj-c2')).toBeDefined();
+    expect(getClubDocData('transactions', 'tx-c2')).toBeDefined();
   });
 
   it('updates a court credit batch and logs an adjustment entry', async () => {

@@ -96,6 +96,8 @@ describe('BirdiesPage', () => {
     expect(screen.getByText('Grace Hopper')).toBeInTheDocument();
     expect(screen.getByText('28 birds')).toBeInTheDocument();
     expect(screen.getByText('36 birds')).toBeInTheDocument();
+    expect(screen.getByText('Used: 8 birds').closest('tr')).toHaveClass('inventory-history-session');
+    expect(screen.getByText(/Reason: Manual recount/).closest('tr')).toHaveClass('inventory-history-adjustment');
     expect(screen.getByRole('link', { name: 'View on calendar' })).toHaveAttribute('href', '/?date=2026-03-04');
   });
 
@@ -295,5 +297,40 @@ describe('BirdiesPage', () => {
       birdsInOpenTube: 0,
       notes: 'Fresh case',
     });
+  });
+
+  it('deletes the selected batch after confirmation', async () => {
+    seedClubDoc('birdieInventory', 'b1', {
+      name: 'Old practice birds',
+      costPerTube: 20,
+      birdsPerTube: 12,
+      tubesPurchased: 1,
+      unopenedTubesRemaining: 0,
+      birdsInOpenTube: 0,
+      purchaserName: 'Pat',
+      purchaseDate: ts('2026-01-01'),
+      createdAt: ts('2026-01-01'),
+    });
+    seedClubDoc('transactions', 'tx-1', {
+      resourceType: 'birdie',
+      batchId: 'b1',
+      quantityUsed: 12,
+      sessionId: 's1',
+      date: ts('2026-02-01'),
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click((await screen.findByText('Old practice birds')).closest('tr')!);
+    await user.click(screen.getByRole('button', { name: 'Delete Batch' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/Session records will remain/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Delete Batch' }));
+
+    await waitFor(() => expect(screen.queryByText('Old practice birds')).not.toBeInTheDocument());
+    expect(getClubDocData('birdieInventory', 'b1')).toBeUndefined();
+    expect(getClubDocData('transactions', 'tx-1')).toBeUndefined();
   });
 });

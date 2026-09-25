@@ -2,6 +2,7 @@ import {
   createSlice,
   createEntityAdapter,
   createAsyncThunk,
+  createSelector,
   PayloadAction,
 } from '@reduxjs/toolkit';
 import { query, orderBy, onSnapshot } from 'firebase/firestore';
@@ -110,3 +111,13 @@ export const {
 export const selectPlayersStatus     = (s: RootState) => s.players.status;
 export const selectPlayersError      = (s: RootState) => s.players.error;
 export const selectIsPlayerListening = (s: RootState) => s.players.isListening;
+
+// Guests are regular player records (so their balance/session history works
+// exactly like everyone else's) but are hidden from the main Players tab
+// roster — see selectGuestPlayers for the collapsible "Guests" section.
+export const selectRosterPlayers = createSelector(selectAllPlayers, (players) =>
+  players.filter((p) => !p.isGuest)
+);
+export const selectGuestPlayers = createSelector(selectAllPlayers, (players) =>
+  players.filter((p) => p.isGuest)
+);

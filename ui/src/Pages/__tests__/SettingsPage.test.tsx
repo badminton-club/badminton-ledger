@@ -165,6 +165,24 @@ describe('SettingsPage', () => {
     });
   });
 
+  it('loads and saves the default court count for new sessions', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club', defaultCourtCount: 6 });
+    renderPage({ role: 'admin' });
+
+    const input = await screen.findByRole('spinbutton', { name: 'Default courts' });
+    await waitFor(() => expect(input).toHaveValue(6));
+
+    await user.clear(input);
+    await user.type(input, '3');
+    await user.click(within(input.parentElement as HTMLElement).getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Default court count saved.')).toBeInTheDocument();
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+      defaultCourtCount: 3,
+    });
+  });
+
   it('shows a toggle for the Attendance tab, so it can be hidden from every club member, not just admins', async () => {
     const user = userEvent.setup();
     seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club' });

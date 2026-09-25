@@ -214,6 +214,20 @@ body {
     color: var(--color-text-primary);
 }
 
+.inventory-history-session > * {
+    background-color: var(--color-background-success) !important;
+    color: var(--color-text-primary) !important;
+}
+
+.inventory-history-adjustment > * {
+    background-color: var(--color-background-warning) !important;
+    color: var(--color-text-primary) !important;
+}
+
+.inventory-batch-alternate {
+    --bs-accordion-btn-bg: var(--color-background-secondary);
+}
+
 /* Bootstrap's static light-background utilities (bg-light, table-light) don't
  * adapt to dark mode on their own — retheme them to the same secondary
  * background/text pair used elsewhere so light "info box" panels and table

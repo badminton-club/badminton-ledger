@@ -1,8 +1,13 @@
 import React from 'react';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders, makePlayersState } from '../../../../test-utils/renderWithProviders';
-import { resetFirebaseTestState, seedClubDoc } from '../../../../test-utils/firebaseTestHelpers';
+import {
+  getClubDocData,
+  resetFirebaseTestState,
+  seedClubDoc,
+} from '../../../../test-utils/firebaseTestHelpers';
+import { __getAllPaths } from '../../../../test-utils/fakeFirestore';
 import ResolveNamesStep from '../ResolveNamesStep';
 import type { NameResolutionItem, Player } from 'types';
 import type { RootState } from '../../../../store';
@@ -95,6 +100,132 @@ describe('ResolveNamesStep', () => {
     renderStep([makeItem({ status: 'unmatched' })]);
     expect(screen.getByText('No match found')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '+ Add player' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save All' })).toBeInTheDocument();
+  });
+
+  it('saves every unmatched name as a new player and resolves all rows', async () => {
+    const user = userEvent.setup();
+    const { store } = renderStep([
+      makeItem({ id: 'a', rawName: 'Ada Lovelace', editableName: 'Ada Lovelace', status: 'unmatched' }),
+      makeItem({ id: 'b', rawName: 'Grace Hopper', editableName: 'Grace Hopper', status: 'unmatched' }),
+    ]);
+
+    await user.click(screen.getByRole('button', { name: 'Save All' }));
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save All' })).not.toBeInTheDocument());
+    expect(screen.getAllByText('Ada Lovelace')).toHaveLength(2);
+    expect(screen.getAllByText('Grace Hopper')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: /Confirm & Add Details/ })).toBeEnabled();
+
+    const resolved = store.getState().sessionModal.resolutionItems;
+    expect(resolved.every((item) => item.status === 'matched' && item.resolvedPlayerId)).toBe(true);
+
+    const playerIds = __getAllPaths()
+      .filter((path) => path.includes('/players/'))
+      .map((path) => path.split('/').pop()!);
+    expect(playerIds).toHaveLength(2);
+    expect(playerIds.map((id) => getClubDocData('players', id)?.firstName)).toEqual(['Ada', 'Grace']);
+  });
+
+  it('Save All uses first and last names typed into open new-player forms', async () => {
+    const user = userEvent.setup();
+    const { store } = renderStep([
+      makeItem({ id: 'a', rawName: 'asd', editableName: 'asd', status: 'unmatched' }),
+      makeItem({ id: 'b', rawName: 'asd', editableName: 'asd', status: 'unmatched' }),
+    ]);
+
+    for (const button of screen.getAllByRole('button', { name: '+ Add player' })) {
+      await user.click(button);
+    }
+    const lastNameInputs = screen.getAllByPlaceholderText('Last name');
+    await user.type(lastNameInputs[0], 'dsa');
+    await user.type(lastNameInputs[1], 'nbv');
+    await user.click(screen.getByRole('button', { name: 'Save All' }));
+
+    await waitFor(() => {
+      expect(store.getState().sessionModal.resolutionItems.every(
+        (item) => item.status === 'matched' && item.resolvedPlayerId
+      )).toBe(true);
+    });
+    expect(screen.queryByText(/already exists/)).not.toBeInTheDocument();
+
+    const players = __getAllPaths()
+      .filter((path) => path.includes('/players/'))
+      .map((path) => getClubDocData('players', path.split('/').pop()!));
+    expect(players).toEqual(expect.arrayContaining([
+      expect.objectContaining({ firstName: 'asd', lastName: 'dsa' }),
+      expect.objectContaining({ firstName: 'asd', lastName: 'nbv' }),
+    ]));
+  });
+
+  it('creates a guest player when the guest checkbox is checked, and Save All persists the flag', async () => {
+    const user = userEvent.setup();
+    const { store } = renderStep([
+      makeItem({ id: 'a', rawName: 'Random Guest', editableName: 'Random Guest', status: 'unmatched' }),
+    ]);
+
+    await user.click(screen.getByRole('button', { name: '+ Add player' }));
+    await user.click(screen.getByRole('checkbox', { name: /Guest \(one-time attendee/ }));
+    await user.click(screen.getByRole('button', { name: 'Save All' }));
+
+    await waitFor(() => {
+      expect(store.getState().sessionModal.resolutionItems[0].status).toBe('matched');
+    });
+
+    const playerPath = __getAllPaths().find((path) => path.includes('/players/'));
+    expect(playerPath).toBeDefined();
+    expect(getClubDocData('players', playerPath!.split('/').pop()!)).toMatchObject({
+      firstName: 'Random',
+      lastName: 'Guest',
+      isGuest: true,
+    });
+  });
+
+  it('validates all unmatched names before Save All creates any players', async () => {
+    const user = userEvent.setup();
+    const existing = makePlayer({ id: 'p1', firstName: 'John', lastName: null });
+    renderStep([
+      makeItem({ id: 'a', rawName: 'Ada Lovelace', editableName: 'Ada Lovelace', status: 'unmatched' }),
+      makeItem({ id: 'b', rawName: 'John', editableName: 'John', status: 'unmatched' }),
+    ], [existing]);
+
+    await user.click(screen.getByRole('button', { name: 'Save All' }));
+
+    expect(await screen.findByText(/"John" already exists/)).toBeInTheDocument();
+    expect(__getAllPaths().filter((path) => path.includes('/players/'))).toHaveLength(0);
+  });
+
+  it('Save All creates and selects a new full name entered while editing a matched row', async () => {
+    const user = userEvent.setup();
+    const existing = makePlayer({ id: 'p1', firstName: 'John', lastName: 'Smith' });
+    const { store } = renderStep([
+      makeItem({
+        rawName: 'John',
+        editableName: 'John',
+        status: 'matched',
+        candidates: [existing],
+        resolvedPlayerId: existing.id,
+      }),
+    ], [existing]);
+
+    await user.click(screen.getByRole('button', { name: 'edit' }));
+    await user.clear(screen.getByRole('textbox'));
+    await user.type(screen.getByRole('textbox'), 'John Doe');
+    await user.click(screen.getByRole('button', { name: 'Save All' }));
+
+    await waitFor(() => {
+      const [item] = store.getState().sessionModal.resolutionItems;
+      expect(item.status).toBe('matched');
+      expect(item.isEditing).toBe(false);
+      expect(item.resolvedPlayerId).not.toBe(existing.id);
+    });
+
+    const newPlayerPath = __getAllPaths().find((path) => path.includes('/players/'));
+    expect(newPlayerPath).toBeDefined();
+    expect(getClubDocData('players', newPlayerPath!.split('/').pop()!)).toMatchObject({
+      firstName: 'John',
+      lastName: 'Doe',
+    });
   });
 
   it('shows a failure message for a failed match', () => {
