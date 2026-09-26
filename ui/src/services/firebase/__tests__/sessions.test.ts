@@ -194,15 +194,23 @@ describe('addSession', () => {
     expect(payerLedger[0].note).toMatch(/Covered a player's dues/);
   });
 
-  it('throws when a payer cannot cover what is drawn from their balance via transfer', async () => {
+  it('allows a payer to go negative covering another player via transfer, instead of blocking the session', async () => {
     seedPlayer('payer', { balance: 5 });
     seedPlayer('payee', { balance: 0 });
 
-    await expect(addSession(baseSessionData({
+    await addSession(baseSessionData({
       players: [
         { id: 'payee', percentage: 100, cost: 25, paid: true, paidVia: 'transfer', paidBy: 'payer', highlighted: false },
       ],
-    }))).rejects.toThrow(/has \$5.00 but \$25.00 was drawn/);
+    }));
+
+    expect(getClubDocData('players', 'payer')?.balance).toBe(-20); // allowed to go negative
+    expect(getClubDocData('players', 'payee')?.balance).toBe(0);
+    expect(getClubDocData('players', 'payee')?.owed).toBe(0); // not owing — covered
+
+    const payerLedger = ledgerEntriesFor('payer');
+    expect(payerLedger).toHaveLength(1);
+    expect(payerLedger[0].delta).toBe(-25);
   });
 
   it('throws if a referenced player does not exist', async () => {
@@ -305,17 +313,20 @@ describe('editSession', () => {
     expect(paymentDeltaEntry?.balanceBefore).toBe(paymentDeltaEntry?.balanceAfter); // wallet-neutral
   });
 
-  it('throws if increasing a balance draw would exceed what the player has available', async () => {
+  it('allows a balance draw to exceed what the player has available, going negative instead of blocking the edit', async () => {
     seedPlayer('p1', { balance: 20 });
     const sessionId = await addSession(baseSessionData({
       players: [{ id: 'p1', percentage: 100, cost: 20, paid: true, paidVia: 'balance', highlighted: false }],
     }));
     expect(getClubDocData('players', 'p1')?.balance).toBe(0);
 
-    // Available = 0 (current) + 20 (refund of the old draw) = 20; new draw of 25 exceeds it.
-    await expect(editSession(sessionId, baseSessionData({
+    // Available = 0 (current) + 20 (refund of the old draw) = 20; new draw of 25 exceeds it,
+    // but the edit should still succeed and simply leave the balance negative.
+    await editSession(sessionId, baseSessionData({
       players: [{ id: 'p1', percentage: 100, cost: 25, paid: true, paidVia: 'balance', highlighted: false }],
-    }))).rejects.toThrow(/available but \$25.00 was drawn/);
+    }));
+
+    expect(getClubDocData('players', 'p1')?.balance).toBe(-5);
   });
 
   it('bumps sessionCount only for players newly added to the session on edit', async () => {
