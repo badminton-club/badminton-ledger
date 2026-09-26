@@ -297,6 +297,49 @@ describe('PlayersPage', () => {
     }));
   });
 
+  it('sets default comped and clears any default payer, since the two are mutually exclusive', async () => {
+    const user = userEvent.setup();
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada', lastName: 'Lovelace', defaultPayerId: 'p2' }),
+      makePlayer({ id: 'p2', firstName: 'Grace', firstNameLower: 'grace', lastName: 'Hopper', lastNameLower: 'hopper' }),
+    ];
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const payerSelect = screen.getByRole('combobox', { name: 'Default payer' });
+    expect(payerSelect).toHaveValue('p2');
+    const compedCheckbox = screen.getByRole('checkbox', { name: 'Default comped' });
+    await user.click(compedCheckbox);
+    expect(payerSelect).toBeDisabled();
+    expect(payerSelect).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(getClubDocData('players', 'p1')).toMatchObject({
+      defaultComped: true,
+      defaultPayerId: null,
+    }));
+  });
+
+  it('shows "Default comped: Yes" and disables re-selecting a default payer for a default-comped player', async () => {
+    const user = userEvent.setup();
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada', lastName: 'Lovelace', defaultComped: true }),
+      makePlayer({ id: 'p2', firstName: 'Grace', firstNameLower: 'grace', lastName: 'Hopper', lastNameLower: 'hopper' }),
+    ];
+
+    renderPage({ players, route: '/?playerId=p1' });
+    await screen.findByText('No balance history yet.');
+
+    expect(screen.getByText('Default comped: Yes')).toBeInTheDocument();
+    expect(screen.getByText('Default payer: N/A (default comped)')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('checkbox', { name: 'Default comped' })).toBeChecked();
+    expect(screen.getByRole('combobox', { name: 'Default payer' })).toBeDisabled();
+  });
+
   it('sorts players by owed and overdrawn status', async () => {
     const user = userEvent.setup();
     const players = [

@@ -167,14 +167,18 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
         allPlayers.some(candidate => candidate.id === player.defaultPayerId)
           ? player.defaultPayerId
           : null;
+      // Default payer and default comped are mutually exclusive settlement
+      // defaults on the player profile — a default payer takes precedence
+      // if somehow both ended up set.
+      const defaultComped = !session && !defaultPayerId && !!player?.defaultComped;
       return {
         id:          p.id,
         percentage:  p.percentage,
         cost:        parseFloat((perUnit * p.percentage).toFixed(2)),
-        paid:        existing?.paid ?? !!defaultPayerId,
-        paidVia:     existing ? existing.paidVia ?? null : defaultPayerId ? 'transfer' : null,
+        paid:        existing?.paid ?? (!!defaultPayerId || defaultComped),
+        paidVia:     existing ? existing.paidVia ?? null : defaultPayerId ? 'transfer' : defaultComped ? 'comp' : null,
         paidBy:      existing ? existing.paidBy ?? null : defaultPayerId,
-        comped:      existing?.comped ?? false,
+        comped:      existing?.comped ?? defaultComped,
         highlighted: existing?.highlighted ?? false,
         settledAt:   existing?.settledAt ?? null,
       };

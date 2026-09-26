@@ -367,6 +367,7 @@ export default function PlayersPage() {
   const [edLast, setEdLast] = useState('');
   const [edEmail, setEdEmail] = useState('');
   const [edDefaultPayerId, setEdDefaultPayerId] = useState('');
+  const [edDefaultComped, setEdDefaultComped] = useState(false);
   const [edIsGuest, setEdIsGuest] = useState(false);
   const [savingDetails, setSavingDetails] = useState(false);
   const [detailsError, setDetailsError] = useState('');
@@ -377,9 +378,21 @@ export default function PlayersPage() {
     setEdLast(selectedPlayer.lastName ?? '');
     setEdEmail(selectedPlayer.email ?? '');
     setEdDefaultPayerId(selectedPlayer.defaultPayerId ?? '');
+    setEdDefaultComped(!!selectedPlayer.defaultComped);
     setEdIsGuest(!!selectedPlayer.isGuest);
     setDetailsError('');
     setEditingDetails(true);
+  };
+
+  // Default payer and default comped are mutually exclusive settlement
+  // defaults — checking one clears the other.
+  const handleDefaultPayerChange = (value: string) => {
+    setEdDefaultPayerId(value);
+    if (value) setEdDefaultComped(false);
+  };
+  const handleDefaultCompedChange = (checked: boolean) => {
+    setEdDefaultComped(checked);
+    if (checked) setEdDefaultPayerId('');
   };
 
   const handleSaveDetails = async () => {
@@ -400,7 +413,8 @@ export default function PlayersPage() {
         firstName: first,
         lastName: edLast.trim() || null,
         email: email || null,
-        defaultPayerId: edDefaultPayerId || null,
+        defaultPayerId: edDefaultComped ? null : edDefaultPayerId || null,
+        defaultComped: edDefaultComped,
         isGuest: edIsGuest,
       });
       setEditingDetails(false);
@@ -638,8 +652,8 @@ export default function PlayersPage() {
                         <Form.Label>Default payer</Form.Label>
                         <Form.Select
                           value={edDefaultPayerId}
-                          onChange={(e) => setEdDefaultPayerId(e.target.value)}
-                          disabled={savingDetails}
+                          onChange={(e) => handleDefaultPayerChange(e.target.value)}
+                          disabled={savingDetails || edDefaultComped}
                           style={{ maxWidth: 260 }}
                         >
                           <option value="">— No default payer —</option>
@@ -652,6 +666,19 @@ export default function PlayersPage() {
                         </Form.Select>
                         <Form.Text>
                           New sessions will default to this person paying from their balance.
+                        </Form.Text>
+                      </Form.Group>
+                      <Form.Group className="mb-2" controlId="players-edit-default-comped">
+                        <Form.Check
+                          type="checkbox"
+                          label="Default comped"
+                          checked={edDefaultComped}
+                          onChange={(e) => handleDefaultCompedChange(e.target.checked)}
+                          disabled={savingDetails}
+                        />
+                        <Form.Text>
+                          New sessions will default to settling this player's dues directly with the club owner
+                          (comp), excluded from payout. Mutually exclusive with a default payer.
                         </Form.Text>
                       </Form.Group>
                       <Form.Group className="mb-2" controlId="players-edit-is-guest">
@@ -706,9 +733,14 @@ export default function PlayersPage() {
                         <p className="small text-muted mt-1">{selectedPlayer.description}</p>
                       )}
                       <p className="small text-muted mt-1">
-                        Default payer: {selectedPlayer.defaultPayerId
-                          ? selectedDefaultPayer ? formatPlayerName(selectedDefaultPayer) : 'Unavailable player'
-                          : 'None'}
+                        Default payer: {selectedPlayer.defaultComped
+                          ? 'N/A (default comped)'
+                          : selectedPlayer.defaultPayerId
+                            ? selectedDefaultPayer ? formatPlayerName(selectedDefaultPayer) : 'Unavailable player'
+                            : 'None'}
+                      </p>
+                      <p className="small text-muted mb-0">
+                        Default comped: {selectedPlayer.defaultComped ? 'Yes' : 'No'}
                       </p>
                     </Col>
 

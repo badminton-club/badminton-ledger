@@ -14,6 +14,7 @@ export interface Player {
   description: string;
   sessionCount: number; // replaces attendedSessionIds[] — cheap increment, no unbounded array
   defaultPayerId?: string | null; // another player whose balance pays this player's new sessions by default
+  defaultComped?: boolean; // new sessions default to settled directly with the owner (excluded from payout) — mutually exclusive with defaultPayerId
   isGuest?: boolean; // one-off attendee: tracked for balances/session history but hidden from the main Players tab
   createdAt: Timestamp;
 }

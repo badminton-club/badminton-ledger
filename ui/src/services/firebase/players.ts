@@ -92,6 +92,7 @@ export async function updatePlayerProfile(
     lastName: string | null;
     email: string | null;
     defaultPayerId?: string | null;
+    defaultComped?: boolean;
     isGuest?: boolean;
   }
 ): Promise<void> {
@@ -103,6 +104,7 @@ export async function updatePlayerProfile(
       lastNameLower:  input.lastName ? input.lastName.toLowerCase() : null,
       email:          input.email ?? null,
       ...(input.defaultPayerId !== undefined ? { defaultPayerId: input.defaultPayerId } : {}),
+      ...(input.defaultComped !== undefined ? { defaultComped: input.defaultComped } : {}),
       ...(input.isGuest !== undefined ? { isGuest: input.isGuest } : {}),
     });
   });

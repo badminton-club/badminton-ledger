@@ -198,6 +198,28 @@ describe('SessionDetailsStep', () => {
     })));
   });
 
+  it('defaults a new session player to comped when the player is configured as default comped', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Main gym', totalCost: 80, costPerHour: 10, hoursPurchased: 20, remainingHours: 20,
+    });
+    const player = makePlayer({ id: 'p1', defaultComped: true });
+    const { onSave } = renderStep([{ id: 'p1', percentage: 1 }], [player]);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Session' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Save Session' }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      players: [expect.objectContaining({
+        id: 'p1',
+        paid: true,
+        paidVia: 'comp',
+        comped: true,
+        paidBy: null,
+      })],
+    })));
+  });
+
   it('does not retroactively apply a default payer when editing an unpaid session', async () => {
     const user = userEvent.setup();
     const player = makePlayer({ id: 'p1', defaultPayerId: 'p2' });
