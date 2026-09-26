@@ -205,15 +205,14 @@ export async function addSession(data: NewSessionData): Promise<string> {
         }
       });
 
-      // Validate every payer exists and can cover what's drawn from their balance.
-      walletDraw.forEach((entries, id) => {
+      // Confirm every payer document actually exists (a real data-integrity issue).
+      // Going negative is allowed — mirrors setPlayerPaidBy, which lets an admin
+      // (or a player's configured default payer) knowingly overdraw a balance
+      // rather than blocking the whole session from being saved.
+      for (const id of walletDraw.keys()) {
         const snap = playerSnapMap.get(id);
         if (!snap?.exists()) throw new Error(`Paying player ${id} not found`);
-        const before = (snap.data()?.balance as number) ?? 0;
-        const total  = entries.reduce((s, e) => s + e.amount, 0);
-        if (total > before)
-          throw new Error(`Player ${id} has $${before.toFixed(2)} but $${total.toFixed(2)} was drawn from their balance`);
-      });
+      }
 
       // Bump attendance + record session debt for participants who still owe.
       resolvedPlayers.forEach((player, i) => {
@@ -329,14 +328,14 @@ export async function editSession(
       const oldDraw = walletDrawOf(original.players);
       const newDraw = walletDrawOf(resolvedPlayers);
 
-      // A payer's balance, after refunding the old draw, must cover the new draw.
-      newDraw.forEach((amount, id) => {
+      // Confirm every payer document actually exists (a real data-integrity issue).
+      // Going negative is allowed — mirrors setPlayerPaidBy, which lets an admin
+      // (or a player's configured default payer) knowingly overdraw a balance
+      // rather than blocking the whole edit from being saved.
+      for (const id of newDraw.keys()) {
         const snap = playerMap.get(id);
         if (!snap?.exists()) throw new Error(`Paying player ${id} not found`);
-        const available = ((snap.data()?.balance as number) ?? 0) + (oldDraw.get(id) ?? 0);
-        if (amount > available)
-          throw new Error(`Player ${id} has $${available.toFixed(2)} available but $${amount.toFixed(2)} was drawn from their balance`);
-      });
+      }
 
       // ── Write phase: update session ────────────────────────────────────────────────
       tx.update(sessionRef, {
@@ -882,6 +881,10 @@ export async function togglePlayerHighlightStatus(
 export async function deleteSession(sessionId: string): Promise<void> {
   return serviceCall('deleteSession', async () => {
     const sessionRef = doc(refs.sessions, sessionId);
+    const transactionSnap = await getDocs(query(
+      refs.transactions,
+      where('sessionId', '==', sessionId)
+    ));
 
     await runTransaction(db, async (tx) => {
       const sessionSnap = await tx.get(sessionRef);
@@ -997,6 +1000,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
         ...session,
         archivedAt: serverTimestamp(),
       });
+      transactionSnap.docs.forEach(snapshot => tx.delete(snapshot.ref));
       tx.delete(sessionRef);
     });
   });

@@ -24,7 +24,7 @@ import {
 } from 'firebase/firestore';
 import { useAppSelector } from '../hooks';
 import {
-  selectAllPlayers, selectPlayerById,
+  selectAllPlayers, selectRosterPlayers, selectGuestPlayers, selectPlayerById,
   selectPlayersStatus, selectPlayersError,
 } from '../features/players/playersSlice';
 import { selectDisabledTabs } from '../features/club/clubSlice';
@@ -98,6 +98,8 @@ export default function PlayersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const playersList   = useAppSelector(selectAllPlayers);
+  const rosterPlayers = useAppSelector(selectRosterPlayers);
+  const guestPlayers  = useAppSelector(selectGuestPlayers);
   const playersStatus = useAppSelector(selectPlayersStatus);
   const playersError  = useAppSelector(selectPlayersError);
   const disabledTabs  = useAppSelector(selectDisabledTabs);
@@ -108,7 +110,8 @@ export default function PlayersPage() {
 
   const [searchTerm,         setSearchTerm]         = useState('');
   const [playerSort,         setPlayerSort]         = useState<PlayerSort>('name');
-  const [filteredPlayers,    setFilteredPlayers]     = useState<Player[]>(playersList);
+  const [filteredPlayers,    setFilteredPlayers]     = useState<Player[]>(rosterPlayers);
+  const [showGuests,         setShowGuests]          = useState(false);
   const [currentMonth,       setCurrentMonth]        = useState(new Date());
   const [attendedSessions,   setAttendedSessions]    = useState<Session[]>([]);
   const [isLoadingSessions,  setIsLoadingSessions]   = useState(false);
@@ -137,13 +140,24 @@ export default function PlayersPage() {
   useEffect(() => {
     const term = searchTerm.toLowerCase();
     const matchingPlayers = searchTerm.trim()
-      ? playersList.filter(p =>
+      ? rosterPlayers.filter(p =>
           p.firstName.toLowerCase().includes(term) ||
           (p.lastName ?? '').toLowerCase().includes(term)
         )
-      : playersList;
+      : rosterPlayers;
     setFilteredPlayers([...matchingPlayers].sort((a, b) => comparePlayers(a, b, playerSort)));
-  }, [searchTerm, playerSort, playersList]);
+  }, [searchTerm, playerSort, rosterPlayers]);
+
+  const filteredGuests = React.useMemo(() => {
+    const term = searchTerm.toLowerCase();
+    const matchingGuests = searchTerm.trim()
+      ? guestPlayers.filter(p =>
+          p.firstName.toLowerCase().includes(term) ||
+          (p.lastName ?? '').toLowerCase().includes(term)
+        )
+      : guestPlayers;
+    return [...matchingGuests].sort((a, b) => comparePlayers(a, b, playerSort));
+  }, [searchTerm, playerSort, guestPlayers]);
 
   // Balance ledger
   // Guards against rapid player switches: an older in-flight request resolving
@@ -352,6 +366,9 @@ export default function PlayersPage() {
   const [edFirst, setEdFirst] = useState('');
   const [edLast, setEdLast] = useState('');
   const [edEmail, setEdEmail] = useState('');
+  const [edDefaultPayerId, setEdDefaultPayerId] = useState('');
+  const [edDefaultComped, setEdDefaultComped] = useState(false);
+  const [edIsGuest, setEdIsGuest] = useState(false);
   const [savingDetails, setSavingDetails] = useState(false);
   const [detailsError, setDetailsError] = useState('');
 
@@ -360,8 +377,22 @@ export default function PlayersPage() {
     setEdFirst(selectedPlayer.firstName ?? '');
     setEdLast(selectedPlayer.lastName ?? '');
     setEdEmail(selectedPlayer.email ?? '');
+    setEdDefaultPayerId(selectedPlayer.defaultPayerId ?? '');
+    setEdDefaultComped(!!selectedPlayer.defaultComped);
+    setEdIsGuest(!!selectedPlayer.isGuest);
     setDetailsError('');
     setEditingDetails(true);
+  };
+
+  // Default payer and default comped are mutually exclusive settlement
+  // defaults — checking one clears the other.
+  const handleDefaultPayerChange = (value: string) => {
+    setEdDefaultPayerId(value);
+    if (value) setEdDefaultComped(false);
+  };
+  const handleDefaultCompedChange = (checked: boolean) => {
+    setEdDefaultComped(checked);
+    if (checked) setEdDefaultPayerId('');
   };
 
   const handleSaveDetails = async () => {
@@ -378,7 +409,14 @@ export default function PlayersPage() {
     setDetailsError('');
     setSavingDetails(true);
     try {
-      await updatePlayerProfile(selectedPlayer.id, { firstName: first, lastName: edLast.trim() || null, email: email || null });
+      await updatePlayerProfile(selectedPlayer.id, {
+        firstName: first,
+        lastName: edLast.trim() || null,
+        email: email || null,
+        defaultPayerId: edDefaultComped ? null : edDefaultPayerId || null,
+        defaultComped: edDefaultComped,
+        isGuest: edIsGuest,
+      });
       setEditingDetails(false);
     } catch (err) {
       setDetailsError(err instanceof Error ? err.message : 'Failed to save details.');
@@ -427,6 +465,9 @@ export default function PlayersPage() {
   const selectedLedgerSessionPlayer = selectedLedgerSession?.players.find(
     player => player.id === selectedPlayerId
   );
+  const selectedDefaultPayer = selectedPlayer?.defaultPayerId
+    ? playersList.find(player => player.id === selectedPlayer.defaultPayerId) ?? null
+    : null;
 
   return (
     <Container fluid className="mt-4 pb-4">
@@ -502,6 +543,48 @@ export default function PlayersPage() {
                     No players matching "{searchTerm}"
                   </ListGroup.Item>
                 )}
+                {guestPlayers.length > 0 && (
+                  <ListGroup.Item
+                    action
+                    onClick={() => setShowGuests(v => !v)}
+                    className="text-muted small fw-bold d-flex justify-content-between align-items-center"
+                  >
+                    <span>{showGuests ? '▾' : '▸'} Guests ({filteredGuests.length})</span>
+                  </ListGroup.Item>
+                )}
+                {showGuests && filteredGuests.map((player, i) => (
+                  <ListGroup.Item
+                    key={player.id}
+                    action
+                    active={selectedPlayerId === player.id}
+                    onClick={() => setSelectedPlayerId(player.id)}
+                    className="d-flex justify-content-between align-items-center"
+                    style={
+                      selectedPlayerId !== player.id && i % 2 === 1
+                        ? { backgroundColor: 'var(--color-background-secondary)' }
+                        : undefined
+                    }
+                  >
+                    <span>{formatPlayerName(player)} <Badge bg="secondary" style={{ fontSize: 9 }}>Guest</Badge></span>
+                    <span className="d-flex flex-column align-items-end gap-1">
+                      {player.balance < 0 && (
+                        <Badge bg="warning" text="dark" style={{ fontSize: 10 }}>
+                          Overdrawn ${Math.abs(player.balance).toFixed(2)}
+                        </Badge>
+                      )}
+                      {(player.owed ?? 0) > 0 && (
+                        <Badge bg="danger" style={{ fontSize: 10 }}>
+                          ${(player.owed ?? 0).toFixed(2)} owed
+                        </Badge>
+                      )}
+                    </span>
+                  </ListGroup.Item>
+                ))}
+                {showGuests && filteredGuests.length === 0 && searchTerm && (
+                  <ListGroup.Item className="text-muted small">
+                    No guests matching "{searchTerm}"
+                  </ListGroup.Item>
+                )}
               </ListGroup>
             </Card.Body>
           </Card>
@@ -522,7 +605,14 @@ export default function PlayersPage() {
               {/* Balance card */}
               <Card className="mb-3">
                 <Card.Header className="d-flex justify-content-between align-items-center">
-                  <h5 className="mb-0">{formatPlayerName(selectedPlayer)}</h5>
+                  <h5 className="mb-0">
+                    {formatPlayerName(selectedPlayer)}
+                    {selectedPlayer.isGuest && (
+                      <Badge bg="secondary" className="ms-2" style={{ fontSize: 11, verticalAlign: 'middle' }}>
+                        Guest
+                      </Badge>
+                    )}
+                  </h5>
                   <div className="d-flex gap-2">
                     <Button variant="outline-secondary" size="sm" onClick={startEditDetails}>
                       Edit
@@ -557,6 +647,53 @@ export default function PlayersPage() {
                       <Form.Group className="mb-2" controlId="players-edit-email">
                         <Form.Label>Email</Form.Label>
                         <Form.Control type="email" value={edEmail} onChange={(e) => setEdEmail(e.target.value)} disabled={savingDetails} />
+                      </Form.Group>
+                      <Form.Group className="mb-2" controlId="players-edit-default-payer">
+                        <Form.Label>Default payer</Form.Label>
+                        <Form.Select
+                          value={edDefaultPayerId}
+                          onChange={(e) => handleDefaultPayerChange(e.target.value)}
+                          disabled={savingDetails || edDefaultComped}
+                          style={{ maxWidth: 260 }}
+                        >
+                          <option value="">— No default payer —</option>
+                          {rosterPlayers
+                            .filter((player) => player.id !== selectedPlayer.id)
+                            .sort(comparePlayerNames)
+                            .map((player) => (
+                              <option key={player.id} value={player.id}>{formatPlayerName(player)}</option>
+                            ))}
+                        </Form.Select>
+                        <Form.Text>
+                          New sessions will default to this person paying from their balance.
+                        </Form.Text>
+                      </Form.Group>
+                      <Form.Group className="mb-2" controlId="players-edit-default-comped">
+                        <Form.Check
+                          type="checkbox"
+                          label="Default comped"
+                          checked={edDefaultComped}
+                          onChange={(e) => handleDefaultCompedChange(e.target.checked)}
+                          disabled={savingDetails}
+                        />
+                        <Form.Text>
+                          New sessions will default to settling this player's dues directly with the club owner
+                          (comp), excluded from payout. Mutually exclusive with a default payer.
+                        </Form.Text>
+                      </Form.Group>
+                      <Form.Group className="mb-2" controlId="players-edit-is-guest">
+                        <Form.Check
+                          type="checkbox"
+                          label="Guest / non-regular player"
+                          checked={edIsGuest}
+                          onChange={(e) => setEdIsGuest(e.target.checked)}
+                          disabled={savingDetails}
+                        />
+                        <Form.Text>
+                          Hides them from the main Players list (they'll appear in a separate "Guests" section
+                          instead) and from other players' default payer dropdown. Their balance, history, and
+                          session matching are unaffected.
+                        </Form.Text>
                       </Form.Group>
                       <div className="d-flex gap-2">
                         <Button size="sm" variant="primary" onClick={handleSaveDetails} disabled={savingDetails || !edFirst.trim()}>
@@ -595,6 +732,16 @@ export default function PlayersPage() {
                       {selectedPlayer.description && (
                         <p className="small text-muted mt-1">{selectedPlayer.description}</p>
                       )}
+                      <p className="small text-muted mt-1">
+                        Default payer: {selectedPlayer.defaultComped
+                          ? 'N/A (default comped)'
+                          : selectedPlayer.defaultPayerId
+                            ? selectedDefaultPayer ? formatPlayerName(selectedDefaultPayer) : 'Unavailable player'
+                            : 'None'}
+                      </p>
+                      <p className="small text-muted mb-0">
+                        Default comped: {selectedPlayer.defaultComped ? 'Yes' : 'No'}
+                      </p>
                     </Col>
 
                     <Col md={6}>

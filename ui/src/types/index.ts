@@ -13,12 +13,15 @@ export interface Player {
   owed: number; // unsettled session debt (sum of costs for sessions the player hasn't settled)
   description: string;
   sessionCount: number; // replaces attendedSessionIds[] — cheap increment, no unbounded array
+  defaultPayerId?: string | null; // another player whose balance pays this player's new sessions by default
+  defaultComped?: boolean; // new sessions default to settled directly with the owner (excluded from payout) — mutually exclusive with defaultPayerId
+  isGuest?: boolean; // one-off attendee: tracked for balances/session history but hidden from the main Players tab
   createdAt: Timestamp;
 }
 
 export type NewPlayerInput = Pick<Player,
   'firstName' | 'lastName' | 'email' | 'balance' | 'description'
->;
+> & { isGuest?: boolean };
 
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
@@ -223,6 +226,7 @@ export interface Club {
   id: string;
   name: string;
   disabledTabs?: string[];    // tab keys hidden for this club (see features/club/tabs.ts)
+  defaultCourtCount?: number; // courts prefilled when creating a new session (defaults to 4)
   // Sender address searched for Interac e-Transfer autodeposit notifications (see
   // services/firebase/gmail.ts). Configurable since some banks/regions may use a
   // different notification address than the Canadian default.

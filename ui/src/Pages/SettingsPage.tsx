@@ -12,7 +12,7 @@ import {
   type DriveBackupFile,
 } from '../services/firebase/drive';
 import { encryptBackupPayload, decryptBackupPayload, isEncryptedBackupPayload } from '../services/backupCrypto';
-import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, createClubInvitation, fetchClubInvitations, deleteClubInvitation, setClubTabEnabled, deleteClub, fetchUserClubs, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, updatePlayerProfile } from '../services/firebase';
+import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, createClubInvitation, fetchClubInvitations, deleteClubInvitation, setClubTabEnabled, setClubDefaultCourtCount, deleteClub, fetchUserClubs, fetchClub, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, updatePlayerProfile } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
@@ -80,6 +80,11 @@ export default function SettingsPage() {
   const [inviteError, setInviteError] = useState('');
   const [togglingTab, setTogglingTab] = useState<string | null>(null);
   const [tabsError, setTabsError] = useState('');
+  const [defaultCourtCount, setDefaultCourtCount] = useState('4');
+  const [defaultCourtsLoading, setDefaultCourtsLoading] = useState(false);
+  const [defaultCourtsSaving, setDefaultCourtsSaving] = useState(false);
+  const [defaultCourtsError, setDefaultCourtsError] = useState('');
+  const [defaultCourtsMessage, setDefaultCourtsMessage] = useState('');
 
   const [requests, setRequests] = useState<LinkRequest[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
@@ -123,6 +128,27 @@ export default function SettingsPage() {
   }, [clubId]);
 
   useEffect(() => { if (isAdmin && clubId) loadInvitations(); }, [isAdmin, clubId, loadInvitations]);
+
+  useEffect(() => {
+    if (!isAdmin || !clubId) return;
+    let cancelled = false;
+    setDefaultCourtsLoading(true);
+    setDefaultCourtsError('');
+    setDefaultCourtsMessage('');
+    fetchClub(clubId)
+      .then((club) => {
+        if (!cancelled) setDefaultCourtCount(String(club?.defaultCourtCount ?? 4));
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setDefaultCourtsError(err instanceof Error ? err.message : 'Failed to load session defaults.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDefaultCourtsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isAdmin, clubId]);
 
   const handleCreateInvitation = async () => {
     if (!clubId || !uid) return;
@@ -376,6 +402,27 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSaveDefaultCourtCount = async () => {
+    if (!clubId) return;
+    const value = Number(defaultCourtCount);
+    if (!Number.isInteger(value) || value < 1) {
+      setDefaultCourtsError('Default courts must be a positive whole number.');
+      setDefaultCourtsMessage('');
+      return;
+    }
+    setDefaultCourtsSaving(true);
+    setDefaultCourtsError('');
+    setDefaultCourtsMessage('');
+    try {
+      await setClubDefaultCourtCount(clubId, value);
+      setDefaultCourtsMessage('Default court count saved.');
+    } catch (err) {
+      setDefaultCourtsError(err instanceof Error ? err.message : 'Failed to save the default court count.');
+    } finally {
+      setDefaultCourtsSaving(false);
+    }
+  };
+
   const handleDeleteClub = async () => {
     if (!clubId || !uid || deleteClubText !== clubId) return;
     if (!window.confirm(`Permanently delete the club "${clubId}"? This cannot be undone.`)) return;
@@ -575,6 +622,38 @@ export default function SettingsPage() {
       <h3>Club settings</h3>
       <p className="text-muted mb-1">Settings for the club you currently have open.</p>
       <p className="text-muted">Club ID: <code>{clubId}</code></p>
+
+      <Card className="mt-3">
+        <Card.Header>Session defaults</Card.Header>
+        <Card.Body>
+          <Card.Text className="text-muted">
+            Choose how many courts are prefilled when adding a new session. Existing sessions keep
+            their saved court count.
+          </Card.Text>
+          <Form.Group controlId="settings-default-court-count" style={{ maxWidth: 320 }}>
+            <Form.Label>Default courts</Form.Label>
+            <InputGroup>
+              <Form.Control
+                type="number"
+                min="1"
+                step="1"
+                value={defaultCourtCount}
+                disabled={defaultCourtsLoading || defaultCourtsSaving || !clubId}
+                onChange={(e) => setDefaultCourtCount(e.target.value)}
+              />
+              <Button
+                variant="primary"
+                disabled={defaultCourtsLoading || defaultCourtsSaving || !clubId}
+                onClick={handleSaveDefaultCourtCount}
+              >
+                {defaultCourtsSaving ? <Spinner size="sm" animation="border" /> : 'Save'}
+              </Button>
+            </InputGroup>
+          </Form.Group>
+          {defaultCourtsError && <Alert variant="danger" className="mt-2 mb-0 py-2">{defaultCourtsError}</Alert>}
+          {defaultCourtsMessage && <Alert variant="success" className="mt-2 mb-0 py-2">{defaultCourtsMessage}</Alert>}
+        </Card.Body>
+      </Card>
 
       <Card className="mt-3">
         <Card.Header>Tabs</Card.Header>

@@ -42,7 +42,11 @@ const EMPTY_PROFILE: UserProfile = { clubs: [], lastVisitedClub: null };
  */
 export async function createClub(clubId: string, name: string, uid: string): Promise<void> {
   return serviceCall('createClub', async () => {
-    await setDoc(clubDoc(clubId), { name, ownerUid: uid, createdAt: serverTimestamp() }, { merge: true });
+    await setDoc(
+      clubDoc(clubId),
+      { name, ownerUid: uid, defaultCourtCount: 4, createdAt: serverTimestamp() },
+      { merge: true }
+    );
     await setDoc(memberDoc(clubId, uid), { role: 'superAdmin', addedAt: serverTimestamp() }, { merge: true });
     await setDoc(userDoc(uid), { clubs: arrayUnion(clubId), lastVisitedClub: clubId }, { merge: true });
   });
@@ -471,6 +475,16 @@ export async function setClubTabEnabled(clubId: string, tabKey: string, enabled:
       { disabledTabs: enabled ? arrayRemove(tabKey) : arrayUnion(tabKey) },
       { merge: true }
     );
+  });
+}
+
+/** Sets the number of courts prefilled when an admin creates a session. */
+export async function setClubDefaultCourtCount(clubId: string, courtCount: number): Promise<void> {
+  return serviceCall('setClubDefaultCourtCount', async () => {
+    if (!Number.isInteger(courtCount) || courtCount < 1) {
+      throw new Error('Default court count must be a positive whole number.');
+    }
+    await setDoc(clubDoc(clubId), { defaultCourtCount: courtCount }, { merge: true });
   });
 }
 

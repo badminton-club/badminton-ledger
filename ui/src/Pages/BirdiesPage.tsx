@@ -10,10 +10,12 @@ import { Link } from 'react-router-dom';
 
 import AddBirdieBatchModal from 'components/AddBirdieBatchModal';
 import BirdieUsageChart, { type UsagePoint } from 'components/BirdieUsageChart';
+import ConfirmDialog from 'components/ConfirmDialog';
 import { auth } from '../services/firebase/client';
 import {
   fetchBirdieInventory,
   addBirdieBatch,
+  deleteBirdieBatch,
   updateBirdieBatch,
   fetchBirdieBatchById,
   fetchInventoryAdjustmentsForBatch,
@@ -79,8 +81,6 @@ function totalBatchValue(batch: Partial<BirdieBatch>): number {
   return tubesEquivalent * costPerTube;
 }
 
-const ADJUSTMENT_ROW_STYLE: React.CSSProperties = { backgroundColor: '#f2bd6d' };
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function BirdiesPage() {
@@ -97,6 +97,8 @@ export default function BirdiesPage() {
   const [editForm,         setEditForm]         = useState<EditFormState | null>(null);
   const [editReason,       setEditReason]       = useState('');
   const [isSaving,         setIsSaving]         = useState(false);
+  const [showDeleteConfirm,setShowDeleteConfirm]= useState(false);
+  const [isDeleting,       setIsDeleting]       = useState(false);
   const [history,          setHistory]          = useState<HistoryItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [usagePoints,      setUsagePoints]      = useState<UsagePoint[]>([]);
@@ -284,6 +286,23 @@ export default function BirdiesPage() {
     }
   };
 
+  const handleDeleteBatch = async () => {
+    if (!selectedBatch) return;
+    setIsDeleting(true);
+    setPageError('');
+    try {
+      await deleteBirdieBatch(selectedBatch.id);
+      setShowDeleteConfirm(false);
+      setSelectedBatch(null);
+      await loadInventory();
+    } catch (err: unknown) {
+      setPageError(err instanceof Error ? err.message : 'Failed to delete batch.');
+      setShowDeleteConfirm(false);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // ── Render helpers ────────────────────────────────────────────────────────────
   const renderTable = () => {
     if (isLoading && !batches.length) return <div className="text-center"><Spinner animation="border" /></div>;
@@ -427,7 +446,17 @@ export default function BirdiesPage() {
       <Card>
         <Card.Header className="d-flex justify-content-between align-items-center">
           <Card.Title className="mb-0">{selectedBatch.name}</Card.Title>
-          <Button variant="outline-primary" size="sm" onClick={handleStartEdit}>Edit Batch</Button>
+          <div>
+            <Button variant="outline-primary" size="sm" onClick={handleStartEdit}>Edit Batch</Button>
+            <Button
+              variant="outline-danger"
+              size="sm"
+              className="ms-2"
+              onClick={() => setShowDeleteConfirm(true)}
+            >
+              Delete Batch
+            </Button>
+          </div>
         </Card.Header>
         <Card.Body>
           {pageError && <Alert variant="danger">{pageError}</Alert>}
@@ -487,12 +516,14 @@ export default function BirdiesPage() {
                 </thead>
                 <tbody>
                   {history.map((item, i) => {
-                    const style = item.type === 'adjustment' ? ADJUSTMENT_ROW_STYLE : {};
                     return (
-                      <tr key={`${item.type}-${item.id ?? i}`}>
-                        <td style={style}>{format(item.eventDate, 'yyyy-MM-dd')}</td>
-                        <td style={style}>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
-                        <td style={style}>
+                      <tr
+                        key={`${item.type}-${item.id ?? i}`}
+                        className={item.type === 'adjustment' ? 'inventory-history-adjustment' : 'inventory-history-session'}
+                      >
+                        <td>{format(item.eventDate, 'yyyy-MM-dd')}</td>
+                        <td>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
+                        <td>
                           {item.type === 'sessionUsage' && (
                             (item.quantityUsed as number) < 0
                               ? `Returned: ${Math.abs(item.quantityUsed as number)} birds`
@@ -509,8 +540,8 @@ export default function BirdiesPage() {
                             </>
                           )}
                         </td>
-                        <td style={style}>{remainingByRow.get(item) ?? 0} birds</td>
-                        <td style={style}>
+                        <td>{remainingByRow.get(item) ?? 0} birds</td>
+                        <td>
                           {item.type === 'sessionUsage' ? (
                             <Link to={`/?date=${format(item.eventDate as Date, 'yyyy-MM-dd')}`}>
                               View on calendar
@@ -550,6 +581,15 @@ export default function BirdiesPage() {
         show={showAddModal}
         onHide={() => setShowAddModal(false)}
         onAddBatch={handleAddBatch}
+      />
+      <ConfirmDialog
+        show={showDeleteConfirm}
+        title="Delete birdie batch?"
+        message={`Permanently delete "${selectedBatch?.name ?? 'this batch'}" and its batch history? Session records will remain.`}
+        confirmLabel={isDeleting ? 'Deleting...' : 'Delete Batch'}
+        onConfirm={handleDeleteBatch}
+        onCancel={() => setShowDeleteConfirm(false)}
+        isLoading={isDeleting}
       />
     </Container>
   );

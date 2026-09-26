@@ -8,12 +8,13 @@ interface Props {
   onAddPlayer:       (data: NewPlayerInput) => Promise<void>;
   initialFirstName?: string;
   existingPlayers:   Player[];
+  allowGuest?:       boolean; // shows a "guest" checkbox — used when adding an attendee mid-session
 }
 
-const EMPTY = { firstName: '', lastName: '', email: '', balance: 0, description: '' };
+const EMPTY = { firstName: '', lastName: '', email: '', balance: 0, description: '', isGuest: false };
 
 export default function AddPlayerModal({
-  show, onHide, onAddPlayer, initialFirstName = '', existingPlayers,
+  show, onHide, onAddPlayer, initialFirstName = '', existingPlayers, allowGuest = false,
 }: Props) {
   const [form,         setForm]         = useState({ ...EMPTY, firstName: initialFirstName });
   const [error,        setError]        = useState('');
@@ -63,6 +64,7 @@ export default function AddPlayerModal({
         email:       form.email.trim() || null,
         balance:     form.balance,
         description: form.description.trim(),
+        isGuest:     allowGuest ? form.isGuest : undefined,
       });
       onHide();
     } catch (err: unknown) {
@@ -101,6 +103,16 @@ export default function AddPlayerModal({
             <Form.Label>Description / Notes (optional)</Form.Label>
             <Form.Control as="textarea" rows={2} value={form.description} onChange={e => set('description', e.target.value)} disabled={isSubmitting} />
           </Form.Group>
+          {allowGuest && (
+            <Form.Check
+              type="checkbox"
+              id="add-player-guest"
+              label="Guest (one-time attendee — won't show on the Players tab, but their balance is still tracked)"
+              checked={form.isGuest}
+              onChange={e => setForm(prev => ({ ...prev, isGuest: e.target.checked }))}
+              disabled={isSubmitting}
+            />
+          )}
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={onHide} disabled={isSubmitting}>Cancel</Button>

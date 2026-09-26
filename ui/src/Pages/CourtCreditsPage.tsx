@@ -8,10 +8,12 @@ import { Link } from 'react-router-dom';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import AddCourtCreditModal from 'components/AddCourtCreditModal';
+import ConfirmDialog from 'components/ConfirmDialog';
 import { auth } from '../services/firebase/client';
 import {
   fetchCourtCredits,
   addCourtCreditBatch,
+  deleteCourtCreditBatch,
   updateCourtCreditBatch,
   fetchCourtCreditBatchById,
   fetchCourtCreditAdjustments,
@@ -51,9 +53,6 @@ const INIT_EDIT: EditFormState = {
   notes:          '',
 };
 
-const SESSION_ROW_STYLE:    React.CSSProperties = { backgroundColor: '#e9f7ef' };
-const ADJUSTMENT_ROW_STYLE: React.CSSProperties = { backgroundColor: '#feefd8' };
-
 // This app only supports Google sign-in, so displayName/email are reliably
 // populated — used to attribute batch edits to the actual admin instead of a
 // generic "Admin" placeholder.
@@ -80,6 +79,9 @@ export default function CourtCreditsPage() {
   const [editForm,         setEditForm]         = useState<EditFormState>({ ...INIT_EDIT });
   const [editReason,       setEditReason]       = useState('');
   const [isSaving,         setIsSaving]         = useState(false);
+  const [deleteTarget,     setDeleteTarget]     = useState<CourtCreditBatch | null>(null);
+  const [isDeleting,       setIsDeleting]       = useState(false);
+  const [deleteError,      setDeleteError]      = useState('');
   const [history,          setHistory]          = useState<HistoryItem[]>([]);
 
   // ── Load batches ─────────────────────────────────────────────────────────────
@@ -233,6 +235,23 @@ export default function CourtCreditsPage() {
     }
   };
 
+  const handleDeleteBatch = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError('');
+    try {
+      await deleteCourtCreditBatch(deleteTarget.id);
+      setDeleteTarget(null);
+      setActiveKey(null);
+      await loadBatches();
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete court credit batch.');
+      setDeleteTarget(null);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────────
   if (isLoading && !batches.length) return (
     <Container className="text-center mt-5"><Spinner animation="border" /><p>Loading…</p></Container>
@@ -271,7 +290,7 @@ export default function CourtCreditsPage() {
               <Accordion.Item
                 eventKey={batch.id}
                 key={batch.id}
-                style={i % 2 === 1 ? ({ '--bs-accordion-btn-bg': '#f8f9fa' } as React.CSSProperties) : undefined}
+                className={i % 2 === 1 ? 'inventory-batch-alternate' : undefined}
               >
                 <Accordion.Header>
                   <Row className="w-100 align-items-center gx-2">
@@ -354,6 +373,9 @@ export default function CourtCreditsPage() {
                   ) : (
                     // ── Detail view ──────────────────────────────────────────
                     <>
+                      {deleteError && activeKey === batch.id && (
+                        <Alert variant="danger" dismissible onClose={() => setDeleteError('')}>{deleteError}</Alert>
+                      )}
                       {batch.name && <p><strong>Name:</strong> {batch.name}</p>}
                       <Row className="mb-3">
                         <Col md={6}>
@@ -369,9 +391,19 @@ export default function CourtCreditsPage() {
                       {batch.notes && (
                         <p><strong>Notes:</strong> <span style={{ whiteSpace: 'pre-wrap' }}>{batch.notes}</span></p>
                       )}
-                      <Button variant="outline-primary" size="sm" className="mb-3" onClick={() => handleStartEdit(batch)}>
-                        Edit Batch Details
-                      </Button>
+                      <div className="mb-3">
+                        <Button variant="outline-primary" size="sm" onClick={() => handleStartEdit(batch)}>
+                          Edit Batch Details
+                        </Button>
+                        <Button
+                          variant="outline-danger"
+                          size="sm"
+                          className="ms-2"
+                          onClick={() => setDeleteTarget(batch)}
+                        >
+                          Delete Batch
+                        </Button>
+                      </div>
                       <hr />
                       <h5>Batch History</h5>
                       {isLoadingHistory && <Spinner animation="border" size="sm" />}
@@ -406,12 +438,14 @@ export default function CourtCreditsPage() {
                           <thead><tr><th>Date</th><th>Type</th><th>Details</th><th>Remaining</th><th>Source</th></tr></thead>
                           <tbody>
                             {history.map((item, i) => {
-                              const style = item.type === 'sessionUsage' ? SESSION_ROW_STYLE : ADJUSTMENT_ROW_STYLE;
                               return (
-                                <tr key={`${item.type}-${item.id ?? i}`}>
-                                  <td style={style}>{format(item.eventDate, 'yyyy-MM-dd')}</td>
-                                  <td style={style}>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
-                                  <td style={style}>
+                                <tr
+                                  key={`${item.type}-${item.id ?? i}`}
+                                  className={item.type === 'sessionUsage' ? 'inventory-history-session' : 'inventory-history-adjustment'}
+                                >
+                                  <td>{format(item.eventDate, 'yyyy-MM-dd')}</td>
+                                  <td>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
+                                  <td>
                                     {item.type === 'sessionUsage' && (
                                       (item.hoursUsed as number) < 0
                                         ? `Returned: ${Math.abs(item.hoursUsed as number)} hrs`
@@ -428,8 +462,8 @@ export default function CourtCreditsPage() {
                                       </>
                                     )}
                                   </td>
-                                  <td style={style}>{remainingByRow.get(item) ?? 0} hrs</td>
-                                  <td style={style}>
+                                  <td>{remainingByRow.get(item) ?? 0} hrs</td>
+                                  <td>
                                     {item.type === 'sessionUsage' ? (
                                       <Link to={`/?date=${format(item.eventDate as Date, 'yyyy-MM-dd')}`}>
                                         View on calendar
@@ -456,6 +490,15 @@ export default function CourtCreditsPage() {
         show={showAddModal}
         onHide={() => setShowAddModal(false)}
         onAddBatch={handleAddBatch}
+      />
+      <ConfirmDialog
+        show={deleteTarget !== null}
+        title="Delete court credit batch?"
+        message={`Permanently delete "${deleteTarget?.name || 'this batch'}" and its batch history? Session records will remain.`}
+        confirmLabel={isDeleting ? 'Deleting...' : 'Delete Batch'}
+        onConfirm={handleDeleteBatch}
+        onCancel={() => setDeleteTarget(null)}
+        isLoading={isDeleting}
       />
     </Container>
   );

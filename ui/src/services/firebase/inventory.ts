@@ -51,6 +51,37 @@ export async function addBirdieBatch(
   });
 }
 
+export async function deleteBirdieBatch(batchId: string): Promise<void> {
+  return serviceCall('deleteBirdieBatch', async () => {
+    const batchRef = doc(refs.birdieInventory, batchId);
+    const [batchSnap, adjustmentSnap, usageSnap] = await Promise.all([
+      getDoc(batchRef),
+      getDocs(query(
+        refs.inventoryAdjustments,
+        where('batchId', '==', batchId),
+        where('resourceType', '==', 'birdieBatch')
+      )),
+      getDocs(query(
+        refs.transactions,
+        where('batchId', '==', batchId),
+        where('resourceType', '==', 'birdie')
+      )),
+    ]);
+
+    if (!batchSnap.exists()) throw new Error(`Birdie batch ${batchId} not found`);
+
+    const relatedDocs = [...adjustmentSnap.docs, ...usageSnap.docs];
+    if (relatedDocs.length >= 500) {
+      throw new Error('This batch has too much history to delete in one operation.');
+    }
+
+    const batch = writeBatch(refs.birdieInventory.firestore);
+    relatedDocs.forEach(snapshot => batch.delete(snapshot.ref));
+    batch.delete(batchRef);
+    await batch.commit();
+  });
+}
+
 export async function updateBirdieBatch(
   batchId: string,
   original: BirdieBatch,
@@ -149,6 +180,37 @@ export async function addCourtCreditBatch(
       createdAt:      serverTimestamp(),
     });
     return ref.id;
+  });
+}
+
+export async function deleteCourtCreditBatch(batchId: string): Promise<void> {
+  return serviceCall('deleteCourtCreditBatch', async () => {
+    const batchRef = doc(refs.courtCredits, batchId);
+    const [batchSnap, adjustmentSnap, usageSnap] = await Promise.all([
+      getDoc(batchRef),
+      getDocs(query(
+        refs.inventoryAdjustments,
+        where('batchId', '==', batchId),
+        where('resourceType', '==', 'courtCreditBatch')
+      )),
+      getDocs(query(
+        refs.transactions,
+        where('batchId', '==', batchId),
+        where('resourceType', '==', 'court')
+      )),
+    ]);
+
+    if (!batchSnap.exists()) throw new Error(`Court credit batch ${batchId} not found`);
+
+    const relatedDocs = [...adjustmentSnap.docs, ...usageSnap.docs];
+    if (relatedDocs.length >= 500) {
+      throw new Error('This batch has too much history to delete in one operation.');
+    }
+
+    const batch = writeBatch(refs.courtCredits.firestore);
+    relatedDocs.forEach(snapshot => batch.delete(snapshot.ref));
+    batch.delete(batchRef);
+    await batch.commit();
   });
 }
 
