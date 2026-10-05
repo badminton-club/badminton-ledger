@@ -183,6 +183,34 @@ describe('SettingsPage', () => {
     });
   });
 
+  it('loads and saves e-Transfer import defaults (search window and ignore-above amount), same club fields the e-Transfers page edits', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc(TEST_CLUB_ID, {
+      name: 'Test Club',
+      etransferSearchWindowDays: 14,
+      etransferIgnoreAboveAmount: 30,
+    });
+    renderPage({ role: 'admin' });
+
+    const windowSelect = await screen.findByRole('combobox', { name: 'Search window' });
+    await waitFor(() => expect(windowSelect).toHaveValue('14'));
+    const ignoreInput = screen.getByRole('spinbutton', { name: 'Ignore amounts over' });
+    await waitFor(() => expect(ignoreInput).toHaveValue(30));
+
+    await user.selectOptions(windowSelect, '30');
+    await user.click(screen.getByRole('button', { name: 'Save window' }));
+    await waitFor(() => expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+      etransferSearchWindowDays: 30,
+    }));
+
+    await user.clear(ignoreInput);
+    await user.type(ignoreInput, '50');
+    await user.click(screen.getByRole('button', { name: 'Save limit' }));
+    await waitFor(() => expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+      etransferIgnoreAboveAmount: 50,
+    }));
+  });
+
   it('shows a toggle for the Attendance tab, so it can be hidden from every club member, not just admins', async () => {
     const user = userEvent.setup();
     seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club' });
