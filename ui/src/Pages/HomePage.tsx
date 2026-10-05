@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Container, Row, Col, Button, Alert } from "react-bootstrap";
 import { format } from "date-fns";
 import { Link, useSearchParams } from "react-router-dom";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 // import "./HomePage.css";
 import SessionCalendar from "components/Calander/SessionCalendar";
 import SessionQuickView from "components/Calander/SessionQuickView";
@@ -51,11 +53,12 @@ export default function HomePage() {
     }, [searchParams, setSearchParams]);
 
     // Same deep-link mechanism as above, plus a "new" flag the calendar uses
-    // to open the add-session flow straight away for today (rather than just
-    // selecting the day) when there's no session there yet.
-    const openAddSessionInCalendar = useCallback(() => {
+    // to open the add-session flow straight away (rather than just selecting
+    // the day) when there's no session there yet. Defaults to today, but the
+    // "Choose date…" control next to the button lets an admin pick any day.
+    const openAddSessionInCalendar = useCallback((date: Date = new Date()) => {
         const next = new URLSearchParams(searchParams);
-        next.set("date", format(new Date(), "yyyy-MM-dd"));
+        next.set("date", format(date, "yyyy-MM-dd"));
         next.set("new", "1");
         setSearchParams(next);
     }, [searchParams, setSearchParams]);
@@ -75,10 +78,22 @@ export default function HomePage() {
         <div className="home-page">
             <Container>
                 {isAdmin && (
-                    <div className="d-flex justify-content-end mb-3">
-                        <Button variant="primary" onClick={openAddSessionInCalendar}>
+                    <div className="d-flex justify-content-end align-items-center gap-2 mb-3">
+                        <Button variant="primary" onClick={() => openAddSessionInCalendar()}>
                             + Add Session
                         </Button>
+                        <DatePicker
+                            selected={null}
+                            onChange={(date: Date | null) => {
+                                if (date) openAddSessionInCalendar(date);
+                            }}
+                            customInput={
+                                <Button size="sm" variant="outline-secondary" title="Add a session for a different date">
+                                    Choose date…
+                                </Button>
+                            }
+                            dateFormat="MMMM d, yyyy"
+                        />
                     </div>
                 )}
 

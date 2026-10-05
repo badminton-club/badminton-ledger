@@ -268,6 +268,31 @@ describe('HomePage', () => {
     });
   });
 
+  it('lets an admin pick a different date for a new session via "Choose date…", instead of always defaulting to today', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 4, 15)); // May 15, 2026
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    jest.mocked(fetchSessions).mockResolvedValue([]);
+
+    renderHomePage({
+      preloadedState: {
+        club: makeClubState(),
+        players: makePlayersState([]),
+      },
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Choose date…' }));
+    await user.click(screen.getByText('20'));
+
+    await waitFor(() => {
+      const search = screen.getByTestId('location-search').textContent ?? '';
+      expect(search).toContain('date=2026-05-20');
+      expect(search).toContain('new=1');
+    });
+
+    jest.useRealTimers();
+  });
+
   it('hides the "+ Add Session" button for a non-admin', async () => {
     jest.mocked(fetchSessions).mockResolvedValue([]);
 
