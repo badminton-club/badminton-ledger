@@ -142,6 +142,36 @@ describe('SessionQuickView', () => {
     expect(within(screen.getByText('Alice Zhang').parentElement as HTMLElement).getByText('Paid')).toBeInTheDocument();
   });
 
+  it('keeps the player list a fixed height regardless of player count, so the card itself does not change size session to session', () => {
+    const fewPlayers = makeSession('session-1', new Date(2026, 7, 10), {
+      players: [{ id: 'p1', percentage: 100, cost: 18, paid: true, comped: false, highlighted: false }],
+    });
+
+    const { rerender } = renderWithProviders(
+      <SessionQuickView date={fewPlayers.date} sessions={[fewPlayers]} onAddSession={jest.fn()} onOpenModal={jest.fn()} />,
+      {
+        preloadedState: {
+          club: makeClubState({ role: 'member' }),
+          players: makePlayersState([makePlayer('p1', 'Alice', 'Zhang')]),
+        },
+      }
+    );
+
+    const playerListHeight = () => screen.getByText('Alice Zhang').closest('div[style*="height"]') as HTMLElement;
+    expect(playerListHeight()).toHaveStyle({ height: '280px' });
+
+    const manyPlayers = makeSession('session-2', new Date(2026, 7, 11), {
+      players: Array.from({ length: 10 }, (_, i) => ({
+        id: `p${i + 1}`, percentage: 10, cost: 2, paid: true, comped: false, highlighted: false,
+      })),
+    });
+    rerender(
+      <SessionQuickView date={manyPlayers.date} sessions={[manyPlayers]} onAddSession={jest.fn()} onOpenModal={jest.fn()} />
+    );
+
+    expect(playerListHeight()).toHaveStyle({ height: '280px' });
+  });
+
   it('omits the left border (used for standalone/embedded placements, e.g. the homepage) when bordered=false', () => {
     const session = makeSession('session-1', new Date(2026, 7, 10));
 

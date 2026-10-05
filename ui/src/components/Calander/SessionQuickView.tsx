@@ -303,7 +303,11 @@ const styles: Record<string, React.CSSProperties> = {
         flexDirection: "column",
         gap: 4,
         overflowY: "auto",
-        maxHeight: 280,
+        // Fixed (not just capped) so the whole card's height stays the same
+        // session to session — otherwise a session with fewer players
+        // renders a shorter card, which shifts page layout/scroll position
+        // when paging through the homepage's Latest/Previous Session card.
+        height: 280,
     },
     playerRow: {
         display: "flex",
