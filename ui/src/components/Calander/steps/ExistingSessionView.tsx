@@ -249,7 +249,6 @@ function PlayerRow({
               <div
                 className="text-end"
                 style={{
-                  fontSize: 11,
                   fontWeight: 600,
                   color: 'var(--color-text-success)',
                 }}
