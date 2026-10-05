@@ -255,20 +255,18 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
                 }
             </div>
 
-            {/* ── Quick view panel ─────────────────────────────────────────── */}
-            <div style={styles.quickViewPanel}>
-                {selectedDate ?
+            {/* ── Quick view panel — only takes up space once a day is picked,
+                so the calendar can use the freed-up width the rest of the time ── */}
+            {selectedDate && (
+                <div style={styles.quickViewPanel}>
                     <SessionQuickView
                         date={selectedDate}
                         sessions={selectedSessions}
                         onAddSession={handleAddSession}
                         onOpenModal={handleOpenModal}
                     />
-                :   <div style={styles.quickViewEmpty}>
-                        <p style={styles.quickViewEmptyText}>Select a day to see session details</p>
-                    </div>
-                }
-            </div>
+                </div>
+            )}
 
             <SessionModal
                 show={showModal}
@@ -329,20 +327,5 @@ const styles: Record<string, React.CSSProperties> = {
         alignSelf: "flex-start", // don't stretch to calendar height
         position: "sticky",
         top: 20,
-    },
-
-    quickViewEmpty: {
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 40,
-        minHeight: 200,
-    },
-
-    quickViewEmptyText: {
-        fontSize: 13,
-        color: "var(--color-text-tertiary)",
-        textAlign: "center",
-        margin: 0,
     },
 };

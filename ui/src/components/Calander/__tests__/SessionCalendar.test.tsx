@@ -104,7 +104,7 @@ describe('SessionCalendar', () => {
 
     renderCalendar();
 
-    expect(screen.getByText('Select a day to see session details')).toBeInTheDocument();
+    expect(screen.queryByText('Select a day to see session details')).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'August 2026' })).toBeInTheDocument();
 
     await user.click((await screen.findByText('10')).parentElement as HTMLElement);
@@ -115,6 +115,25 @@ describe('SessionCalendar', () => {
 
     await user.click(screen.getByRole('button', { name: 'View details' }));
     expect(screen.getByTestId('session-modal')).toHaveTextContent('aug-10');
+  });
+
+  it('gives the calendar the full width when no day is selected, and reserves room for the quick-view panel once one is', async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    seedSession('aug-10', new Date(2026, 7, 10), { location: 'Court A' });
+
+    const { container } = renderCalendar();
+    await screen.findByRole('button', { name: 'August 2026' });
+
+    // Only the calendar panel renders — no quick-view placeholder panel is
+    // mounted at all, so the calendar panel (flex: 1) can use the full width.
+    const outerWrap = container.firstChild as HTMLElement;
+    expect(outerWrap.children).toHaveLength(1);
+
+    await user.click((await screen.findByText('10')).parentElement as HTMLElement);
+    await screen.findByText(dateHeading('Monday August 10'));
+
+    // The quick-view panel now takes up its own space alongside the calendar.
+    expect(outerWrap.children).toHaveLength(2);
   });
 
   it('navigates between months and reloads the sessions for each visible month', async () => {
@@ -217,8 +236,10 @@ describe('SessionCalendar', () => {
     expect(await screen.findByRole('button', { name: 'September 2026' })).toBeInTheDocument();
 
     // The selected-day panel must go back to its empty state — not keep
-    // showing (or silently targeting) August 10 from before navigating.
-    expect(screen.getByText('Select a day to see session details')).toBeInTheDocument();
+    // showing (or silently targeting) August 10 from before navigating. The
+    // panel itself is now unmounted entirely (rather than showing a "Select
+    // a day…" placeholder) so the calendar can use the freed-up width.
+    expect(screen.queryByText('Select a day to see session details')).not.toBeInTheDocument();
     expect(screen.queryByText(dateHeading('Monday August 10'))).not.toBeInTheDocument();
   });
 
