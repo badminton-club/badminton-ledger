@@ -111,7 +111,6 @@ body {
     border-radius: var(--border-radius-lg);
     padding: 20px;
     width: 100%;
-    max-width: 500px;
     /* Fills the full height of its Bootstrap column (which the Row's default
      * flex `align-items: stretch` already sizes to match the taller sibling
      * card), so the shorter card visually stretches instead of leaving a gap. */

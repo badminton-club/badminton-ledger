@@ -205,7 +205,7 @@ function PlayerRow({ playerId, cost, paid, comped }: { playerId: string; cost: n
 
 const styles: Record<string, React.CSSProperties> = {
     wrap: {
-        padding: "16px",
+        padding: "20px",
         borderLeftWidth: "0.5px",
         borderLeftStyle: "solid",
         borderLeftColor: "var(--color-border-tertiary)",
