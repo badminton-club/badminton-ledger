@@ -26,20 +26,6 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-// The date header renders as "Weekday" <br/> "Month d" (two lines, no
-// comma), so its text is split across sibling text nodes within one <p>.
-function dateHeading(text: string) {
-  return (_content: string, element: Element | null) => {
-    if (!element || element.tagName.toLowerCase() !== 'p') return false;
-    const joined = Array.from(element.childNodes)
-      .map((n) => (n.nodeType === Node.TEXT_NODE ? n.textContent : ' '))
-      .join('')
-      .replace(/\s+/g, ' ')
-      .trim();
-    return joined === text;
-  };
-}
-
 function makePlayer(id: string, firstName: string, lastName: string): Player {
   return {
     id,
@@ -74,8 +60,8 @@ function seedSession(id: string, date: Date, overrides: Record<string, unknown> 
   });
 }
 
-function renderCalendar(route?: string) {
-  return renderWithProviders(<SessionCalendar />, {
+function renderCalendar(route?: string, props?: { onDaySelected?: (date: Date) => void }) {
+  return renderWithProviders(<SessionCalendar {...props} />, {
     route,
     preloadedState: {
       club: makeClubState({ currentClubId: TEST_CLUB_ID }),
@@ -88,8 +74,9 @@ function renderCalendar(route?: string) {
 }
 
 describe('SessionCalendar', () => {
-  it('loads the visible month and shows a clicked day in the quick view', async () => {
+  it('loads the visible month, highlights a clicked day, and reports it via onDaySelected', async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    const onDaySelected = jest.fn();
     seedSession('aug-10', new Date(2026, 7, 10), {
       location: 'Court A',
       totalCourtCost: 24,
@@ -97,47 +84,20 @@ describe('SessionCalendar', () => {
       totalSessionCost: 40,
       players: [{ id: 'p1', percentage: 100, cost: 40, paid: false, comped: false, highlighted: false }],
     });
-    seedSession('sep-02', new Date(2026, 8, 2), {
-      location: 'Court B',
-      totalSessionCost: 18,
-    });
 
-    renderCalendar();
+    renderCalendar(undefined, { onDaySelected });
 
-    expect(screen.queryByText('Select a day to see session details')).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'August 2026' })).toBeInTheDocument();
 
-    await user.click((await screen.findByText('10')).parentElement as HTMLElement);
+    const dayCell = (await screen.findByText('10')).parentElement as HTMLElement;
+    await user.click(dayCell);
 
-    expect(await screen.findByText(dateHeading('Monday August 10'))).toBeInTheDocument();
-    expect(screen.getByText('1 unpaid')).toBeInTheDocument();
-    // Compact: no stats grid/cost breakdown/player list here — the homepage
-    // already shows that detail in its own "Latest Session" card, so
-    // repeating it in the calendar's side panel would just be duplicated.
-    expect(screen.queryByText('Total cost')).not.toBeInTheDocument();
-    expect(screen.queryByText('Court A')).not.toBeInTheDocument();
+    // No separate quick-view panel here anymore — the homepage pages its own
+    // "Latest Session" card to match instead, via this callback.
+    expect(onDaySelected).toHaveBeenCalledWith(new Date(2026, 7, 10));
 
-    await user.click(screen.getByRole('button', { name: 'View details' }));
+    await user.click(within(dayCell).getByRole('button', { name: 'View session details' }));
     expect(screen.getByTestId('session-modal')).toHaveTextContent('aug-10');
-  });
-
-  it('gives the calendar the full width when no day is selected, and reserves room for the quick-view panel once one is', async () => {
-    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
-    seedSession('aug-10', new Date(2026, 7, 10), { location: 'Court A' });
-
-    const { container } = renderCalendar();
-    await screen.findByRole('button', { name: 'August 2026' });
-
-    // Only the calendar panel renders — no quick-view placeholder panel is
-    // mounted at all, so the calendar panel (flex: 1) can use the full width.
-    const outerWrap = container.firstChild as HTMLElement;
-    expect(outerWrap.children).toHaveLength(1);
-
-    await user.click((await screen.findByText('10')).parentElement as HTMLElement);
-    await screen.findByText(dateHeading('Monday August 10'));
-
-    // The quick-view panel now takes up its own space alongside the calendar.
-    expect(outerWrap.children).toHaveLength(2);
   });
 
   it('navigates between months and reloads the sessions for each visible month', async () => {
@@ -158,16 +118,13 @@ describe('SessionCalendar', () => {
 
     await user.click(screen.getByRole('button', { name: '>' }));
     expect(await screen.findByRole('button', { name: 'September 2026' })).toBeInTheDocument();
-
-    await user.click((await screen.findByText('2')).parentElement as HTMLElement);
-    expect(await screen.findByText(dateHeading('Wednesday September 2'))).toBeInTheDocument();
-    expect(screen.getByText('Fully paid')).toBeInTheDocument();
+    await user.click(within((await screen.findByText('2')).parentElement as HTMLElement).getByRole('button', { name: 'View session details' }));
+    expect(screen.getByTestId('session-modal')).toHaveTextContent('sep-02');
 
     await user.click(screen.getByRole('button', { name: '<' }));
     expect(await screen.findByRole('button', { name: 'August 2026' })).toBeInTheDocument();
-
-    await user.click((await screen.findByText('10')).parentElement as HTMLElement);
-    expect(await screen.findByText(dateHeading('Monday August 10'))).toBeInTheDocument();
+    await user.click(within((await screen.findByText('10')).parentElement as HTMLElement).getByRole('button', { name: 'View session details' }));
+    expect(screen.getByTestId('session-modal')).toHaveTextContent('aug-10');
   });
 
   it('opens a new-session modal immediately when an admin clicks an empty day', async () => {
@@ -177,9 +134,7 @@ describe('SessionCalendar', () => {
     await screen.findByRole('button', { name: 'August 2026' });
     await user.click((await screen.findByText('11')).parentElement as HTMLElement);
 
-    expect(await screen.findByText(dateHeading('Tuesday August 11'))).toBeInTheDocument();
-    expect(screen.getByText('No session this day')).toBeInTheDocument();
-    expect(screen.getByTestId('session-modal')).toHaveTextContent('new-session');
+    expect(await screen.findByTestId('session-modal')).toHaveTextContent('new-session');
   });
 
   it('opens the View details modal straight from the calendar-grid expand button, without selecting the day first', async () => {
@@ -209,7 +164,8 @@ describe('SessionCalendar', () => {
 
   it('lets a non-admin select an empty day without launching the admin-only add-session flow', async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
-    renderWithProviders(<SessionCalendar />, {
+    const onDaySelected = jest.fn();
+    renderWithProviders(<SessionCalendar onDaySelected={onDaySelected} />, {
       preloadedState: {
         club: makeClubState({ currentClubId: TEST_CLUB_ID, role: 'member' }),
         players: makePlayersState([makePlayer('p1', 'Alice', 'Zhang')]),
@@ -219,30 +175,8 @@ describe('SessionCalendar', () => {
     await screen.findByRole('button', { name: 'August 2026' });
     await user.click((await screen.findByText('11')).parentElement as HTMLElement);
 
-    expect(await screen.findByText(dateHeading('Tuesday August 11'))).toBeInTheDocument();
-    expect(screen.getByText('No session this day')).toBeInTheDocument();
+    expect(onDaySelected).toHaveBeenCalledWith(new Date(2026, 7, 11));
     expect(screen.queryByTestId('session-modal')).not.toBeInTheDocument();
-  });
-
-  it('deselects the day when navigating months, so "+ Add Session" cannot silently create a session in the month navigated away from', async () => {
-    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
-    seedSession('aug-10', new Date(2026, 7, 10), { location: 'Court A' });
-
-    renderCalendar();
-
-    await screen.findByRole('button', { name: 'August 2026' });
-    await user.click((await screen.findByText('10')).parentElement as HTMLElement);
-    expect(await screen.findByText(dateHeading('Monday August 10'))).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: '>' }));
-    expect(await screen.findByRole('button', { name: 'September 2026' })).toBeInTheDocument();
-
-    // The selected-day panel must go back to its empty state — not keep
-    // showing (or silently targeting) August 10 from before navigating. The
-    // panel itself is now unmounted entirely (rather than showing a "Select
-    // a day…" placeholder) so the calendar can use the freed-up width.
-    expect(screen.queryByText('Select a day to see session details')).not.toBeInTheDocument();
-    expect(screen.queryByText(dateHeading('Monday August 10'))).not.toBeInTheDocument();
   });
 
   it('opens the session-details popup directly for a /?date=YYYY-MM-DD deep link, without requiring a click', async () => {
@@ -251,21 +185,20 @@ describe('SessionCalendar', () => {
     renderCalendar('/?date=2026-08-10');
 
     expect(await screen.findByTestId('session-modal')).toHaveTextContent('aug-10');
-    // The day is also selected in the inline quick-view panel underneath.
-    expect(await screen.findByText(dateHeading('Monday August 10'))).toBeInTheDocument();
   });
 
   it('selects the day but does not open a popup for a /?date= deep link with no session that day', async () => {
-    renderCalendar('/?date=2026-08-11');
+    const onDaySelected = jest.fn();
+    renderCalendar('/?date=2026-08-11', { onDaySelected });
 
-    expect(await screen.findByText(dateHeading('Tuesday August 11'))).toBeInTheDocument();
+    await screen.findByRole('button', { name: 'August 2026' });
+    expect(onDaySelected).not.toHaveBeenCalled();
     expect(screen.queryByTestId('session-modal')).not.toBeInTheDocument();
   });
 
   it('opens the add-session flow directly for a /?date=...&new=1 deep link with no session that day', async () => {
     renderCalendar('/?date=2026-08-11&new=1');
 
-    expect(await screen.findByText(dateHeading('Tuesday August 11'))).toBeInTheDocument();
     expect(await screen.findByTestId('session-modal')).toHaveTextContent('new-session');
   });
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Button, ButtonGroup, Spinner } from "react-bootstrap";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -16,7 +16,6 @@ import type { NewSessionData } from "../../services/firebase/sessions";
 
 import CalendarGrid from "./CalendarGrid";
 import SessionModal from "./SessionModal";
-import SessionQuickView from "./SessionQuickView";
 
 export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { onSessionsChanged?: () => void; onDaySelected?: (date: Date) => void }) {
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -32,11 +31,6 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { 
     const isAdmin = useAppSelector(selectIsClubAdmin);
     const dispatch = useAppDispatch();
     const [searchParams, setSearchParams] = useSearchParams();
-
-    const selectedSessions = useMemo(
-        () => (selectedDate ? sessions.filter((s) => +s.date === +selectedDate) : []),
-        [selectedDate, sessions],
-    );
 
     const loadMonth = useCallback(async () => {
         if (!currentClubId) return;
@@ -91,7 +85,7 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { 
     // the day, and opens the full session-details popup directly for that
     // day (via its own narrow fetch, so it doesn't race the month-level
     // `sessions` load below) — instead of just selecting the day and leaving
-    // the user to scroll down to find it in the inline quick-view panel.
+    // the user to find it via the Latest Session card alongside the calendar.
     useEffect(() => {
         const dateParam = searchParams.get("date");
         if (!dateParam) return;
@@ -99,8 +93,7 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { 
         if (!y || !m || !d) return;
         // "new=1" (set by e.g. the homepage's "+ Add Session" button) opens
         // the add-session flow directly for an empty day, instead of just
-        // selecting it and leaving an admin to click "+ Add Session" again
-        // in the quick-view panel underneath.
+        // selecting it and leaving an admin to click "+ Add Session" again.
         const wantsNew = searchParams.get("new") === "1";
         const target = new Date(y, m - 1, d);
         setCurrentDate(target);
@@ -144,14 +137,9 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { 
         setShowModal(true);
     };
 
-    const handleAddSession = () => {
-        if (!selectedDate || !isAdmin) return;
-        openAddSession(selectedDate);
-    };
-
     // Calendar-grid shortcut: jump straight to the "View details" modal for a
-    // day's session without first selecting it in the quick-view panel. Only
-    // wired up for days that actually have a session (see CalendarGrid).
+    // day's session without first selecting it. Only wired up for days that
+    // actually have a session (see CalendarGrid).
     const handleExpandDay = (date: Date) => {
         const daySessions = sessions.filter((s) => +s.date === +date);
         if (daySessions.length === 0) return;
@@ -192,10 +180,9 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { 
     };
 
     // Navigating months should deselect whatever day was picked in the
-    // previous month — otherwise a stale selectedDate lingers (invisible in
-    // the newly displayed grid) and "+ Add Session" in the quick-view panel
-    // would silently create a session back in the month the user navigated
-    // away from, instead of the month currently on screen.
+    // previous month — otherwise a stale selection lingers highlighted in
+    // the newly displayed grid even though it belongs to the month just
+    // navigated away from.
     const goToMonth = (nextDate: Date) => {
         setCurrentDate(nextDate);
         setSelectedDate(null);
@@ -254,24 +241,6 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { 
                 }
             </div>
 
-            {/* ── Quick view panel — only takes up space once a day is picked,
-                so the calendar can use the freed-up width the rest of the time ──
-                Compact: this calendar only renders on the homepage, which
-                already has a detailed "Latest Session" summary card up top —
-                showing the full stats/cost/player-list breakdown again here
-                for whatever day is selected just duplicates it. */}
-            {selectedDate && (
-                <div style={styles.quickViewPanel}>
-                    <SessionQuickView
-                        date={selectedDate}
-                        sessions={selectedSessions}
-                        onAddSession={handleAddSession}
-                        onOpenModal={handleOpenModal}
-                        compact
-                    />
-                </div>
-            )}
-
             <SessionModal
                 show={showModal}
                 onHide={() => setShowModal(false)}
@@ -318,18 +287,5 @@ const styles: Record<string, React.CSSProperties> = {
         alignItems: "center",
         justifyContent: "center",
         minHeight: 500,
-    },
-
-    // Quick view — separate card, no header
-    quickViewPanel: {
-        width: 300,
-        flexShrink: 0,
-        border: "0.5px solid var(--color-border-tertiary)",
-        borderRadius: 12,
-        overflow: "hidden",
-        background: "var(--color-background-primary)",
-        alignSelf: "flex-start", // don't stretch to calendar height
-        position: "sticky",
-        top: 20,
     },
 };

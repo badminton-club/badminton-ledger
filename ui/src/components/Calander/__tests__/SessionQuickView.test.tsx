@@ -123,34 +123,6 @@ describe('SessionQuickView', () => {
     expect(onOpenModal).toHaveBeenCalledWith(session);
   });
 
-  it('hides the stats grid/cost breakdown/player list when compact=true (e.g. the calendar\'s side panel, to avoid duplicating a detailed summary shown elsewhere on the page)', () => {
-    const session = makeSession('session-1', new Date(2026, 7, 10));
-
-    renderWithProviders(
-      <SessionQuickView date={session.date} sessions={[session]} onAddSession={jest.fn()} onOpenModal={jest.fn()} compact />,
-      {
-        preloadedState: {
-          club: makeClubState({ role: 'member' }),
-          players: makePlayersState([
-            makePlayer('p1', 'Alice', 'Zhang'),
-            makePlayer('p2', 'Bob', 'Lee'),
-          ]),
-        },
-      }
-    );
-
-    // Date, status, and the "View details" action still show.
-    expect(screen.getByText(dateHeading('Monday August 10'))).toBeInTheDocument();
-    expect(screen.getByText('1 unpaid')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'View details' })).toBeInTheDocument();
-
-    // But the detailed breakdown does not.
-    expect(screen.queryByText('Main Gym')).not.toBeInTheDocument();
-    expect(screen.queryByText('Total cost')).not.toBeInTheDocument();
-    expect(screen.queryByText('Court cost')).not.toBeInTheDocument();
-    expect(screen.queryByText('Alice Zhang')).not.toBeInTheDocument();
-  });
-
   it('does not count a zero-cost player as unpaid', () => {
     const session = makeSession('session-1', new Date(2026, 7, 10), {
       players: [{ id: 'p1', percentage: 0, cost: 0, paid: false, comped: false, highlighted: false }],

@@ -81,11 +81,61 @@ export default function HomePage() {
                         </Button>
                     </div>
                 )}
+
+                {/* ── Outstanding balances — unsettled session dues and overdrawn
+                    prepaid balances are distinct concerns, shown separately so
+                    neither list masks the other. ── */}
                 <Row className="mb-3">
-                    {/* ── Latest session summary — reuses the same quick-view panel
-                        shown in the calendar below, so there's a single place that
-                        defines what a session's summary looks like. ── */}
-                    <Col md={6}>
+                    <Col>
+                        <div className="session-card">
+                            <h2 className="session-title">Outstanding Balances</h2>
+                            <div className="balances-list-wrap d-flex flex-column gap-3">
+                                <div>
+                                    <h3 className="small text-muted fw-bold mb-1">Owe for sessions</h3>
+                                    {owingPlayers.length > 0 ?
+                                        <ul className="list-disc list-inside mb-0">
+                                            {owingPlayers.map((player) => (
+                                                <li key={player.id} className="player-balance">
+                                                    <Link to={`/players?playerId=${player.id}`}>
+                                                        {player.firstName} {player.lastName ?? ""}
+                                                    </Link>{" "}
+                                                    —{" "}
+                                                    <strong>${(player.owed ?? 0).toFixed(2)}</strong>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    :   <p className="no-players mb-0">No players owe for sessions.</p>}
+                                </div>
+                                <div>
+                                    <h3 className="small text-muted fw-bold mb-1">Overdrawn balance</h3>
+                                    {overdrawnPlayers.length > 0 ?
+                                        <ul className="list-disc list-inside mb-0">
+                                            {overdrawnPlayers.map((player) => (
+                                                <li key={player.id} className="player-balance">
+                                                    <Link to={`/players?playerId=${player.id}`}>
+                                                        {player.firstName} {player.lastName ?? ""}
+                                                    </Link>{" "}
+                                                    —{" "}
+                                                    <strong>Overdrawn ${Math.abs(player.balance).toFixed(2)}</strong>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    :   <p className="no-players mb-0">No players are overdrawn.</p>}
+                                </div>
+                            </div>
+                        </div>
+                    </Col>
+                </Row>
+
+                {/* ── Calendar + Latest/Previous Session — side by side so the
+                    detail card can page through whatever day is clicked in the
+                    calendar, without a second duplicate detail panel inside the
+                    calendar itself. ── */}
+                <Row>
+                    <Col md={8} className="mb-3 mb-md-0">
+                        <SessionCalendar onSessionsChanged={loadSessions} onDaySelected={handleCalendarDaySelected} />
+                    </Col>
+                    <Col md={4}>
                         {sessionsError && (
                             <Alert variant="danger" className="d-flex justify-content-between align-items-center">
                                 <span>{sessionsError}</span>
@@ -138,53 +188,6 @@ export default function HomePage() {
                             </div>
                         )}
                     </Col>
-
-                    {/* ── Outstanding balances — unsettled session dues and overdrawn
-                        prepaid balances are distinct concerns, shown separately so
-                        neither list masks the other. ── */}
-                    <Col md={6}>
-                        <div className="session-card">
-                            <h2 className="session-title">Outstanding Balances</h2>
-                            <div className="balances-list-wrap d-flex flex-column gap-3">
-                                <div>
-                                    <h3 className="small text-muted fw-bold mb-1">Owe for sessions</h3>
-                                    {owingPlayers.length > 0 ?
-                                        <ul className="list-disc list-inside mb-0">
-                                            {owingPlayers.map((player) => (
-                                                <li key={player.id} className="player-balance">
-                                                    <Link to={`/players?playerId=${player.id}`}>
-                                                        {player.firstName} {player.lastName ?? ""}
-                                                    </Link>{" "}
-                                                    —{" "}
-                                                    <strong>${(player.owed ?? 0).toFixed(2)}</strong>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    :   <p className="no-players mb-0">No players owe for sessions.</p>}
-                                </div>
-                                <div>
-                                    <h3 className="small text-muted fw-bold mb-1">Overdrawn balance</h3>
-                                    {overdrawnPlayers.length > 0 ?
-                                        <ul className="list-disc list-inside mb-0">
-                                            {overdrawnPlayers.map((player) => (
-                                                <li key={player.id} className="player-balance">
-                                                    <Link to={`/players?playerId=${player.id}`}>
-                                                        {player.firstName} {player.lastName ?? ""}
-                                                    </Link>{" "}
-                                                    —{" "}
-                                                    <strong>Overdrawn ${Math.abs(player.balance).toFixed(2)}</strong>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    :   <p className="no-players mb-0">No players are overdrawn.</p>}
-                                </div>
-                            </div>
-                        </div>
-                    </Col>
-                </Row>
-
-                <Row>
-                    <SessionCalendar onSessionsChanged={loadSessions} onDaySelected={handleCalendarDaySelected} />
                 </Row>
             </Container>
         </div>
