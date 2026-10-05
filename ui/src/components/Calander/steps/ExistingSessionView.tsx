@@ -316,7 +316,7 @@ function PlayerRow({
                   );
                 })}
               </ButtonGroup>
-            {!!stored && stored.balance !== 0 && (
+            {!!stored && stored.balance > 0 && (
               <div
                 className="text-center"
                 style={{
@@ -326,7 +326,7 @@ function PlayerRow({
                   marginTop: 2,
                   borderRadius: 4,
                   border: '0.5px solid var(--color-border-tertiary)',
-                  color: stored.balance > 0 ? 'var(--color-text-success)' : 'var(--color-text-danger)',
+                  color: 'var(--color-text-success)',
                 }}
               >
                 Balance: ${stored.balance.toFixed(2)}

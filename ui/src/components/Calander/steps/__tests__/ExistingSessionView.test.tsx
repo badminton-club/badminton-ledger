@@ -113,7 +113,7 @@ describe('ExistingSessionView', () => {
     expect(screen.getByRole('button', { name: 'e-Transfer' }).closest('.btn-group')).toHaveClass('flex-wrap');
   });
 
-  it("shows an admin the player's current balance (positive or overdrawn) alongside the settlement controls", () => {
+  it("shows an admin a player's positive balance alongside the settlement controls, but not an overdrawn (negative) one", () => {
     const players = [
       makePlayer({ id: 'p1', firstName: 'Ada', balance: 100 }),
       makePlayer({ id: 'p2', firstName: 'Bea', firstNameLower: 'bea', lastName: null, lastNameLower: null, balance: -15 }),
@@ -124,12 +124,18 @@ describe('ExistingSessionView', () => {
     ], { isAdmin: true });
 
     expect(screen.getByText('Balance: $100.00')).toBeInTheDocument();
-    expect(screen.getByText('Balance: $-15.00')).toBeInTheDocument();
+    expect(screen.queryByText(/Balance: \$-/)).not.toBeInTheDocument();
   });
 
-  it("hides the balance callout for a player with a zero balance", () => {
-    const players = [makePlayer({ id: 'p1', firstName: 'Ada', balance: 0 })];
-    renderView(players, [makeSessionPlayer({ id: 'p1' })], { isAdmin: true });
+  it("hides the balance callout for a player with a zero or negative balance", () => {
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada', balance: 0 }),
+      makePlayer({ id: 'p2', firstName: 'Bea', firstNameLower: 'bea', lastName: null, lastNameLower: null, balance: -5 }),
+    ];
+    renderView(players, [
+      makeSessionPlayer({ id: 'p1', cost: 20 }),
+      makeSessionPlayer({ id: 'p2', cost: 10 }),
+    ], { isAdmin: true });
     expect(screen.queryByText(/Balance: \$/)).not.toBeInTheDocument();
   });
 
