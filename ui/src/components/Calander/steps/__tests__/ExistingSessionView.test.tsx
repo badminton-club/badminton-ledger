@@ -104,6 +104,15 @@ describe('ExistingSessionView', () => {
     expect(screen.getByRole('button', { name: 'e-Transfer' })).toBeInTheDocument();
   });
 
+  it('lets the player row and its settlement buttons wrap onto multiple lines instead of being clipped on narrow (mobile) viewports', () => {
+    const players = [makePlayer({ id: 'p1' })];
+    renderView(players, [makeSessionPlayer()], { isAdmin: true });
+
+    const row = screen.getByText('Ada Lovelace').closest('.list-group-item') as HTMLElement;
+    expect(row).toHaveClass('flex-column', 'flex-sm-row');
+    expect(screen.getByRole('button', { name: 'e-Transfer' }).closest('.btn-group')).toHaveClass('flex-wrap');
+  });
+
   it('warns before a Balance settlement would overdraw the player', async () => {
     const user = userEvent.setup();
     const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);

@@ -74,6 +74,11 @@ export default function AppNavbar() {
                                 Attendance
                             </Nav.Link>
                         )}
+                        {currentClubId && (
+                            <Nav.Link as={Link} to="/faq">
+                                Help &amp; FAQ
+                            </Nav.Link>
+                        )}
                         {isAdmin && (
                             <>
                                 {TOGGLEABLE_TABS.filter((t) => t.key !== "attendance" && !disabledTabs.includes(t.key)).map((t) => (

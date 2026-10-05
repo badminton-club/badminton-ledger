@@ -137,4 +137,23 @@ describe('CalendarGrid', () => {
     const dayWithSession = screen.getByText('10').parentElement as HTMLElement;
     expect(within(dayWithSession).queryByRole('button', { name: 'View session details' })).not.toBeInTheDocument();
   });
+
+  it('shows a court-credit badge with the hours added on the matching day, and nowhere else', () => {
+    const creditDates = new Map<number, number>([[+new Date(2026, 7, 5), 20]]);
+
+    renderWithProviders(
+      <CalendarGrid
+        currentDate={new Date(2026, 7, 1)}
+        selectedDate={null}
+        onDayClick={jest.fn()}
+        sessions={[]}
+        creditDates={creditDates}
+      />
+    );
+
+    const dayWithCredit = screen.getByText('5').parentElement as HTMLElement;
+    const dayWithoutCredit = screen.getByText('6').parentElement as HTMLElement;
+    expect(within(dayWithCredit).getByText('💳+20')).toBeInTheDocument();
+    expect(within(dayWithoutCredit).queryByText(/💳/)).not.toBeInTheDocument();
+  });
 });

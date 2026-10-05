@@ -74,8 +74,9 @@ function seedSession(id: string, date: Date, overrides: Record<string, unknown> 
   });
 }
 
-function renderCalendar() {
+function renderCalendar(route?: string) {
   return renderWithProviders(<SessionCalendar />, {
+    route,
     preloadedState: {
       club: makeClubState({ currentClubId: TEST_CLUB_ID }),
       players: makePlayersState([
@@ -219,5 +220,41 @@ describe('SessionCalendar', () => {
     // showing (or silently targeting) August 10 from before navigating.
     expect(screen.getByText('Select a day to see session details')).toBeInTheDocument();
     expect(screen.queryByText(dateHeading('Monday August 10'))).not.toBeInTheDocument();
+  });
+
+  it('opens the session-details popup directly for a /?date=YYYY-MM-DD deep link, without requiring a click', async () => {
+    seedSession('aug-10', new Date(2026, 7, 10), { location: 'Court A' });
+
+    renderCalendar('/?date=2026-08-10');
+
+    expect(await screen.findByTestId('session-modal')).toHaveTextContent('aug-10');
+    // The day is also selected in the inline quick-view panel underneath.
+    expect(await screen.findByText(dateHeading('Monday August 10'))).toBeInTheDocument();
+  });
+
+  it('selects the day but does not open a popup for a /?date= deep link with no session that day', async () => {
+    renderCalendar('/?date=2026-08-11');
+
+    expect(await screen.findByText(dateHeading('Tuesday August 11'))).toBeInTheDocument();
+    expect(screen.queryByTestId('session-modal')).not.toBeInTheDocument();
+  });
+
+  it('shows a court-credit badge on the calendar for the day a batch was purchased', async () => {
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Fall block',
+      totalCost: 150,
+      costPerHour: 15,
+      hoursPurchased: 10,
+      remainingHours: 10,
+      purchaserName: 'Alex',
+      purchaseDate: ts(new Date(2026, 7, 5)),
+      createdAt: ts(new Date(2026, 7, 5)),
+    });
+
+    renderCalendar();
+
+    await screen.findByRole('button', { name: 'August 2026' });
+    const dayWithCredit = (await screen.findByText('5')).parentElement as HTMLElement;
+    expect(within(dayWithCredit).getByText('💳+10')).toBeInTheDocument();
   });
 });

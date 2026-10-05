@@ -10,11 +10,12 @@ interface Props {
     currentDate: Date;
     sessions: Session[];
     selectedDate: Date | null;
+    creditDates?: Map<number, number>;
     onDayClick: (date: Date) => void;
     onExpandDay?: (date: Date) => void;
 }
 
-export default function CalendarGrid({ currentDate, sessions, selectedDate, onDayClick, onExpandDay }: Props) {
+export default function CalendarGrid({ currentDate, sessions, selectedDate, creditDates, onDayClick, onExpandDay }: Props) {
     const totalDays = getTotalDaysInMonth(currentDate);
     const startDay = getFirstDayOfMonthWeekday(currentDate);
     const year = getYear(currentDate);
@@ -34,6 +35,7 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, onDa
         const allPaid =
             daySessions.length > 0 &&
             daySessions.every((s) => s.players.length > 0 && !s.players.some(isSessionPlayerUnpaid));
+        const creditHoursAdded = creditDates?.get(+date);
 
         cells.push(
             <DayCell
@@ -43,6 +45,7 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, onDa
                 today={today}
                 selected={!!selected}
                 allPaid={allPaid}
+                creditHoursAdded={creditHoursAdded}
                 onClick={() => onDayClick(date)}
                 onExpand={daySessions.length > 0 && onExpandDay ? () => onExpandDay(date) : undefined}
             />,
@@ -83,6 +86,7 @@ function DayCell({
     today,
     selected,
     allPaid,
+    creditHoursAdded,
     onClick,
     onExpand,
 }: {
@@ -91,6 +95,7 @@ function DayCell({
     today: boolean;
     selected: boolean;
     allPaid: boolean;
+    creditHoursAdded?: number;
     onClick: () => void;
     onExpand?: () => void;
 }) {
@@ -120,6 +125,32 @@ function DayCell({
             >
                 {day}
             </div>
+
+            {/* Court credit purchase badge — top-left, so it doesn't collide with
+                the multi-session count / expand-detail shortcut in the top-right. */}
+            {!!creditHoursAdded && (
+                <span
+                    title={`+${creditHoursAdded} court credit hr${creditHoursAdded === 1 ? "" : "s"} added`}
+                    aria-label={`+${creditHoursAdded} court credit hours added`}
+                    style={{
+                        position: "absolute",
+                        top: 6,
+                        left: 6,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 2,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        lineHeight: 1,
+                        padding: "2px 4px",
+                        borderRadius: 4,
+                        color: "var(--color-text-success)",
+                        background: "var(--color-background-success)",
+                    }}
+                >
+                    💳+{creditHoursAdded}
+                </span>
+            )}
 
             {/* Session indicator bar at bottom */}
             {sessionCount > 0 && (

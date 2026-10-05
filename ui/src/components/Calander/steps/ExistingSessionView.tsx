@@ -231,7 +231,7 @@ function PlayerRow({
 
   return (
     <ListGroup.Item
-      className="d-flex justify-content-between align-items-center"
+      className="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2"
       style={{
         transition:      'background-color 0.2s',
       }}
@@ -241,11 +241,11 @@ function PlayerRow({
           ? <Link to={`/players?playerId=${player.id}`}>{name}</Link>
           : name}
       </span>
-      <div className="d-flex align-items-center gap-2">
+      <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
         <span className={isSettled ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
         {isAdmin ? (
           <div className="d-flex flex-column align-items-end">
-            <ButtonGroup size="sm">
+            <ButtonGroup size="sm" className="flex-wrap justify-content-end">
                 {options.map(o => {
                   const isActive = currentVia === o.method;
                   const displayLabel = o.method === 'balance' && isActive && settledViaEtransferBalance

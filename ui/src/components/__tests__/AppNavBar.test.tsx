@@ -23,6 +23,7 @@ describe('AppNavBar', () => {
 
     expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/');
     expect(screen.getByRole('link', { name: 'Attendance' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Help & FAQ' })).toHaveAttribute('href', '/faq');
     expect(screen.getByRole('button', { name: 'Account' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Birdies' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Credits' })).not.toBeInTheDocument();
@@ -64,6 +65,15 @@ describe('AppNavBar', () => {
       },
     });
     expect(screen.queryByRole('link', { name: 'Attendance' })).not.toBeInTheDocument();
+  });
+
+  it('hides Help & FAQ when no club is selected yet', () => {
+    renderWithProviders(<AppNavBar />, {
+      preloadedState: {
+        club: makeClubState({ currentClubId: null, clubs: [] }),
+      },
+    });
+    expect(screen.queryByRole('link', { name: 'Help & FAQ' })).not.toBeInTheDocument();
   });
 
   it('hides Attendance for an admin when disabled, without a leftover duplicate in the admin tab list', () => {

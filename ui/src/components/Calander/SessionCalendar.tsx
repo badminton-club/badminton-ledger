@@ -9,6 +9,7 @@ import { useAppDispatch, useAppSelector } from "../../hooks";
 import { selectModalMode, setMode } from "../../features/SessionModal/sessionModalSlice";
 import { selectCurrentClubId, selectIsClubAdmin } from "../../features/club/clubSlice";
 import { fetchSessions, fetchSessionById, addSession, editSession, deleteSession } from "../../services/firebase";
+import { fetchCourtCredits } from "../../services/firebase/inventory";
 import { getMonthYear, getNextMonth, getPrevMonth } from "../../utils/dateUtils";
 import type { Session } from "../../types";
 import type { NewSessionData } from "../../services/firebase/sessions";
@@ -22,6 +23,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [clickedDate, setClickedDate] = useState<Date | null>(null);
     const [sessions, setSessions] = useState<Session[]>([]);
+    const [creditDates, setCreditDates] = useState<Map<number, number>>(new Map());
     const [modalSession, setModalSession] = useState<Session | undefined>();
     const [showModal, setShowModal] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
@@ -56,16 +58,56 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
         loadMonth();
     }, [loadMonth]);
 
-    // Deep link: /?date=YYYY-MM-DD opens the calendar on that month and selects the day.
+    // Shows a small badge on any day in the visible month that a court credit
+    // batch was purchased on, so admins/members can see at a glance when
+    // credits were topped up without opening the Credits tab.
+    const loadCourtCreditDates = useCallback(async () => {
+        if (!currentClubId) return;
+        try {
+            const batches = await fetchCourtCredits();
+            const monthStart = new Date(getYear(currentDate), getMonth(currentDate), 1);
+            const monthEnd = lastDayOfMonth(currentDate);
+            const byDay = new Map<number, number>();
+            batches.forEach((batch) => {
+                if (batch.purchaseDate < monthStart || batch.purchaseDate > monthEnd) return;
+                const day = new Date(
+                    batch.purchaseDate.getFullYear(),
+                    batch.purchaseDate.getMonth(),
+                    batch.purchaseDate.getDate(),
+                ).getTime();
+                byDay.set(day, (byDay.get(day) ?? 0) + batch.hoursPurchased);
+            });
+            setCreditDates(byDay);
+        } catch (err) {
+            console.error("Failed to load court credit purchase dates:", err);
+        }
+    }, [currentDate, currentClubId]);
+
+    useEffect(() => {
+        loadCourtCreditDates();
+    }, [loadCourtCreditDates]);
+
+    // Deep link: /?date=YYYY-MM-DD opens the calendar on that month, selects
+    // the day, and opens the full session-details popup directly for that
+    // day (via its own narrow fetch, so it doesn't race the month-level
+    // `sessions` load below) — instead of just selecting the day and leaving
+    // the user to scroll down to find it in the inline quick-view panel.
     useEffect(() => {
         const dateParam = searchParams.get("date");
         if (!dateParam) return;
         const [y, m, d] = dateParam.split("-").map(Number);
         if (!y || !m || !d) return;
-        setCurrentDate(new Date(y, m - 1, d));
-        setSelectedDate(new Date(y, m - 1, d));
+        const target = new Date(y, m - 1, d);
+        setCurrentDate(target);
+        setSelectedDate(target);
         searchParams.delete("date");
         setSearchParams(searchParams, { replace: true });
+
+        fetchSessions({ startDate: target, endDate: target })
+            .then((daySessions) => {
+                if (daySessions.length > 0) handleOpenModal(daySessions[0], target);
+            })
+            .catch((err) => console.error("Failed to open deep-linked session:", err));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchParams]);
 
@@ -196,6 +238,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
                         currentDate={currentDate}
                         sessions={sessions}
                         selectedDate={selectedDate}
+                        creditDates={creditDates}
                         onDayClick={handleDayClick}
                         onExpandDay={handleExpandDay}
                     />
