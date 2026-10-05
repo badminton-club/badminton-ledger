@@ -110,8 +110,12 @@ describe('SessionCalendar', () => {
     await user.click((await screen.findByText('10')).parentElement as HTMLElement);
 
     expect(await screen.findByText(dateHeading('Monday August 10'))).toBeInTheDocument();
-    expect(screen.getByText('Court A')).toBeInTheDocument();
     expect(screen.getByText('1 unpaid')).toBeInTheDocument();
+    // Compact: no stats grid/cost breakdown/player list here — the homepage
+    // already shows that detail in its own "Latest Session" card, so
+    // repeating it in the calendar's side panel would just be duplicated.
+    expect(screen.queryByText('Total cost')).not.toBeInTheDocument();
+    expect(screen.queryByText('Court A')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'View details' }));
     expect(screen.getByTestId('session-modal')).toHaveTextContent('aug-10');
@@ -157,7 +161,6 @@ describe('SessionCalendar', () => {
 
     await user.click((await screen.findByText('2')).parentElement as HTMLElement);
     expect(await screen.findByText(dateHeading('Wednesday September 2'))).toBeInTheDocument();
-    expect(await screen.findByText('Court B')).toBeInTheDocument();
     expect(screen.getByText('Fully paid')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '<' }));
@@ -165,7 +168,6 @@ describe('SessionCalendar', () => {
 
     await user.click((await screen.findByText('10')).parentElement as HTMLElement);
     expect(await screen.findByText(dateHeading('Monday August 10'))).toBeInTheDocument();
-    expect(await screen.findByText('Court A')).toBeInTheDocument();
   });
 
   it('opens a new-session modal immediately when an admin clicks an empty day', async () => {

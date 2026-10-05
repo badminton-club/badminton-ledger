@@ -23,6 +23,12 @@ interface Props {
     // "this day" selection happening, just a session someone's paging through.
     // Defaults to true to preserve the calendar's existing side-panel behavior.
     allowAdd?: boolean;
+    // Skips the stats grid/cost breakdown/player list, showing just the date,
+    // status, and action buttons — used by the calendar's side panel so
+    // selecting a day there doesn't duplicate the full session summary
+    // already shown elsewhere on the same page (e.g. the homepage's Latest
+    // Session card). Defaults to false to preserve existing detailed views.
+    compact?: boolean;
 }
 
 // The weekday and month/day sit on their own lines (e.g. "Saturday" then
@@ -37,7 +43,7 @@ function DateLabel({ date }: { date: Date }) {
     );
 }
 
-export default function SessionQuickView({ date, sessions, onAddSession, onOpenModal, bordered = true, allowAdd = true }: Props) {
+export default function SessionQuickView({ date, sessions, onAddSession, onOpenModal, bordered = true, allowAdd = true, compact = false }: Props) {
     const isAdmin = useAppSelector(selectIsClubAdmin);
     const [activeIndex, setActiveIndex] = React.useState(0);
     React.useEffect(() => {
@@ -100,70 +106,74 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
                 </div>
             </div>
 
-            {sessions.length > 1 && (
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-                    {sessions.map((s, i) => (
-                        <Button
-                            key={s.id}
-                            size="sm"
-                            variant={i === activeIndex ? "secondary" : "outline-secondary"}
-                            onClick={() => setActiveIndex(i)}
-                        >
-                            Session {i + 1}
-                        </Button>
-                    ))}
-                </div>
+            {!compact && (
+                <>
+                    {sessions.length > 1 && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                            {sessions.map((s, i) => (
+                                <Button
+                                    key={s.id}
+                                    size="sm"
+                                    variant={i === activeIndex ? "secondary" : "outline-secondary"}
+                                    onClick={() => setActiveIndex(i)}
+                                >
+                                    Session {i + 1}
+                                </Button>
+                            ))}
+                        </div>
+                    )}
+
+                    <div style={styles.statsGrid}>
+                        <StatCard
+                            label="Players"
+                            value={String(totalPlayers)}
+                            subColor="var(--color-text-success)"
+                        />
+                        <StatCard
+                            label="Unpaid"
+                            value={String(unpaidPlayers)}
+                            subColor={unpaidPlayers === 0 ? "var(--color-text-success)" : "var(--color-text-danger)"}
+                        />
+                        <StatCard
+                            label="Courts"
+                            value={String(session.courtCount ?? "—")}
+                            sub={session.location ?? ""}
+                            subColor="var(--color-text-secondary)"
+                        />
+                        <StatCard
+                            label="Birdies used"
+                            value={String(totalBirds)}
+                            sub={`${session.birdieUsage.length} batch${session.birdieUsage.length !== 1 ? "es" : ""}`}
+                            subColor="var(--color-text-secondary)"
+                        />
+                    </div>
+
+                    <div style={styles.divider} />
+
+                    <div style={styles.costRow}>
+                        <span style={styles.costLabel}>Total cost</span>
+                        <span style={styles.costValue}>${(session.totalSessionCost ?? 0).toFixed(2)}</span>
+                    </div>
+                    <div style={styles.costRow}>
+                        <span style={styles.costLabel}>Court cost</span>
+                        <span style={styles.costSub}>${(session.totalCourtCost ?? 0).toFixed(2)}</span>
+                    </div>
+                    <div style={styles.costRow}>
+                        <span style={styles.costLabel}>Birdie cost</span>
+                        <span style={styles.costSub}>${(session.totalBirdieCost ?? 0).toFixed(2)}</span>
+                    </div>
+
+                    <div style={styles.divider} />
+
+                    {/* Player list */}
+                    <p style={styles.sectionLabel}>Players</p>
+                    <div style={styles.playerList}>
+                        {session.players.map((p) => (
+                            <PlayerRow key={p.id} playerId={p.id} cost={p.cost} paid={p.paid} comped={p.comped}/>
+                        ))}
+                    </div>
+                </>
             )}
-
-            <div style={styles.statsGrid}>
-                <StatCard
-                    label="Players"
-                    value={String(totalPlayers)}
-                    subColor="var(--color-text-success)"
-                />
-                <StatCard
-                    label="Unpaid"
-                    value={String(unpaidPlayers)}
-                    subColor={unpaidPlayers === 0 ? "var(--color-text-success)" : "var(--color-text-danger)"}
-                />
-                <StatCard
-                    label="Courts"
-                    value={String(session.courtCount ?? "—")}
-                    sub={session.location ?? ""}
-                    subColor="var(--color-text-secondary)"
-                />
-                <StatCard
-                    label="Birdies used"
-                    value={String(totalBirds)}
-                    sub={`${session.birdieUsage.length} batch${session.birdieUsage.length !== 1 ? "es" : ""}`}
-                    subColor="var(--color-text-secondary)"
-                />
-            </div>
-
-            <div style={styles.divider} />
-
-            <div style={styles.costRow}>
-                <span style={styles.costLabel}>Total cost</span>
-                <span style={styles.costValue}>${(session.totalSessionCost ?? 0).toFixed(2)}</span>
-            </div>
-            <div style={styles.costRow}>
-                <span style={styles.costLabel}>Court cost</span>
-                <span style={styles.costSub}>${(session.totalCourtCost ?? 0).toFixed(2)}</span>
-            </div>
-            <div style={styles.costRow}>
-                <span style={styles.costLabel}>Birdie cost</span>
-                <span style={styles.costSub}>${(session.totalBirdieCost ?? 0).toFixed(2)}</span>
-            </div>
-
-            <div style={styles.divider} />
-
-            {/* Player list */}
-            <p style={styles.sectionLabel}>Players</p>
-            <div style={styles.playerList}>
-                {session.players.map((p) => (
-                    <PlayerRow key={p.id} playerId={p.id} cost={p.cost} paid={p.paid} comped={p.comped}/>
-                ))}
-            </div>
         </div>
     );
 }

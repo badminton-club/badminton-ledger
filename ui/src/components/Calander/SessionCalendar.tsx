@@ -253,7 +253,11 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
             </div>
 
             {/* ── Quick view panel — only takes up space once a day is picked,
-                so the calendar can use the freed-up width the rest of the time ── */}
+                so the calendar can use the freed-up width the rest of the time ──
+                Compact: this calendar only renders on the homepage, which
+                already has a detailed "Latest Session" summary card up top —
+                showing the full stats/cost/player-list breakdown again here
+                for whatever day is selected just duplicates it. */}
             {selectedDate && (
                 <div style={styles.quickViewPanel}>
                     <SessionQuickView
@@ -261,6 +265,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
                         sessions={selectedSessions}
                         onAddSession={handleAddSession}
                         onOpenModal={handleOpenModal}
+                        compact
                     />
                 </div>
             )}
