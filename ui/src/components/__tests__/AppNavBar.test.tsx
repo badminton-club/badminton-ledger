@@ -53,6 +53,24 @@ describe('AppNavBar', () => {
     expect(screen.queryByRole('link', { name: 'Payout' })).not.toBeInTheDocument();
   });
 
+  it('places Help & FAQ right after Settings in the admin tab order', () => {
+    renderWithProviders(<AppNavBar />, {
+      preloadedState: {
+        club: makeClubState({
+          role: 'admin',
+          currentClubId: 'club-a',
+          clubs: [{ id: 'club-a', name: 'Alpha Club', role: 'admin' }],
+        }),
+      },
+    });
+
+    const linkNames = screen.getAllByRole('link').map((el) => el.textContent);
+    const settingsIndex = linkNames.indexOf('Settings');
+    const faqIndex = linkNames.indexOf('Help & FAQ');
+    expect(settingsIndex).toBeGreaterThan(-1);
+    expect(faqIndex).toBe(settingsIndex + 1);
+  });
+
   it('hides Attendance for a non-admin member when disabled for the club', () => {
     renderWithProviders(<AppNavBar />, {
       preloadedState: {
