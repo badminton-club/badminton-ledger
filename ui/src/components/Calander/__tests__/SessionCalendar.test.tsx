@@ -239,6 +239,27 @@ describe('SessionCalendar', () => {
     expect(screen.queryByTestId('session-modal')).not.toBeInTheDocument();
   });
 
+  it('opens the add-session flow for a /?date=YYYY-MM-DD&action=add deep link, as an admin', async () => {
+    seedSession('aug-10', new Date(2026, 7, 10), { location: 'Court A' });
+
+    renderCalendar('/?date=2026-08-10&action=add');
+
+    expect(await screen.findByTestId('session-modal')).toHaveTextContent('new-session');
+  });
+
+  it('ignores an action=add deep link for a non-admin, instead of opening anything', async () => {
+    renderWithProviders(<SessionCalendar />, {
+      route: '/?date=2026-08-10&action=add',
+      preloadedState: {
+        club: makeClubState({ currentClubId: TEST_CLUB_ID, role: 'member' }),
+        players: makePlayersState([]),
+      },
+    });
+
+    await screen.findByRole('button', { name: 'August 2026' });
+    expect(screen.queryByTestId('session-modal')).not.toBeInTheDocument();
+  });
+
   it('shows a court-credit badge on the calendar for the day a batch was purchased', async () => {
     seedClubDoc('courtCredits', 'c1', {
       name: 'Fall block',

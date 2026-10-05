@@ -1,9 +1,9 @@
 import React from 'react';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useSearchParams } from 'react-router-dom';
 import HomePage from '../HomePage';
 import { renderWithProviders, makeClubState, makePlayersState } from '../../test-utils/renderWithProviders';
-import { ts } from '../../test-utils/firebaseTestHelpers';
 import { fetchSessions } from 'services/firebase/sessions';
 import type { Player, Session } from '../../types';
 
@@ -19,6 +19,39 @@ jest.mock('components/Calander/SessionCalendar', () => ({
     </button>
   ),
 }));
+
+// Exposes the current URL query string so tests can verify HomePage
+// deep-links into the (mocked-away) calendar via ?date=/&action=, without
+// needing a real SessionCalendar mounted to observe it.
+function LocationSearchProbe() {
+  const [params] = useSearchParams();
+  return <div data-testid="location-search">{params.toString()}</div>;
+}
+
+function renderHomePage(options: Parameters<typeof renderWithProviders>[1]) {
+  return renderWithProviders(
+    <>
+      <HomePage />
+      <LocationSearchProbe />
+    </>,
+    options
+  );
+}
+
+// The date label renders as "Weekday" <br/> "Month d" (two text nodes split
+// by a <br/>, no literal space between them) — join and compare instead of
+// searching for a single flat string.
+function dateHeading(text: string) {
+  return (_content: string, element: Element | null) => {
+    if (!element || element.tagName.toLowerCase() !== 'p') return false;
+    const joined = Array.from(element.childNodes)
+      .map((n) => (n.nodeType === Node.TEXT_NODE ? n.textContent : ' '))
+      .join('')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return joined === text;
+  };
+}
 
 function makePlayer(overrides: Partial<Player> = {}): Player {
   return {
@@ -60,7 +93,7 @@ beforeEach(() => {
 });
 
 describe('HomePage', () => {
-  it('renders the latest session summary, unpaid players, and outstanding balances, and navigates older sessions', async () => {
+  it('renders the latest session via the shared quick-view panel, shows outstanding balances, and navigates older sessions', async () => {
     const user = userEvent.setup();
     jest.mocked(fetchSessions).mockResolvedValue([
       makeSession({
@@ -85,17 +118,9 @@ describe('HomePage', () => {
       makePlayer({ id: 'p2', firstName: 'Chris', firstNameLower: 'chris', lastName: 'Ng', lastNameLower: 'ng', owed: 20 }),
       makePlayer({ id: 'p3', firstName: 'Sam', firstNameLower: 'sam', lastName: 'Cho', lastNameLower: 'cho', owed: 15 }),
       makePlayer({ id: 'p4', firstName: 'Pat', firstNameLower: 'pat', lastName: 'Kim', lastNameLower: 'kim', owed: 10 }),
-      makePlayer({ id: 'p5', firstName: 'Alex', firstNameLower: 'alex', lastName: 'Yu', lastNameLower: 'yu', owed: 5 }),
-      makePlayer({ id: 'p6', firstName: 'Morgan', firstNameLower: 'morgan', lastName: 'Ho', lastNameLower: 'ho', owed: 1 }),
-      makePlayer({ id: 'p7', firstName: 'Drew', firstNameLower: 'drew', lastName: 'Bell', lastNameLower: 'bell', owed: 9 }),
-      makePlayer({ id: 'p8', firstName: 'Casey', firstNameLower: 'casey', lastName: 'Fox', lastNameLower: 'fox', owed: 8 }),
-      makePlayer({ id: 'p9', firstName: 'Robin', firstNameLower: 'robin', lastName: 'Day', lastNameLower: 'day', owed: 7 }),
-      makePlayer({ id: 'p10', firstName: 'Jesse', firstNameLower: 'jesse', lastName: 'Wu', lastNameLower: 'wu', owed: 6 }),
-      makePlayer({ id: 'p11', firstName: 'Reese', firstNameLower: 'reese', lastName: 'Chan', lastNameLower: 'chan', owed: 4 }),
-      makePlayer({ id: 'p12', firstName: 'Tatum', firstNameLower: 'tatum', lastName: 'Silva', lastNameLower: 'silva', owed: 3 }),
     ];
 
-    renderWithProviders(<HomePage />, {
+    renderHomePage({
       preloadedState: {
         club: makeClubState(),
         players: makePlayersState(players),
@@ -103,22 +128,40 @@ describe('HomePage', () => {
     });
 
     expect(await screen.findByText('Latest Session')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'May 5, 2026' })).toHaveAttribute('href', '/?date=2026-05-05');
-    expect(screen.getByText('Players: 2')).toBeInTheDocument();
-    expect(screen.getByText('Birdies Used: 3')).toBeInTheDocument();
-    expect(screen.getByText('Jamie Lee', { selector: '.unpaid-player' })).toBeInTheDocument();
-    // No artificial cap on the outstanding-balances list — every player with a
-    // balance owed renders (overflow, if any, is handled visually via CSS
-    // clipping rather than by truncating the underlying list).
+    // The reused quick-view panel renders its own date label and stats grid.
+    expect(screen.getByText(dateHeading('Tuesday May 5'))).toBeInTheDocument();
+    expect(screen.getByText('1 unpaid')).toBeInTheDocument();
+
+    const [playersLabel] = screen.getAllByText('Players');
+    expect(playersLabel.nextElementSibling).toHaveTextContent('2');
+    expect(screen.getByText('Birdies used').nextElementSibling).toHaveTextContent('3');
+
+    // Each attendee's own paid/unpaid status shows in the player list below —
+    // disambiguated from the "Chris Ng"/"Jamie Lee" links in the outstanding
+    // balances card on the right by scoping to the player row itself.
+    const jamieRow = screen.getByText('Jamie Lee', { selector: 'span' }).closest('div') as HTMLElement;
+    expect(jamieRow).toHaveTextContent('Unpaid');
+    const chrisRow = screen.getByText('Chris Ng', { selector: 'span' }).closest('div') as HTMLElement;
+    expect(chrisRow).toHaveTextContent('Paid');
+
+    // No artificial cap on the outstanding-balances list.
     expect(screen.getByRole('link', { name: 'Chris Ng' })).toHaveAttribute('href', '/players?playerId=p2');
-    expect(screen.getByRole('link', { name: 'Tatum Silva' })).toHaveAttribute('href', '/players?playerId=p12');
-    expect(screen.queryByText(/more with outstanding balances/)).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Pat Kim' })).toHaveAttribute('href', '/players?playerId=p4');
+
+    // "View details" deep-links into the calendar below via ?date=.
+    await user.click(screen.getByRole('button', { name: 'View details' }));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('date=2026-05-05'));
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('action');
+
+    // "+ Add" deep-links the same way but also flags the add-session action.
+    await user.click(screen.getByRole('button', { name: '+ Add' }));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('action=add'));
 
     await user.click(screen.getByTitle('Older session'));
 
     expect(await screen.findByText('Previous Session')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'April 28, 2026' })).toHaveAttribute('href', '/?date=2026-04-28');
-    expect(screen.getByText('All players have paid.')).toBeInTheDocument();
+    expect(screen.getByText(dateHeading('Tuesday April 28'))).toBeInTheDocument();
+    expect(screen.getByText('Fully paid')).toBeInTheDocument();
 
     await user.click(screen.getByTitle('Newer session'));
 
@@ -129,7 +172,7 @@ describe('HomePage', () => {
     const user = userEvent.setup();
     jest.mocked(fetchSessions).mockResolvedValue([]);
 
-    renderWithProviders(<HomePage />, {
+    renderHomePage({
       preloadedState: {
         club: makeClubState(),
         players: makePlayersState([]),
@@ -148,7 +191,7 @@ describe('HomePage', () => {
     const user = userEvent.setup();
     jest.mocked(fetchSessions).mockRejectedValueOnce(new Error('network down'));
 
-    renderWithProviders(<HomePage />, {
+    renderHomePage({
       preloadedState: {
         club: makeClubState(),
         players: makePlayersState([]),

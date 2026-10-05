@@ -1,21 +1,21 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Container, Row, Col, Button, Alert } from "react-bootstrap";
 import { format } from "date-fns";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 // import "./HomePage.css";
 import SessionCalendar from "components/Calander/SessionCalendar";
+import SessionQuickView from "components/Calander/SessionQuickView";
 import { fetchSessions } from "services/firebase/sessions";
 import { useAppSelector } from "../hooks";
-import { selectAllPlayers, selectPlayerById } from "../features/players/playersSlice";
-import { isSessionPlayerUnpaid } from "../utils/sessionPayment";
+import { selectAllPlayers } from "../features/players/playersSlice";
 import type { Session } from "../types";
-import type { RootState } from "../store";
 
 export default function HomePage() {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [sessionIndex, setSessionIndex] = useState(0);
     const [sessionsError, setSessionsError] = useState('');
     const players = useAppSelector(selectAllPlayers);
+    const [searchParams, setSearchParams] = useSearchParams();
 
     const loadSessions = useCallback(() => {
         setSessionsError('');
@@ -33,11 +33,24 @@ export default function HomePage() {
 
     const negativeBalancePlayers = players.filter((p) => (p.owed ?? 0) > 0);
 
+    // Deep-links into the calendar rendered further down this same page —
+    // SessionCalendar watches for its own ?date=/&action= query params and
+    // opens the matching popup directly, so this summary card doesn't need
+    // its own modal plumbing.
+    const openSessionInCalendar = useCallback((date: Date, action?: "add") => {
+        const next = new URLSearchParams(searchParams);
+        next.set("date", format(date, "yyyy-MM-dd"));
+        if (action) next.set("action", action); else next.delete("action");
+        setSearchParams(next);
+    }, [searchParams, setSearchParams]);
+
     return (
         <div className="home-page">
             <Container>
                 <Row className="mb-3">
-                    {/* ── Latest session summary ── */}
+                    {/* ── Latest session summary — reuses the same quick-view panel
+                        shown in the calendar below, so there's a single place that
+                        defines what a session's summary looks like. ── */}
                     <Col md={6}>
                         {sessionsError && (
                             <Alert variant="danger" className="d-flex justify-content-between align-items-center">
@@ -46,8 +59,8 @@ export default function HomePage() {
                             </Alert>
                         )}
                         {currentSession && (
-                            <div className="session-card">
-                                <div className="d-flex align-items-center justify-content-between">
+                            <div className="session-card" style={{ padding: 0, overflow: "hidden" }}>
+                                <div className="d-flex align-items-center justify-content-between px-3 pt-3">
                                     <h2 className="session-title mb-0">
                                         {sessionIndex === 0 ? "Latest Session" : "Previous Session"}
                                     </h2>
@@ -75,29 +88,12 @@ export default function HomePage() {
                                         </Button>
                                     </div>
                                 </div>
-                                <p className="session-date">
-                                    <Link to={`/?date=${format(currentSession.date, "yyyy-MM-dd")}`}>
-                                        {format(currentSession.date, "MMMM d, yyyy")}
-                                    </Link>
-                                </p>
-                                <div className="session-details">
-                                    <p className="session-info">Players: {currentSession.players?.length ?? 0}</p>
-                                    <p className="session-info">
-                                        Birdies Used: {(currentSession.birdieUsage ?? []).reduce((s, u) => s + u.quantity, 0)}
-                                    </p>
-                                </div>
-                                <div className="mt-3">
-                                    <h3 className="unpaid-title">Unpaid Players:</h3>
-                                    {(currentSession.players ?? []).filter(isSessionPlayerUnpaid).length > 0 ?
-                                        <ul className="list-disc list-inside">
-                                            {(currentSession.players ?? [])
-                                                .filter(isSessionPlayerUnpaid)
-                                                .map((p) => (
-                                                    <UnpaidPlayerItem key={p.id} playerId={p.id} />
-                                                ))}
-                                        </ul>
-                                    :   <p className="no-unpaid">All players have paid.</p>}
-                                </div>
+                                <SessionQuickView
+                                    date={currentSession.date}
+                                    sessions={[currentSession]}
+                                    onAddSession={() => openSessionInCalendar(currentSession.date, "add")}
+                                    onOpenModal={() => openSessionInCalendar(currentSession.date)}
+                                />
                             </div>
                         )}
                     </Col>
@@ -131,11 +127,4 @@ export default function HomePage() {
             </Container>
         </div>
     );
-}
-
-// Resolves a player name from Redux rather than reading session.player.name
-function UnpaidPlayerItem({ playerId }: { playerId: string }) {
-    const player = useAppSelector((s: RootState) => selectPlayerById(s, playerId));
-    const name = player ? [player.firstName, player.lastName].filter(Boolean).join(" ") : playerId;
-    return <li className="unpaid-player">{name}</li>;
 }

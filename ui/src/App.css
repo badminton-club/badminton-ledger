@@ -126,38 +126,6 @@ body {
     color: var(--color-text-primary);
 }
 
-.session-date {
-    font-size: 14px;
-    color: var(--color-text-secondary);
-}
-
-.session-details {
-    margin-top: 8px;
-}
-
-.session-info {
-    font-size: 16px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-    margin-bottom: 8px;
-}
-
-.unpaid-title {
-    font-size: 16px;
-    font-weight: 500;
-    color: var(--color-text-danger);
-}
-
-.unpaid-player {
-    font-size: 14px;
-    color: var(--color-text-primary);
-}
-
-.no-unpaid {
-    font-size: 14px;
-    color: var(--color-text-secondary);
-}
-
 .player-balance {
     font-size: 14px;
     color: var(--color-text-primary);
