@@ -217,4 +217,41 @@ describe('HomePage', () => {
     expect(await screen.findByText('Latest Session')).toBeInTheDocument();
     expect(screen.queryByText('Failed to load recent sessions.')).not.toBeInTheDocument();
   });
+
+  it('lets an admin add a new session for today via a dedicated button, deep-linking into the calendar', async () => {
+    const user = userEvent.setup();
+    jest.mocked(fetchSessions).mockResolvedValue([]);
+
+    renderHomePage({
+      preloadedState: {
+        club: makeClubState(),
+        players: makePlayersState([]),
+      },
+    });
+
+    await user.click(screen.getByRole('button', { name: '+ Add Session' }));
+
+    // Reuses the same ?date= deep-link the calendar below watches for, plus a
+    // "new=1" flag so it opens the add-session flow straight away instead of
+    // just selecting today's (likely empty) day.
+    await waitFor(() => {
+      const search = screen.getByTestId('location-search').textContent ?? '';
+      expect(search).toMatch(/date=\d{4}-\d{2}-\d{2}/);
+      expect(search).toContain('new=1');
+    });
+  });
+
+  it('hides the "+ Add Session" button for a non-admin', async () => {
+    jest.mocked(fetchSessions).mockResolvedValue([]);
+
+    renderHomePage({
+      preloadedState: {
+        club: makeClubState({ role: 'member' }),
+        players: makePlayersState([]),
+      },
+    });
+
+    await screen.findByText('No players owe for sessions.');
+    expect(screen.queryByRole('button', { name: '+ Add Session' })).not.toBeInTheDocument();
+  });
 });

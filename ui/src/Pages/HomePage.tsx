@@ -8,6 +8,7 @@ import SessionQuickView from "components/Calander/SessionQuickView";
 import { fetchSessions } from "services/firebase/sessions";
 import { useAppSelector } from "../hooks";
 import { selectAllPlayers } from "../features/players/playersSlice";
+import { selectIsClubAdmin } from "../features/club/clubSlice";
 import type { Session } from "../types";
 
 export default function HomePage() {
@@ -15,6 +16,7 @@ export default function HomePage() {
     const [sessionIndex, setSessionIndex] = useState(0);
     const [sessionsError, setSessionsError] = useState('');
     const players = useAppSelector(selectAllPlayers);
+    const isAdmin = useAppSelector(selectIsClubAdmin);
     const [searchParams, setSearchParams] = useSearchParams();
 
     const loadSessions = useCallback(() => {
@@ -48,9 +50,26 @@ export default function HomePage() {
         setSearchParams(next);
     }, [searchParams, setSearchParams]);
 
+    // Same deep-link mechanism as above, plus a "new" flag the calendar uses
+    // to open the add-session flow straight away for today (rather than just
+    // selecting the day) when there's no session there yet.
+    const openAddSessionInCalendar = useCallback(() => {
+        const next = new URLSearchParams(searchParams);
+        next.set("date", format(new Date(), "yyyy-MM-dd"));
+        next.set("new", "1");
+        setSearchParams(next);
+    }, [searchParams, setSearchParams]);
+
     return (
         <div className="home-page">
             <Container>
+                {isAdmin && (
+                    <div className="d-flex justify-content-end mb-3">
+                        <Button variant="primary" onClick={openAddSessionInCalendar}>
+                            + Add Session
+                        </Button>
+                    </div>
+                )}
                 <Row className="mb-3">
                     {/* ── Latest session summary — reuses the same quick-view panel
                         shown in the calendar below, so there's a single place that

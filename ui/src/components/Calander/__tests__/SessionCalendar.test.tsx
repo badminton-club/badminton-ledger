@@ -260,6 +260,13 @@ describe('SessionCalendar', () => {
     expect(screen.queryByTestId('session-modal')).not.toBeInTheDocument();
   });
 
+  it('opens the add-session flow directly for a /?date=...&new=1 deep link with no session that day', async () => {
+    renderCalendar('/?date=2026-08-11&new=1');
+
+    expect(await screen.findByText(dateHeading('Tuesday August 11'))).toBeInTheDocument();
+    expect(await screen.findByTestId('session-modal')).toHaveTextContent('new-session');
+  });
+
   it('shows a court-credit badge on the calendar for the day a batch was purchased', async () => {
     seedClubDoc('courtCredits', 'c1', {
       name: 'Fall block',

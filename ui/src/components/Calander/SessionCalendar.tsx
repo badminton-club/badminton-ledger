@@ -97,15 +97,22 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
         if (!dateParam) return;
         const [y, m, d] = dateParam.split("-").map(Number);
         if (!y || !m || !d) return;
+        // "new=1" (set by e.g. the homepage's "+ Add Session" button) opens
+        // the add-session flow directly for an empty day, instead of just
+        // selecting it and leaving an admin to click "+ Add Session" again
+        // in the quick-view panel underneath.
+        const wantsNew = searchParams.get("new") === "1";
         const target = new Date(y, m - 1, d);
         setCurrentDate(target);
         setSelectedDate(target);
         searchParams.delete("date");
+        searchParams.delete("new");
         setSearchParams(searchParams, { replace: true });
 
         fetchSessions({ startDate: target, endDate: target })
             .then((daySessions) => {
                 if (daySessions.length > 0) handleOpenModal(daySessions[0], target);
+                else if (wantsNew && isAdmin) openAddSession(target);
             })
             .catch((err) => console.error("Failed to open deep-linked session:", err));
         // eslint-disable-next-line react-hooks/exhaustive-deps
