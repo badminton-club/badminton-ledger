@@ -10,12 +10,13 @@ interface Props {
     currentDate: Date;
     sessions: Session[];
     selectedDate: Date | null;
-    creditDates?: Map<number, number>;
+    creditDates?: Map<number, { hours: number; batchIds: string[] }>;
     onDayClick: (date: Date) => void;
     onExpandDay?: (date: Date) => void;
+    onCreditClick?: (batchIds: string[]) => void;
 }
 
-export default function CalendarGrid({ currentDate, sessions, selectedDate, creditDates, onDayClick, onExpandDay }: Props) {
+export default function CalendarGrid({ currentDate, sessions, selectedDate, creditDates, onDayClick, onExpandDay, onCreditClick }: Props) {
     const totalDays = getTotalDaysInMonth(currentDate);
     const startDay = getFirstDayOfMonthWeekday(currentDate);
     const year = getYear(currentDate);
@@ -35,7 +36,7 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, cred
         const allPaid =
             daySessions.length > 0 &&
             daySessions.every((s) => s.players.length > 0 && !s.players.some(isSessionPlayerUnpaid));
-        const creditHoursAdded = creditDates?.get(+date);
+        const creditInfo = creditDates?.get(+date);
 
         cells.push(
             <DayCell
@@ -45,7 +46,8 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, cred
                 today={today}
                 selected={!!selected}
                 allPaid={allPaid}
-                creditHoursAdded={creditHoursAdded}
+                creditHoursAdded={creditInfo?.hours}
+                onCreditClick={creditInfo && onCreditClick ? () => onCreditClick(creditInfo.batchIds) : undefined}
                 onClick={() => onDayClick(date)}
                 onExpand={daySessions.length > 0 && onExpandDay ? () => onExpandDay(date) : undefined}
             />,
@@ -89,6 +91,7 @@ function DayCell({
     creditHoursAdded,
     onClick,
     onExpand,
+    onCreditClick,
 }: {
     day: number;
     sessionCount: number;
@@ -98,6 +101,7 @@ function DayCell({
     creditHoursAdded?: number;
     onClick: () => void;
     onExpand?: () => void;
+    onCreditClick?: () => void;
 }) {
     const [hovered, setHovered] = useState(false);
 
@@ -129,11 +133,19 @@ function DayCell({
             {/* Court credit purchase badge — placed in normal flow right under the
                 day number (not absolutely positioned) so it has room to be large
                 enough to actually read, without overlapping the day number or the
-                multi-session count / expand shortcut in the top-right corner. */}
+                multi-session count / expand shortcut in the top-right corner.
+                It's its own button (stopping propagation) so clicking it opens
+                the purchased batch on the Credits page instead of just
+                selecting the day underneath it. */}
             {!!creditHoursAdded && (
-                <div
-                    title={`+${creditHoursAdded} court credit hr${creditHoursAdded === 1 ? "" : "s"} added`}
-                    aria-label={`+${creditHoursAdded} court credit hours added`}
+                <button
+                    type="button"
+                    title={`+${creditHoursAdded} court credit hr${creditHoursAdded === 1 ? "" : "s"} added — view in Credits`}
+                    aria-label={`+${creditHoursAdded} court credit hours added — view in Credits`}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onCreditClick?.();
+                    }}
                     style={{
                         alignSelf: "flex-start",
                         display: "inline-flex",
@@ -144,13 +156,15 @@ function DayCell({
                         fontWeight: 700,
                         lineHeight: 1.3,
                         padding: "3px 7px",
+                        border: "none",
                         borderRadius: 6,
                         color: "var(--color-text-success)",
                         background: "var(--color-background-success)",
+                        cursor: onCreditClick ? "pointer" : "default",
                     }}
                 >
                     💳+{creditHoursAdded}
-                </div>
+                </button>
             )}
 
             {/* Session indicator bar at bottom */}

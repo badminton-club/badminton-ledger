@@ -3,7 +3,7 @@ import { Button, ButtonGroup, Spinner } from "react-bootstrap";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { getMonth, getYear, lastDayOfMonth } from "date-fns";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { selectModalMode, setMode } from "../../features/SessionModal/sessionModalSlice";
@@ -22,7 +22,7 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { 
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [clickedDate, setClickedDate] = useState<Date | null>(null);
     const [sessions, setSessions] = useState<Session[]>([]);
-    const [creditDates, setCreditDates] = useState<Map<number, number>>(new Map());
+    const [creditDates, setCreditDates] = useState<Map<number, { hours: number; batchIds: string[] }>>(new Map());
     const [modalSession, setModalSession] = useState<Session | undefined>();
     const [showModal, setShowModal] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
@@ -30,6 +30,7 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { 
     const currentClubId = useAppSelector(selectCurrentClubId);
     const isAdmin = useAppSelector(selectIsClubAdmin);
     const dispatch = useAppDispatch();
+    const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
 
     const loadMonth = useCallback(async () => {
@@ -54,14 +55,15 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { 
 
     // Shows a small badge on any day in the visible month that a court credit
     // batch was purchased on, so admins/members can see at a glance when
-    // credits were topped up without opening the Credits tab.
+    // credits were topped up without opening the Credits tab — clicking it
+    // jumps straight to that batch there (see handleCreditClick).
     const loadCourtCreditDates = useCallback(async () => {
         if (!currentClubId) return;
         try {
             const batches = await fetchCourtCredits();
             const monthStart = new Date(getYear(currentDate), getMonth(currentDate), 1);
             const monthEnd = lastDayOfMonth(currentDate);
-            const byDay = new Map<number, number>();
+            const byDay = new Map<number, { hours: number; batchIds: string[] }>();
             batches.forEach((batch) => {
                 if (batch.purchaseDate < monthStart || batch.purchaseDate > monthEnd) return;
                 const day = new Date(
@@ -69,13 +71,26 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { 
                     batch.purchaseDate.getMonth(),
                     batch.purchaseDate.getDate(),
                 ).getTime();
-                byDay.set(day, (byDay.get(day) ?? 0) + batch.hoursPurchased);
+                const existing = byDay.get(day);
+                byDay.set(day, {
+                    hours: (existing?.hours ?? 0) + batch.hoursPurchased,
+                    batchIds: [...(existing?.batchIds ?? []), batch.id],
+                });
             });
             setCreditDates(byDay);
         } catch (err) {
             console.error("Failed to load court credit purchase dates:", err);
         }
     }, [currentDate, currentClubId]);
+
+    // Deep-links into the Credits page (?batchId=...), which expands and
+    // scrolls to that batch — same pattern as this calendar's own ?date=
+    // deep link. When more than one batch was purchased the same day, this
+    // just opens the first one rather than trying to show several at once.
+    const handleCreditClick = (batchIds: string[]) => {
+        if (batchIds.length === 0) return;
+        navigate(`/credits?batchId=${batchIds[0]}`);
+    };
 
     useEffect(() => {
         loadCourtCreditDates();
@@ -237,6 +252,7 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { 
                         creditDates={creditDates}
                         onDayClick={handleDayClick}
                         onExpandDay={handleExpandDay}
+                        onCreditClick={handleCreditClick}
                     />
                 }
             </div>

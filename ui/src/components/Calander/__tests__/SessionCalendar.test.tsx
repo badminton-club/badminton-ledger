@@ -2,6 +2,7 @@ import React from 'react';
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Timestamp } from 'firebase/firestore';
+import { useLocation } from 'react-router-dom';
 import SessionCalendar from '../SessionCalendar';
 import { makeClubState, makePlayersState, renderWithProviders } from '../../../test-utils/renderWithProviders';
 import { resetFirebaseTestState, seedClubDoc, TEST_CLUB_ID, ts } from '../../../test-utils/firebaseTestHelpers';
@@ -219,5 +220,42 @@ describe('SessionCalendar', () => {
     await screen.findByRole('button', { name: 'August 2026' });
     const dayWithCredit = (await screen.findByText('5')).parentElement as HTMLElement;
     expect(within(dayWithCredit).getByText('💳+10')).toBeInTheDocument();
+  });
+
+  it('navigates to the Credits page for that batch when the court-credit badge is clicked', async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Fall block',
+      totalCost: 150,
+      costPerHour: 15,
+      hoursPurchased: 10,
+      remainingHours: 10,
+      purchaserName: 'Alex',
+      purchaseDate: ts(new Date(2026, 7, 5)),
+      createdAt: ts(new Date(2026, 7, 5)),
+    });
+
+    function LocationProbe() {
+      const location = useLocation();
+      return <div data-testid="location">{location.pathname}{location.search}</div>;
+    }
+
+    renderWithProviders(
+      <>
+        <SessionCalendar />
+        <LocationProbe />
+      </>,
+      {
+        preloadedState: {
+          club: makeClubState({ currentClubId: TEST_CLUB_ID }),
+          players: makePlayersState([]),
+        },
+      }
+    );
+
+    await screen.findByRole('button', { name: 'August 2026' });
+    await user.click(await screen.findByText('💳+10'));
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/credits?batchId=c1');
   });
 });

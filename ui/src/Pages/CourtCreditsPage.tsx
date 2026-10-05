@@ -4,7 +4,7 @@ import {
   Card, Row, Col, Form, Accordion,
 } from 'react-bootstrap';
 import { format, compareDesc } from 'date-fns';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import AddCourtCreditModal from 'components/AddCourtCreditModal';
@@ -83,6 +83,7 @@ export default function CourtCreditsPage() {
   const [isDeleting,       setIsDeleting]       = useState(false);
   const [deleteError,      setDeleteError]      = useState('');
   const [history,          setHistory]          = useState<HistoryItem[]>([]);
+  const [searchParams,     setSearchParams]     = useSearchParams();
 
   // ── Load batches ─────────────────────────────────────────────────────────────
   const loadBatches = useCallback(async (openAfterLoad?: string) => {
@@ -99,6 +100,20 @@ export default function CourtCreditsPage() {
   }, []);
 
   useEffect(() => { loadBatches(); }, [loadBatches]);
+
+  // Deep link: ?batchId=... (e.g. from the calendar's court-credit badge)
+  // expands that batch and scrolls to it, once it's actually present in the
+  // loaded list — so a slow/pending fetch doesn't silently miss the param.
+  useEffect(() => {
+    const batchId = searchParams.get('batchId');
+    if (!batchId || !batches.some(b => b.id === batchId)) return;
+    setActiveKey(batchId);
+    searchParams.delete('batchId');
+    setSearchParams(searchParams, { replace: true });
+    document.getElementById(`court-credit-batch-${batchId}`)
+      ?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batches, searchParams]);
 
   // ── Load history when accordion opens ────────────────────────────────────────
   useEffect(() => {
@@ -290,6 +305,7 @@ export default function CourtCreditsPage() {
               <Accordion.Item
                 eventKey={batch.id}
                 key={batch.id}
+                id={`court-credit-batch-${batch.id}`}
                 className={i % 2 === 1 ? 'inventory-batch-alternate' : undefined}
               >
                 <Accordion.Header>
