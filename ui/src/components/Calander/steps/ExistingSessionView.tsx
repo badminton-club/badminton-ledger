@@ -316,6 +316,22 @@ function PlayerRow({
                   );
                 })}
               </ButtonGroup>
+            {!!stored && stored.balance !== 0 && (
+              <div
+                className="text-center"
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  marginTop: 2,
+                  borderRadius: 4,
+                  border: '0.5px solid var(--color-border-tertiary)',
+                  color: stored.balance > 0 ? 'var(--color-text-success)' : 'var(--color-text-danger)',
+                }}
+              >
+                Balance: ${stored.balance.toFixed(2)}
+              </div>
+            )}
             {player.settledAt && isSettled && (
               <div className="text-muted" style={{ fontSize: 10 }}>
                 Updated {format(player.settledAt.toDate(), 'MMM d, yyyy h:mm a')}

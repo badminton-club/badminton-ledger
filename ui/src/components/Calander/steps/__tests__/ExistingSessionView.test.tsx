@@ -113,6 +113,32 @@ describe('ExistingSessionView', () => {
     expect(screen.getByRole('button', { name: 'e-Transfer' }).closest('.btn-group')).toHaveClass('flex-wrap');
   });
 
+  it("shows an admin the player's current balance (positive or overdrawn) alongside the settlement controls", () => {
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada', balance: 100 }),
+      makePlayer({ id: 'p2', firstName: 'Bea', firstNameLower: 'bea', lastName: null, lastNameLower: null, balance: -15 }),
+    ];
+    renderView(players, [
+      makeSessionPlayer({ id: 'p1', cost: 20 }),
+      makeSessionPlayer({ id: 'p2', cost: 10 }),
+    ], { isAdmin: true });
+
+    expect(screen.getByText('Balance: $100.00')).toBeInTheDocument();
+    expect(screen.getByText('Balance: $-15.00')).toBeInTheDocument();
+  });
+
+  it("hides the balance callout for a player with a zero balance", () => {
+    const players = [makePlayer({ id: 'p1', firstName: 'Ada', balance: 0 })];
+    renderView(players, [makeSessionPlayer({ id: 'p1' })], { isAdmin: true });
+    expect(screen.queryByText(/Balance: \$/)).not.toBeInTheDocument();
+  });
+
+  it('hides the balance callout from non-admins', () => {
+    const players = [makePlayer({ id: 'p1', firstName: 'Ada', balance: 100 })];
+    renderView(players, [makeSessionPlayer({ id: 'p1' })], { isAdmin: false });
+    expect(screen.queryByText(/Balance: \$/)).not.toBeInTheDocument();
+  });
+
   it('warns before a Balance settlement would overdraw the player', async () => {
     const user = userEvent.setup();
     const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
