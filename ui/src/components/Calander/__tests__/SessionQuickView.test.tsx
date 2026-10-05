@@ -142,6 +142,33 @@ describe('SessionQuickView', () => {
     expect(within(screen.getByText('Alice Zhang').parentElement as HTMLElement).getByText('Paid')).toBeInTheDocument();
   });
 
+  it('omits the left border (used for standalone/embedded placements, e.g. the homepage) when bordered=false', () => {
+    const session = makeSession('session-1', new Date(2026, 7, 10));
+
+    const { container, rerender } = renderWithProviders(
+      <SessionQuickView date={session.date} sessions={[session]} onAddSession={jest.fn()} onOpenModal={jest.fn()} />,
+      {
+        preloadedState: {
+          club: makeClubState({ role: 'member' }),
+          players: makePlayersState([makePlayer('p1', 'Alice', 'Zhang'), makePlayer('p2', 'Bob', 'Lee')]),
+        },
+      }
+    );
+    const wrap = container.firstChild as HTMLElement;
+    expect(wrap.style.borderLeftWidth).toBe('0.5px');
+
+    rerender(
+      <SessionQuickView
+        date={session.date}
+        sessions={[session]}
+        onAddSession={jest.fn()}
+        onOpenModal={jest.fn()}
+        bordered={false}
+      />
+    );
+    expect(wrap.style.borderLeftWidth).toBe('0');
+  });
+
   it('switches between multiple sessions and opens the currently selected one', async () => {
     const user = userEvent.setup();
     const onOpenModal = jest.fn();

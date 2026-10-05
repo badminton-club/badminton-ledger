@@ -13,6 +13,11 @@ interface Props {
     sessions: Session[];
     onAddSession: () => void;
     onOpenModal: (session: Session) => void;
+    // The calendar shows this flush against the grid panel to its left (hence
+    // the left border there); standalone elsewhere (e.g. the homepage), that
+    // border reads as a stray line with nothing to separate it from, so it's
+    // dropped — defaults to true to preserve the calendar's existing look.
+    bordered?: boolean;
 }
 
 // The weekday and month/day sit on their own lines (e.g. "Saturday" then
@@ -27,16 +32,21 @@ function DateLabel({ date }: { date: Date }) {
     );
 }
 
-export default function SessionQuickView({ date, sessions, onAddSession, onOpenModal }: Props) {
+export default function SessionQuickView({ date, sessions, onAddSession, onOpenModal, bordered = true }: Props) {
     const isAdmin = useAppSelector(selectIsClubAdmin);
     const [activeIndex, setActiveIndex] = React.useState(0);
     React.useEffect(() => {
         setActiveIndex(0);
     }, [date, sessions.length]);
 
+    const wrapStyle: React.CSSProperties = {
+        ...styles.wrap,
+        ...(bordered ? {} : { borderLeftWidth: 0 }),
+    };
+
     if (sessions.length === 0) {
         return (
-            <div style={styles.wrap}>
+            <div style={wrapStyle}>
                 <div style={styles.header}>
                     <DateLabel date={date} />
                     {isAdmin && (
@@ -59,7 +69,7 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
     const allPaid = unpaidPlayers === 0 && totalPlayers > 0;
 
     return (
-        <div style={styles.wrap}>
+        <div style={wrapStyle}>
             <div style={styles.header}>
                 <div>
                     <DateLabel date={date} />
@@ -196,8 +206,11 @@ function PlayerRow({ playerId, cost, paid, comped }: { playerId: string; cost: n
 const styles: Record<string, React.CSSProperties> = {
     wrap: {
         padding: "16px",
-        borderLeft: "0.5px solid var(--color-border-tertiary)",
+        borderLeftWidth: "0.5px",
+        borderLeftStyle: "solid",
+        borderLeftColor: "var(--color-border-tertiary)",
         height: "100%",
+        flex: "1 1 auto",
         display: "flex",
         flexDirection: "column",
         gap: 0,

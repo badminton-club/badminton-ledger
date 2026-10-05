@@ -60,7 +60,13 @@ export default function HomePage() {
                         )}
                         {currentSession && (
                             <div className="session-card" style={{ padding: 0, overflow: "hidden" }}>
-                                <div className="d-flex align-items-center justify-content-between px-3 pt-3">
+                                <div
+                                    className="d-flex align-items-center justify-content-between"
+                                    style={{
+                                        padding: "20px 20px 12px",
+                                        borderBottom: "0.5px solid var(--color-border-tertiary)",
+                                    }}
+                                >
                                     <h2 className="session-title mb-0">
                                         {sessionIndex === 0 ? "Latest Session" : "Previous Session"}
                                     </h2>
@@ -93,6 +99,7 @@ export default function HomePage() {
                                     sessions={[currentSession]}
                                     onAddSession={() => openSessionInCalendar(currentSession.date, "add")}
                                     onOpenModal={() => openSessionInCalendar(currentSession.date)}
+                                    bordered={false}
                                 />
                             </div>
                         )}
