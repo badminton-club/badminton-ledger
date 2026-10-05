@@ -61,7 +61,7 @@ function seedSession(id: string, date: Date, overrides: Record<string, unknown> 
   });
 }
 
-function renderCalendar(route?: string, props?: { onDaySelected?: (date: Date) => void }) {
+function renderCalendar(route?: string, props?: { onDaySelected?: (date: Date) => void; highlightDate?: Date | null }) {
   return renderWithProviders(<SessionCalendar {...props} />, {
     route,
     preloadedState: {
@@ -99,6 +99,18 @@ describe('SessionCalendar', () => {
 
     await user.click(within(dayCell).getByRole('button', { name: 'View session details' }));
     expect(screen.getByTestId('session-modal')).toHaveTextContent('aug-10');
+  });
+
+  it('jumps to the month containing highlightDate without opening any modal (unlike the ?date= deep link)', async () => {
+    seedSession('sep-02', new Date(2026, 8, 2));
+
+    renderCalendar(undefined, { highlightDate: new Date(2026, 8, 2) });
+
+    // Starts on the current (fake-timer) month, August 2026, then jumps to
+    // September once highlightDate is supplied as a prop.
+    expect(await screen.findByRole('button', { name: 'September 2026' })).toBeInTheDocument();
+    expect(await screen.findByText('2')).toBeInTheDocument();
+    expect(screen.queryByTestId('session-modal')).not.toBeInTheDocument();
   });
 
   it('navigates between months and reloads the sessions for each visible month', async () => {

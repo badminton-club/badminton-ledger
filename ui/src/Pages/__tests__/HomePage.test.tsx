@@ -13,7 +13,11 @@ jest.mock('services/firebase/sessions', () => ({
 
 jest.mock('components/Calander/SessionCalendar', () => ({
   __esModule: true,
-  default: ({ onSessionsChanged, onDaySelected }: { onSessionsChanged?: () => void; onDaySelected?: (date: Date) => void }) => (
+  default: ({ onSessionsChanged, onDaySelected, highlightDate }: {
+    onSessionsChanged?: () => void;
+    onDaySelected?: (date: Date) => void;
+    highlightDate?: Date | null;
+  }) => (
     <>
       <button type="button" onClick={onSessionsChanged}>
         Mock calendar
@@ -21,6 +25,7 @@ jest.mock('components/Calander/SessionCalendar', () => ({
       <button type="button" onClick={() => onDaySelected?.(new Date('2026-04-28T19:00:00.000Z'))}>
         Mock day click
       </button>
+      <div data-testid="highlight-date">{highlightDate ? highlightDate.toISOString() : ''}</div>
     </>
   ),
 }));
@@ -203,6 +208,29 @@ describe('HomePage', () => {
 
     expect(await screen.findByText('Previous Session')).toBeInTheDocument();
     expect(screen.getByText(dateHeading('Tuesday April 28'))).toBeInTheDocument();
+  });
+
+  it('passes the currently paged session\'s date to the calendar as highlightDate, so paging older/newer also highlights it there', async () => {
+    const user = userEvent.setup();
+    jest.mocked(fetchSessions).mockResolvedValue([
+      makeSession({ id: 'latest', date: new Date('2026-05-05T19:00:00.000Z') }),
+      makeSession({ id: 'older', date: new Date('2026-04-28T19:00:00.000Z') }),
+    ]);
+
+    renderHomePage({
+      preloadedState: {
+        club: makeClubState(),
+        players: makePlayersState([]),
+      },
+    });
+
+    expect(await screen.findByText('Latest Session')).toBeInTheDocument();
+    expect(screen.getByTestId('highlight-date')).toHaveTextContent(new Date('2026-05-05T19:00:00.000Z').toISOString());
+
+    await user.click(screen.getByTitle('Older session'));
+
+    expect(await screen.findByText('Previous Session')).toBeInTheDocument();
+    expect(screen.getByTestId('highlight-date')).toHaveTextContent(new Date('2026-04-28T19:00:00.000Z').toISOString());
   });
 
   it('renders the calendar wrapper and reloads sessions when the calendar callback fires', async () => {

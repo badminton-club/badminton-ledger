@@ -17,7 +17,16 @@ import type { NewSessionData } from "../../services/firebase/sessions";
 import CalendarGrid from "./CalendarGrid";
 import SessionModal from "./SessionModal";
 
-export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { onSessionsChanged?: () => void; onDaySelected?: (date: Date) => void }) {
+interface Props {
+    onSessionsChanged?: () => void;
+    onDaySelected?: (date: Date) => void;
+    // Lets a parent (e.g. the homepage paging through its own "Latest/Previous
+    // Session" card) highlight a date here without opening any modal — unlike
+    // the ?date= deep link, which is for actually opening a session/add flow.
+    highlightDate?: Date | null;
+}
+
+export default function SessionCalendar({ onSessionsChanged, onDaySelected, highlightDate }: Props) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [clickedDate, setClickedDate] = useState<Date | null>(null);
@@ -32,6 +41,19 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { 
     const dispatch = useAppDispatch();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
+
+    // Jumps to (and highlights) whatever date the parent reports, e.g. paging
+    // the homepage's Latest/Previous Session card — guarded so it's a no-op
+    // once already showing that month/day, rather than fighting a user's own
+    // in-progress month navigation or day selection every render.
+    useEffect(() => {
+        if (!highlightDate) return;
+        setSelectedDate((prev) => (prev && +prev === +highlightDate ? prev : highlightDate));
+        setCurrentDate((prev) => (
+            getYear(prev) === getYear(highlightDate) && getMonth(prev) === getMonth(highlightDate)
+                ? prev : highlightDate
+        ));
+    }, [highlightDate]);
 
     const loadMonth = useCallback(async () => {
         if (!currentClubId) return;

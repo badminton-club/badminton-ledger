@@ -148,7 +148,11 @@ export default function HomePage() {
                     calendar itself. ── */}
                 <Row>
                     <Col md={8} className="mb-3 mb-md-0">
-                        <SessionCalendar onSessionsChanged={loadSessions} onDaySelected={handleCalendarDaySelected} />
+                        <SessionCalendar
+                            onSessionsChanged={loadSessions}
+                            onDaySelected={handleCalendarDaySelected}
+                            highlightDate={currentSession?.date ?? null}
+                        />
                     </Col>
                     <Col md={4}>
                         {sessionsError && (
