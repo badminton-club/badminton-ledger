@@ -60,6 +60,17 @@ export default function HomePage() {
         setSearchParams(next);
     }, [searchParams, setSearchParams]);
 
+    // Clicking a date in the calendar below pages the "Latest/Previous
+    // Session" card above to that same session, instead of only updating the
+    // calendar's own (separate) quick-view panel — so the two stay in sync
+    // rather than showing two different days at once. Only matches within
+    // the already-loaded recent-sessions array (older sessions beyond that
+    // window are left as-is, since there's nothing in the array to select).
+    const handleCalendarDaySelected = useCallback((date: Date) => {
+        const idx = sessions.findIndex((s) => +s.date === +date);
+        if (idx !== -1) setSessionIndex(idx);
+    }, [sessions]);
+
     return (
         <div className="home-page">
             <Container>
@@ -173,7 +184,7 @@ export default function HomePage() {
                 </Row>
 
                 <Row>
-                    <SessionCalendar onSessionsChanged={loadSessions} />
+                    <SessionCalendar onSessionsChanged={loadSessions} onDaySelected={handleCalendarDaySelected} />
                 </Row>
             </Container>
         </div>

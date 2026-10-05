@@ -13,10 +13,15 @@ jest.mock('services/firebase/sessions', () => ({
 
 jest.mock('components/Calander/SessionCalendar', () => ({
   __esModule: true,
-  default: ({ onSessionsChanged }: { onSessionsChanged?: () => void }) => (
-    <button type="button" onClick={onSessionsChanged}>
-      Mock calendar
-    </button>
+  default: ({ onSessionsChanged, onDaySelected }: { onSessionsChanged?: () => void; onDaySelected?: (date: Date) => void }) => (
+    <>
+      <button type="button" onClick={onSessionsChanged}>
+        Mock calendar
+      </button>
+      <button type="button" onClick={() => onDaySelected?.(new Date('2026-04-28T19:00:00.000Z'))}>
+        Mock day click
+      </button>
+    </>
   ),
 }));
 
@@ -176,6 +181,28 @@ describe('HomePage', () => {
     await user.click(screen.getByTitle('Newer session'));
 
     expect(await screen.findByText('Latest Session')).toBeInTheDocument();
+  });
+
+  it('pages the Latest/Previous Session card to match a day clicked in the calendar below, so the two stay in sync', async () => {
+    const user = userEvent.setup();
+    jest.mocked(fetchSessions).mockResolvedValue([
+      makeSession({ id: 'latest', date: new Date('2026-05-05T19:00:00.000Z') }),
+      makeSession({ id: 'older', date: new Date('2026-04-28T19:00:00.000Z') }),
+    ]);
+
+    renderHomePage({
+      preloadedState: {
+        club: makeClubState(),
+        players: makePlayersState([]),
+      },
+    });
+
+    expect(await screen.findByText('Latest Session')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Mock day click' }));
+
+    expect(await screen.findByText('Previous Session')).toBeInTheDocument();
+    expect(screen.getByText(dateHeading('Tuesday April 28'))).toBeInTheDocument();
   });
 
   it('renders the calendar wrapper and reloads sessions when the calendar callback fires', async () => {

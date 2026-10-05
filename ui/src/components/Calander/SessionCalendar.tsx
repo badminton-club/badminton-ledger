@@ -18,7 +18,7 @@ import CalendarGrid from "./CalendarGrid";
 import SessionModal from "./SessionModal";
 import SessionQuickView from "./SessionQuickView";
 
-export default function SessionCalendar({ onSessionsChanged }: { onSessionsChanged?: () => void }) {
+export default function SessionCalendar({ onSessionsChanged, onDaySelected }: { onSessionsChanged?: () => void; onDaySelected?: (date: Date) => void }) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [clickedDate, setClickedDate] = useState<Date | null>(null);
@@ -127,6 +127,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
 
     const handleDayClick = (date: Date) => {
         setSelectedDate(date);
+        onDaySelected?.(date);
         const hasSession = sessions.some((session) => +session.date === +date);
         // Only admins can create sessions — clicking an empty day should just
         // select it (so members can see "no session" state), not launch the
@@ -155,6 +156,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
         const daySessions = sessions.filter((s) => +s.date === +date);
         if (daySessions.length === 0) return;
         setSelectedDate(date);
+        onDaySelected?.(date);
         handleOpenModal(daySessions[0], date);
     };
 
