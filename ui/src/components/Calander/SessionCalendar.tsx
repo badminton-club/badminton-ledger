@@ -299,13 +299,16 @@ const styles: Record<string, React.CSSProperties> = {
         flexWrap: "wrap",
         gap: 16,
         width: "100%",
-        paddingBottom: 40, 
     },
 
-    // Calendar panel — its own card with header + grid inside
+    // Calendar panel — its own card with header + grid inside. No minWidth —
+    // this is the only child here now (the side panel that used to sit next
+    // to it is gone), and a hard floor risked overflowing the narrowest phone
+    // screens when this sits inside a homepage column that's already
+    // narrower than that floor.
     calendarPanel: {
         flex: 1,
-        minWidth: 300,
+        minWidth: 0,
         border: "0.5px solid var(--color-border-tertiary)",
         borderRadius: 12,
         overflow: "hidden",

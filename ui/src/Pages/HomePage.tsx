@@ -76,9 +76,9 @@ export default function HomePage() {
 
     return (
         <div className="home-page">
-            <Container>
+            <Container className="pb-4">
                 {isAdmin && (
-                    <div className="d-flex justify-content-end align-items-center gap-2 mb-3">
+                    <div className="d-flex flex-wrap justify-content-end align-items-center gap-2 mb-3">
                         <Button variant="primary" onClick={() => openAddSessionInCalendar()}>
                             + Add Session
                         </Button>
