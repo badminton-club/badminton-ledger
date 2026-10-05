@@ -1,5 +1,9 @@
-import React from 'react';
-import { Accordion, Container } from 'react-bootstrap';
+import React, { useState } from 'react';
+import { Accordion, Alert, Button, Container, Form, Spinner } from 'react-bootstrap';
+import { auth } from '../services/firebase/client';
+import { submitSuggestion } from '../services/firebase';
+import { useAppSelector } from '../hooks';
+import { selectCurrentClubId } from '../features/club/clubSlice';
 
 // A plain-language, one-pager explanation of the terms and concepts used
 // throughout the ledger (sessions, balances, settlement methods, etc.) for
@@ -184,6 +188,30 @@ const FAQ_SECTIONS: { question: string; answer: React.ReactNode }[] = [
 ];
 
 export default function FaqPage() {
+  const clubId = useAppSelector(selectCurrentClubId);
+  const [message, setMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [sent, setSent] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!clubId) return;
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    setError('');
+    setSubmitting(true);
+    try {
+      const name = auth.currentUser?.displayName || auth.currentUser?.email || 'A member';
+      await submitSuggestion(clubId, uid, name, message);
+      setMessage('');
+      setSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to submit suggestion.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <Container className="py-4" style={{ maxWidth: 820 }}>
       <h2 className="mb-2">Help &amp; FAQ</h2>
@@ -198,6 +226,31 @@ export default function FaqPage() {
           </Accordion.Item>
         ))}
       </Accordion>
+
+      <h3 className="mt-5 mb-2">Have a suggestion?</h3>
+      <p className="text-muted mb-3">
+        Missing something, found something confusing, or have an idea for the club's ledger?
+        Let us know below — only club admins can see what's submitted here.
+      </p>
+      <Form.Group controlId="faq-suggestion-message" className="mb-2">
+        <Form.Control
+          as="textarea"
+          rows={3}
+          placeholder="What would you like to suggest?"
+          value={message}
+          onChange={(e) => {
+            setMessage(e.target.value);
+            setSent(false);
+            setError('');
+          }}
+          disabled={submitting}
+        />
+      </Form.Group>
+      <Button onClick={handleSubmit} disabled={submitting || !message.trim()}>
+        {submitting ? <Spinner size="sm" animation="border" /> : 'Submit suggestion'}
+      </Button>
+      {sent && <Alert variant="success" className="mt-2 mb-0 py-2">Thanks — your suggestion was submitted.</Alert>}
+      {error && <Alert variant="danger" className="mt-2 mb-0 py-2">{error}</Alert>}
     </Container>
   );
 }

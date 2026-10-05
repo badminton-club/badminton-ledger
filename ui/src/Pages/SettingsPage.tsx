@@ -12,7 +12,7 @@ import {
   type DriveBackupFile,
 } from '../services/firebase/drive';
 import { encryptBackupPayload, decryptBackupPayload, isEncryptedBackupPayload } from '../services/backupCrypto';
-import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, createClubInvitation, fetchClubInvitations, deleteClubInvitation, setClubTabEnabled, setClubDefaultCourtCount, setClubEtransferSearchWindowDays, setClubEtransferIgnoreAboveAmount, DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS, DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT, ETRANSFER_SEARCH_WINDOW_PRESETS, deleteClub, fetchUserClubs, fetchClub, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, updatePlayerProfile } from '../services/firebase';
+import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, createClubInvitation, fetchClubInvitations, deleteClubInvitation, setClubTabEnabled, setClubDefaultCourtCount, setClubEtransferSearchWindowDays, setClubEtransferIgnoreAboveAmount, DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS, DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT, ETRANSFER_SEARCH_WINDOW_PRESETS, deleteClub, fetchUserClubs, fetchClub, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, fetchSuggestions, deleteSuggestion, updatePlayerProfile } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
@@ -26,7 +26,7 @@ import {
   setCurrentClub,
 } from '../features/club/clubSlice';
 import { TOGGLEABLE_TABS } from '../features/club/tabs';
-import type { ClubMember, ClubInvitation, ClubRole, LinkRequest, ProfileEditRequest, Player } from '../types';
+import type { ClubMember, ClubInvitation, ClubRole, LinkRequest, ProfileEditRequest, Suggestion, Player } from '../types';
 
 const CONFIRM_PHRASE = 'CLEAR ALL DATA';
 
@@ -109,6 +109,11 @@ export default function SettingsPage() {
   const [editRequestsLoading, setEditRequestsLoading] = useState(false);
   const [editRequestsError, setEditRequestsError] = useState('');
   const [processingEditReq, setProcessingEditReq] = useState<string | null>(null);
+
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState('');
+  const [processingSuggestionId, setProcessingSuggestionId] = useState<string | null>(null);
 
   const [deleteClubText, setDeleteClubText] = useState('');
   const [deletingClub, setDeletingClub] = useState(false);
@@ -462,6 +467,34 @@ export default function SettingsPage() {
       setEditRequestsError(err instanceof Error ? err.message : 'Failed to dismiss request.');
     } finally {
       setProcessingEditReq(null);
+    }
+  };
+
+  const loadSuggestions = useCallback(async () => {
+    if (!clubId) { setSuggestions([]); return; }
+    setSuggestionsLoading(true);
+    setSuggestionsError('');
+    try {
+      setSuggestions(await fetchSuggestions(clubId));
+    } catch (err) {
+      setSuggestionsError(err instanceof Error ? err.message : 'Failed to load suggestions.');
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  }, [clubId]);
+
+  useEffect(() => { if (isAdmin && clubId) loadSuggestions(); }, [isAdmin, clubId, loadSuggestions]);
+
+  const handleDismissSuggestion = async (id: string) => {
+    if (!clubId) return;
+    setProcessingSuggestionId(id);
+    try {
+      await deleteSuggestion(clubId, id);
+      await loadSuggestions();
+    } catch (err) {
+      setSuggestionsError(err instanceof Error ? err.message : 'Failed to dismiss suggestion.');
+    } finally {
+      setProcessingSuggestionId(null);
     }
   };
 
@@ -953,6 +986,55 @@ export default function SettingsPage() {
                   </ListGroup.Item>
                 );
               })}
+            </ListGroup>
+          )}
+        </Card.Body>
+      </Card>
+
+      <Card className="mt-3">
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span>Suggestions</span>
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            onClick={loadSuggestions}
+            disabled={suggestionsLoading}
+          >
+            {suggestionsLoading ? <Spinner size="sm" animation="border" /> : 'Refresh'}
+          </Button>
+        </Card.Header>
+        <Card.Body>
+          <Card.Text className="text-muted">
+            Feedback submitted from the Help &amp; FAQ page's suggestion box. Dismiss one once
+            you've read/addressed it.
+          </Card.Text>
+          {suggestionsError && <Alert variant="danger" className="py-2">{suggestionsError}</Alert>}
+          {suggestionsLoading ? (
+            <Spinner animation="border" size="sm" />
+          ) : suggestions.length === 0 ? (
+            <p className="text-muted mb-0">No suggestions submitted yet.</p>
+          ) : (
+            <ListGroup variant="flush">
+              {suggestions.map((s) => (
+                <ListGroup.Item key={s.id} className="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                  <span>
+                    <span style={{ whiteSpace: 'pre-wrap' }}>{s.message}</span>
+                    <br />
+                    <span className="text-muted small">
+                      {s.submittedByName}
+                      {s.createdAt?.toDate && ` — ${format(s.createdAt.toDate(), 'MMMM d, yyyy')}`}
+                    </span>
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline-secondary"
+                    disabled={processingSuggestionId === s.id}
+                    onClick={() => handleDismissSuggestion(s.id)}
+                  >
+                    {processingSuggestionId === s.id ? <Spinner size="sm" animation="border" /> : 'Dismiss'}
+                  </Button>
+                </ListGroup.Item>
+              ))}
             </ListGroup>
           )}
         </Card.Body>

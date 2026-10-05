@@ -1,10 +1,16 @@
 import React from 'react';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { renderWithProviders } from '../../test-utils/renderWithProviders';
+import { renderWithProviders, makeClubState } from '../../test-utils/renderWithProviders';
+import { resetFirebaseTestState, setCurrentUser, TEST_CLUB_ID } from '../../test-utils/firebaseTestHelpers';
+import { __getAllPaths } from '../../test-utils/fakeFirestore';
 import FaqPage from '../FaqPage';
 
 describe('FaqPage', () => {
+  beforeEach(() => {
+    resetFirebaseTestState();
+  });
+
   it('renders the help heading and every FAQ question, collapsed by default', () => {
     renderWithProviders(<FaqPage />);
 
@@ -27,5 +33,38 @@ describe('FaqPage', () => {
 
     const compAnswer = await screen.findByText(/club owner has settled this/);
     expect(compAnswer.closest('.accordion-collapse')).toHaveClass('show');
+  });
+
+  it('submits a suggestion and saves it under the current club', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({ uid: 'member-1', displayName: 'Jamie Lee', email: 'jamie@example.com' });
+
+    renderWithProviders(<FaqPage />, {
+      preloadedState: { club: makeClubState({ currentClubId: TEST_CLUB_ID }) },
+    });
+
+    const textarea = screen.getByPlaceholderText('What would you like to suggest?');
+    await user.type(textarea, 'Add dark mode please');
+
+    const submitButton = screen.getByRole('button', { name: 'Submit suggestion' });
+    await user.click(submitButton);
+
+    expect(await screen.findByText('Thanks — your suggestion was submitted.')).toBeInTheDocument();
+    // Clears the box so a second suggestion isn't accidentally appended to it.
+    expect(textarea).toHaveValue('');
+
+    await waitFor(() => {
+      const path = __getAllPaths().find((p) => p.startsWith(`clubs/${TEST_CLUB_ID}/suggestions/`));
+      expect(path).toBeDefined();
+    });
+  });
+
+  it('disables the submit button until a suggestion is typed', () => {
+    setCurrentUser({ uid: 'member-1', displayName: 'Jamie Lee', email: 'jamie@example.com' });
+    renderWithProviders(<FaqPage />, {
+      preloadedState: { club: makeClubState({ currentClubId: TEST_CLUB_ID }) },
+    });
+
+    expect(screen.getByRole('button', { name: 'Submit suggestion' })).toBeDisabled();
   });
 });

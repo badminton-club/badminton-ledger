@@ -113,6 +113,12 @@ export function profileEditRequestsRef(clubId: string): CollectionReference {
 export function profileEditRequestDoc(clubId: string, uid: string): DocumentReference {
   return doc(db, 'clubs', clubId, 'profileEditRequests', uid);
 }
+export function suggestionsRef(clubId: string): CollectionReference {
+  return collection(db, 'clubs', clubId, 'suggestions') as CollectionReference;
+}
+export function suggestionDoc(clubId: string, id: string): DocumentReference {
+  return doc(db, 'clubs', clubId, 'suggestions', id);
+}
 export function userDoc(uid: string): DocumentReference {
   return doc(db, 'users', uid);
 }

@@ -23,6 +23,8 @@ import {
   linkRequestDoc,
   profileEditRequestsRef,
   profileEditRequestDoc,
+  suggestionsRef,
+  suggestionDoc,
   clubCollection,
   clubInvitationsRef,
   clubInvitationDoc,
@@ -30,7 +32,7 @@ import {
 } from './client';
 import { serviceCall } from './utils';
 import { formatPlayerName } from './players';
-import type { UserProfile, Club, ClubRole, ClubMember, ClubInvitation, LinkRequest, ProfileEditRequest, UserClub } from 'types';
+import type { UserProfile, Club, ClubRole, ClubMember, ClubInvitation, LinkRequest, ProfileEditRequest, Suggestion, UserClub } from 'types';
 import type { Player } from 'types';
 
 const EMPTY_PROFILE: UserProfile = { clubs: [], lastVisitedClub: null };
@@ -479,6 +481,50 @@ export async function fetchMyProfileEditRequest(clubId: string, uid: string): Pr
 export async function deleteProfileEditRequest(clubId: string, uid: string): Promise<void> {
   return serviceCall('deleteProfileEditRequest', async () => {
     await deleteDoc(profileEditRequestDoc(clubId, uid));
+  });
+}
+
+// ─── Suggestions ─────────────────────────────────────────────────────────────
+// Free-text feedback any member can submit (e.g. from the Help & FAQ page's
+// suggestion box) — visible only to admins, who can clear entries once read.
+
+/** Submits a new suggestion. Anyone can submit as many as they like. */
+export async function submitSuggestion(clubId: string, uid: string, submittedByName: string, message: string): Promise<void> {
+  return serviceCall('submitSuggestion', async () => {
+    const trimmed = message.trim();
+    if (!trimmed) throw new Error('Enter a suggestion before submitting.');
+    await addDoc(suggestionsRef(clubId), {
+      submittedByUid: uid,
+      submittedByName,
+      message: trimmed,
+      createdAt: serverTimestamp(),
+    });
+  });
+}
+
+/** Lists submitted suggestions, newest first (admin-only, enforced by rules). */
+export async function fetchSuggestions(clubId: string): Promise<Suggestion[]> {
+  return serviceCall('fetchSuggestions', async () => {
+    const snap = await getDocs(suggestionsRef(clubId));
+    return snap.docs
+      .map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          message: (data.message as string) ?? '',
+          submittedByUid: (data.submittedByUid as string) ?? '',
+          submittedByName: (data.submittedByName as string) ?? '',
+          createdAt: data.createdAt,
+        };
+      })
+      .sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+  });
+}
+
+/** Removes a suggestion once an admin has read/addressed it. */
+export async function deleteSuggestion(clubId: string, id: string): Promise<void> {
+  return serviceCall('deleteSuggestion', async () => {
+    await deleteDoc(suggestionDoc(clubId, id));
   });
 }
 

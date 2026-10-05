@@ -90,6 +90,15 @@ service cloud.firestore {
         allow delete:         if isClubAdmin(clubId) || request.auth.uid == uid;
       }
 
+      // Suggestions: any member can submit one (for themselves only — can't
+      // impersonate another uid), but only admins can read/clear the list, so
+      // submissions stay private between the submitter and the admins.
+      match /suggestions/{id} {
+        allow read:   if isClubAdmin(clubId);
+        allow create: if isMember(clubId) && request.resource.data.submittedByUid == request.auth.uid;
+        allow delete: if isClubAdmin(clubId);
+      }
+
       // Calendar data: any member may read; only admins may write.
       match /sessions/{doc} { allow read: if isMember(clubId); allow write: if isClubAdmin(clubId); }
       match /players/{doc} {

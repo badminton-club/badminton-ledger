@@ -295,6 +295,16 @@ export interface ProfileEditRequest {
   createdAt?: Timestamp;
 }
 
+// clubs/{clubId}/suggestions/{id} — free-text feedback from a member (e.g. the
+// Help & FAQ page's suggestion box), visible only to admins.
+export interface Suggestion {
+  id: string;
+  message: string;
+  submittedByUid: string;
+  submittedByName: string;
+  createdAt?: Timestamp;
+}
+
 // clubs/{clubId}/balanceLedger/{id} — one balance change for a player.
 export interface BalanceLedgerEntry {
   id: string;
