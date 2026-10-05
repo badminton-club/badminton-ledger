@@ -54,6 +54,33 @@ const FAQ_SECTIONS: { question: string; answer: React.ReactNode }[] = [
     ),
   },
   {
+    question: 'One player actually sent an e-Transfer covering someone else\'s cost too — how do I record that?',
+    answer: (
+      <div>
+        <p>
+          <strong>Paid by (Transfer)</strong> only ever moves cost between two players'
+          balances — it's <em>not</em> a record of a real payment coming into the club. If
+          player A actually sends real money (e.g. by e-Transfer) that covers both their own
+          cost and player B's cost, there are two ways to record it:
+        </p>
+        <ul className="mb-0">
+          <li>
+            Mark <strong>both</strong> A's and B's session cost as <strong>e-Transfer</strong>
+            {' '}individually. This is the simplest option and has no balance side-effects —
+            it just records that both costs were settled by an incoming payment.
+          </li>
+          <li>
+            Mark B's cost as <strong>Paid by</strong> A instead. This draws B's cost out of
+            A's balance, which will leave A with a <strong>negative (overdrawn) balance</strong>
+            {' '}for that amount, since A hasn't actually banked that money yet. To fix that, go
+            to A's player page and add a <strong>manual e-Transfer</strong> entry for the
+            amount A really sent — that settles the negative balance it just created.
+          </li>
+        </ul>
+      </div>
+    ),
+  },
+  {
     question: 'What does "Comp" mean?',
     answer: (
       <p className="mb-0">
