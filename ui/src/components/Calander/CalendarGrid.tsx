@@ -126,30 +126,31 @@ function DayCell({
                 {day}
             </div>
 
-            {/* Court credit purchase badge — top-left, so it doesn't collide with
-                the multi-session count / expand-detail shortcut in the top-right. */}
+            {/* Court credit purchase badge — placed in normal flow right under the
+                day number (not absolutely positioned) so it has room to be large
+                enough to actually read, without overlapping the day number or the
+                multi-session count / expand shortcut in the top-right corner. */}
             {!!creditHoursAdded && (
-                <span
+                <div
                     title={`+${creditHoursAdded} court credit hr${creditHoursAdded === 1 ? "" : "s"} added`}
                     aria-label={`+${creditHoursAdded} court credit hours added`}
                     style={{
-                        position: "absolute",
-                        top: 6,
-                        left: 6,
+                        alignSelf: "flex-start",
                         display: "inline-flex",
                         alignItems: "center",
-                        gap: 2,
-                        fontSize: 9,
+                        gap: 3,
+                        marginTop: 4,
+                        fontSize: 13,
                         fontWeight: 700,
-                        lineHeight: 1,
-                        padding: "2px 4px",
-                        borderRadius: 4,
+                        lineHeight: 1.3,
+                        padding: "3px 7px",
+                        borderRadius: 6,
                         color: "var(--color-text-success)",
                         background: "var(--color-background-success)",
                     }}
                 >
                     💳+{creditHoursAdded}
-                </span>
+                </div>
             )}
 
             {/* Session indicator bar at bottom */}
