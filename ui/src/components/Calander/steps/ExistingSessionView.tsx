@@ -241,16 +241,20 @@ function PlayerRow({
           ? <Link to={`/players?playerId=${player.id}`}>{name}</Link>
           : name}
       </span>
-      <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
-        <span className={isSettled ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
+      <div className="d-flex flex-wrap align-items-start justify-content-end gap-2">
         {isAdmin ? (
-          <div className="d-flex flex-column align-items-end">
+          <div className="d-flex flex-column align-items-end gap-1">
+            <span className={isSettled ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
             {!!stored && stored.balance > 0 && (
               <div
                 className="text-end"
                 style={{
                   fontWeight: 600,
                   color: 'var(--color-text-success)',
+                  border: '1px solid var(--color-border-success)',
+                  background: 'var(--color-background-success)',
+                  borderRadius: 4,
+                  padding: '1px 8px',
                 }}
               >
                 Balance: ${stored.balance.toFixed(2)}
@@ -334,9 +338,12 @@ function PlayerRow({
             )}
           </div>
         ) : (
-          <Badge bg={settlement.bg} style={{ fontSize: 10, minWidth: 72 }}>
-            {settlement.label}
-          </Badge>
+          <>
+            <span className={isSettled ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
+            <Badge bg={settlement.bg} style={{ fontSize: 10, minWidth: 72 }}>
+              {settlement.label}
+            </Badge>
+          </>
         )}
       </div>
     </ListGroup.Item>
