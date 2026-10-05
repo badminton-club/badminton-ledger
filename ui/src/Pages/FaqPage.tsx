@@ -125,10 +125,12 @@ const FAQ_SECTIONS: { question: string; answer: React.ReactNode }[] = [
     question: 'What is the "Payout" page?',
     answer: (
       <p className="mb-0">
-        It's an owner-facing summary of how much is owed to the club from e-Transfer/unpaid
-        settlements (excluding anything settled via Balance, Transfer, or Comp, since those
-        don't involve new money coming in), so the owner can track what they're still owed
-        and record when they've been paid out.
+        It's a summary of how much is owed to the club from e-Transfer/unpaid settlements
+        (excluding anything settled via Balance, Transfer, or Comp, since those don't involve
+        new money coming in), so whoever is collecting those funds can track what they're
+        still owed and record when they've been paid out. This isn't only for the club
+        owner — enable the Payout tab (Settings) whenever a manager or anyone else is
+        collecting dues on the owner's behalf, so they can track it too.
       </p>
     ),
   },
