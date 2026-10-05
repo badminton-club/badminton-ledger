@@ -77,10 +77,10 @@ describe('EtransfersPage', () => {
       {
         gmailMessageId: 'msg-1',
         gmailThreadId: 'thread-1',
-        subject: "Interac e-Transfer: You've received $200.00 from CAI FANG WU and it has been automatically deposited.",
+        subject: "Interac e-Transfer: You've received $15.00 from CAI FANG WU and it has been automatically deposited.",
         senderName: 'CAI FANG WU',
         senderEmail: 'caifang1966@gmail.com',
-        amount: 200,
+        amount: 15,
         memo: 'cash for shoppers',
         referenceNumber: 'C1AYd8eJYUcY',
         emailDate: new Date('2026-08-26T14:47:00.000Z'),
@@ -106,7 +106,7 @@ describe('EtransfersPage', () => {
 
   it('shows newly fetched exact-debt payments in a separate auto-settled list', async () => {
     const user = userEvent.setup();
-    seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 30 }));
+    seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 20 }));
     seedClubDoc('sessions', 'oldest', {
       date: ts('2026-08-01T12:00:00'),
       players: [{
@@ -117,13 +117,53 @@ describe('EtransfersPage', () => {
     seedClubDoc('sessions', 'newer', {
       date: ts('2026-08-08T12:00:00'),
       players: [{
-        id: 'p1', percentage: 100, cost: 20, paid: false, paidVia: null,
+        id: 'p1', percentage: 100, cost: 10, paid: false, paidVia: null,
         comped: false, highlighted: false,
       }],
     });
     jest.mocked(searchEtransferEmails).mockResolvedValue([{
       gmailMessageId: 'msg-exact',
       gmailThreadId: 'thread-exact',
+      subject: 'Exact payment received',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'caifang1966@gmail.com',
+      amount: 20,
+      memo: null,
+      referenceNumber: 'EXACT20',
+      emailDate: new Date('2026-08-26T14:47:00.000Z'),
+    }]);
+
+    renderPage();
+    await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+
+    expect(await screen.findByText(/1 exact payment automatically settled/i)).toBeInTheDocument();
+    const autoSettledCard = screen.getByText('Auto-settled exact payments (1)').closest('.card') as HTMLElement;
+    expect(within(autoSettledCard).getByText('CAI FANG WU')).toBeInTheDocument();
+    expect(within(autoSettledCard).getByText('$20.00')).toBeInTheDocument();
+    expect(within(autoSettledCard).getByText('2')).toBeInTheDocument();
+    expect(within(autoSettledCard).getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+    expect(screen.getByText('No manually reviewed imports yet.')).toBeInTheDocument();
+    expect(getClubDocData('etransferImports', 'msg-exact')).toMatchObject({
+      status: 'applied',
+      applicationMethod: 'auto-exact-owed',
+    });
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
+  });
+
+  it('ignores an e-Transfer above the ignore-above amount entirely, instead of adding it for review or auto-settling it', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 30 }));
+    seedClubDoc('sessions', 'oldest', {
+      date: ts('2026-08-01T12:00:00'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 30, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    jest.mocked(searchEtransferEmails).mockResolvedValue([{
+      gmailMessageId: 'msg-over-limit',
+      gmailThreadId: 'thread-over-limit',
       subject: 'Exact payment received',
       senderName: 'CAI FANG WU',
       senderEmail: 'caifang1966@gmail.com',
@@ -137,17 +177,51 @@ describe('EtransfersPage', () => {
     await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
     await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
 
-    expect(await screen.findByText(/1 exact payment automatically settled/i)).toBeInTheDocument();
-    const autoSettledCard = screen.getByText('Auto-settled exact payments (1)').closest('.card') as HTMLElement;
-    expect(within(autoSettledCard).getByText('CAI FANG WU')).toBeInTheDocument();
-    expect(within(autoSettledCard).getByText('$30.00')).toBeInTheDocument();
-    expect(within(autoSettledCard).getByText('2')).toBeInTheDocument();
-    expect(within(autoSettledCard).getByRole('button', { name: 'Undo' })).toBeInTheDocument();
-    expect(screen.getByText('No manually reviewed imports yet.')).toBeInTheDocument();
-    expect(getClubDocData('etransferImports', 'msg-exact')).toMatchObject({
-      status: 'applied',
-      applicationMethod: 'auto-exact-owed',
+    // $30 exactly matches owed, but exceeds the default $20 ignore-above
+    // amount, so it's never picked up at all — not added for review, and
+    // definitely not auto-settled.
+    expect(await screen.findByText(/all ignored \(over \$20\.00\)/i)).toBeInTheDocument();
+    expect(screen.getByText('Nothing to review — search Gmail to find new e-Transfers.')).toBeInTheDocument();
+    expect(screen.getByText('Auto-settled exact payments (0)')).toBeInTheDocument();
+    expect(getClubDocData('etransferImports', 'msg-over-limit')).toBeUndefined();
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 30 });
+  });
+
+  it('picks up and auto-settles an exact-debt payment above $20 once the ignore-above amount is raised', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 30 }));
+    seedClubDoc('sessions', 'oldest', {
+      date: ts('2026-08-01T12:00:00'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 30, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
     });
+    jest.mocked(searchEtransferEmails).mockResolvedValue([{
+      gmailMessageId: 'msg-raised-limit',
+      gmailThreadId: 'thread-raised-limit',
+      subject: 'Exact payment received',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'caifang1966@gmail.com',
+      amount: 30,
+      memo: null,
+      referenceNumber: 'EXACT30',
+      emailDate: new Date('2026-08-26T14:47:00.000Z'),
+    }]);
+
+    renderPage();
+    await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
+
+    const limitInput = screen.getByLabelText('Ignore amounts over');
+    await user.clear(limitInput);
+    await user.type(limitInput, '50');
+    await user.click(screen.getByRole('button', { name: 'Save limit' }));
+    await waitFor(() => expect(getClubMetaDocData('test-club')).toMatchObject({ etransferIgnoreAboveAmount: 50 }));
+
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+
+    expect(await screen.findByText(/1 exact payment automatically settled/i)).toBeInTheDocument();
+    expect(getClubDocData('etransferImports', 'msg-raised-limit')).toMatchObject({ status: 'applied' });
     expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
   });
 
@@ -160,7 +234,7 @@ describe('EtransfersPage', () => {
     expect(windowSelect).toHaveValue('30');
 
     await user.selectOptions(windowSelect, '14');
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(screen.getByRole('button', { name: 'Save window' }));
     await waitFor(() => expect(screen.getByText('Saved.')).toBeInTheDocument());
     expect(getClubMetaDocData('test-club')).toMatchObject({ etransferSearchWindowDays: 14 });
   });
@@ -188,7 +262,7 @@ describe('EtransfersPage', () => {
 
     await user.clear(dateInput);
     await user.type(dateInput, '2026-10-15');
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(screen.getByRole('button', { name: 'Save window' }));
 
     await waitFor(() => {
       expect(screen.getByText('Saved.')).toBeInTheDocument();
@@ -398,7 +472,7 @@ describe('EtransfersPage', () => {
       subject: 'subject',
       senderName: 'CAI FANG WU',
       senderEmail: null,
-      amount: 200,
+      amount: 15,
       memo: null,
       referenceNumber: null,
       emailDate: new Date('2026-08-26T14:47:00.000Z'),

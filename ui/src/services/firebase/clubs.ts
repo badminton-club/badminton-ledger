@@ -195,6 +195,21 @@ export async function resetClubEtransferSearchSetting(clubId: string): Promise<v
   });
 }
 
+/**
+ * Persists the club's e-Transfer ignore-above cutoff — a newly found
+ * e-Transfer above this amount is skipped entirely (never even recorded as a
+ * pending import) instead of being picked up (see importEtransferEmails).
+ */
+export async function setClubEtransferIgnoreAboveAmount(clubId: string, amount: number): Promise<void> {
+  return serviceCall('setClubEtransferIgnoreAboveAmount', async () => {
+    await setDoc(
+      clubDoc(clubId),
+      { etransferIgnoreAboveAmount: amount },
+      { merge: true }
+    );
+  });
+}
+
 /** Reads the caller's linked player id in a club (null if unlinked or not a member). */
 export async function fetchMemberPlayerId(clubId: string, uid: string): Promise<string | null> {
   return serviceCall('fetchMemberPlayerId', async () => {

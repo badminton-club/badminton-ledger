@@ -239,6 +239,13 @@ export interface Club {
   // search so it never goes stale — e.g. 7 for "always search the last week".
   // Preferred over etransferSearchAfterDate once set.
   etransferSearchWindowDays?: number | null;
+  // Cutoff (dollars) above which a newly found e-Transfer is ignored
+  // entirely — not recorded as a pending import at all, auto-settled or
+  // otherwise (see services/firebase/etransferImports.ts) — as a safety net
+  // against an unusually large/unexpected transfer being picked up
+  // unattended. Defaults to $20 when unset (see
+  // DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT).
+  etransferIgnoreAboveAmount?: number | null;
   createdAt?: Timestamp;
 }
 
