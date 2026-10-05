@@ -251,10 +251,6 @@ function PlayerRow({
                 style={{
                   fontWeight: 600,
                   color: 'var(--color-text-success)',
-                  border: '1px solid var(--color-border-success)',
-                  background: 'var(--color-background-success)',
-                  borderRadius: 4,
-                  padding: '1px 8px',
                 }}
               >
                 Balance: ${stored.balance.toFixed(2)}
