@@ -169,6 +169,28 @@ describe('SessionQuickView', () => {
     expect(wrap.style.borderLeftWidth).toBe('0');
   });
 
+  it('hides "+ Add" for an admin when allowAdd=false (e.g. the homepage, which browses an already-existing session rather than picking a day)', () => {
+    const session = makeSession('session-1', new Date(2026, 7, 10));
+
+    renderWithProviders(
+      <SessionQuickView
+        date={session.date}
+        sessions={[session]}
+        onOpenModal={jest.fn()}
+        allowAdd={false}
+      />,
+      {
+        preloadedState: {
+          club: makeClubState({ role: 'admin' }),
+          players: makePlayersState([makePlayer('p1', 'Alice', 'Zhang'), makePlayer('p2', 'Bob', 'Lee')]),
+        },
+      }
+    );
+
+    expect(screen.queryByRole('button', { name: '+ Add' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View details' })).toBeInTheDocument();
+  });
+
   it('switches between multiple sessions and opens the currently selected one', async () => {
     const user = userEvent.setup();
     const onOpenModal = jest.fn();

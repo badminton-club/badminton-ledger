@@ -34,13 +34,12 @@ export default function HomePage() {
     const negativeBalancePlayers = players.filter((p) => (p.owed ?? 0) > 0);
 
     // Deep-links into the calendar rendered further down this same page —
-    // SessionCalendar watches for its own ?date=/&action= query params and
-    // opens the matching popup directly, so this summary card doesn't need
-    // its own modal plumbing.
-    const openSessionInCalendar = useCallback((date: Date, action?: "add") => {
+    // SessionCalendar watches for its own ?date= query param and opens the
+    // matching popup directly, so this summary card doesn't need its own
+    // modal plumbing.
+    const openSessionInCalendar = useCallback((date: Date) => {
         const next = new URLSearchParams(searchParams);
         next.set("date", format(date, "yyyy-MM-dd"));
-        if (action) next.set("action", action); else next.delete("action");
         setSearchParams(next);
     }, [searchParams, setSearchParams]);
 
@@ -97,9 +96,9 @@ export default function HomePage() {
                                 <SessionQuickView
                                     date={currentSession.date}
                                     sessions={[currentSession]}
-                                    onAddSession={() => openSessionInCalendar(currentSession.date, "add")}
                                     onOpenModal={() => openSessionInCalendar(currentSession.date)}
                                     bordered={false}
+                                    allowAdd={false}
                                 />
                             </div>
                         )}

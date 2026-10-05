@@ -21,8 +21,8 @@ jest.mock('components/Calander/SessionCalendar', () => ({
 }));
 
 // Exposes the current URL query string so tests can verify HomePage
-// deep-links into the (mocked-away) calendar via ?date=/&action=, without
-// needing a real SessionCalendar mounted to observe it.
+// deep-links into the (mocked-away) calendar via ?date=, without needing a
+// real SessionCalendar mounted to observe it.
 function LocationSearchProbe() {
   const [params] = useSearchParams();
   return <div data-testid="location-search">{params.toString()}</div>;
@@ -148,14 +148,13 @@ describe('HomePage', () => {
     expect(screen.getByRole('link', { name: 'Chris Ng' })).toHaveAttribute('href', '/players?playerId=p2');
     expect(screen.getByRole('link', { name: 'Pat Kim' })).toHaveAttribute('href', '/players?playerId=p4');
 
+    // "+ Add" doesn't make sense while browsing an already-existing session
+    // (there's no "day" being picked, just a session being paged through).
+    expect(screen.queryByRole('button', { name: '+ Add' })).not.toBeInTheDocument();
+
     // "View details" deep-links into the calendar below via ?date=.
     await user.click(screen.getByRole('button', { name: 'View details' }));
     await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('date=2026-05-05'));
-    expect(screen.getByTestId('location-search')).not.toHaveTextContent('action');
-
-    // "+ Add" deep-links the same way but also flags the add-session action.
-    await user.click(screen.getByRole('button', { name: '+ Add' }));
-    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('action=add'));
 
     await user.click(screen.getByTitle('Older session'));
 

@@ -11,13 +11,18 @@ import { isSessionPlayerUnpaid } from "../../utils/sessionPayment";
 interface Props {
     date: Date;
     sessions: Session[];
-    onAddSession: () => void;
+    onAddSession?: () => void;
     onOpenModal: (session: Session) => void;
     // The calendar shows this flush against the grid panel to its left (hence
     // the left border there); standalone elsewhere (e.g. the homepage), that
     // border reads as a stray line with nothing to separate it from, so it's
     // dropped — defaults to true to preserve the calendar's existing look.
     bordered?: boolean;
+    // "+ Add" doesn't make sense when browsing a specific already-existing
+    // session (e.g. the homepage's Latest/Previous Session card) — there's no
+    // "this day" selection happening, just a session someone's paging through.
+    // Defaults to true to preserve the calendar's existing side-panel behavior.
+    allowAdd?: boolean;
 }
 
 // The weekday and month/day sit on their own lines (e.g. "Saturday" then
@@ -32,7 +37,7 @@ function DateLabel({ date }: { date: Date }) {
     );
 }
 
-export default function SessionQuickView({ date, sessions, onAddSession, onOpenModal, bordered = true }: Props) {
+export default function SessionQuickView({ date, sessions, onAddSession, onOpenModal, bordered = true, allowAdd = true }: Props) {
     const isAdmin = useAppSelector(selectIsClubAdmin);
     const [activeIndex, setActiveIndex] = React.useState(0);
     React.useEffect(() => {
@@ -49,7 +54,7 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
             <div style={wrapStyle}>
                 <div style={styles.header}>
                     <DateLabel date={date} />
-                    {isAdmin && (
+                    {allowAdd && isAdmin && (
                         <Button size="sm" variant="primary" onClick={onAddSession}>
                             + Add Session
                         </Button>
@@ -84,7 +89,7 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
                     </div>
                 </div>
                 <div className="d-flex gap-2">
-                    {isAdmin && (
+                    {allowAdd && isAdmin && (
                         <Button size="sm" variant="primary" onClick={onAddSession}>
                             + Add
                         </Button>

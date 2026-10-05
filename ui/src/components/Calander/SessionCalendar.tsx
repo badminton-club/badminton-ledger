@@ -92,26 +92,16 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
     // day (via its own narrow fetch, so it doesn't race the month-level
     // `sessions` load below) — instead of just selecting the day and leaving
     // the user to scroll down to find it in the inline quick-view panel.
-    // An additional &action=add instead launches the "add a new session"
-    // flow for that day (used by the homepage's "+ Add" button when
-    // browsing a past session via its own reused quick-view panel).
     useEffect(() => {
         const dateParam = searchParams.get("date");
         if (!dateParam) return;
         const [y, m, d] = dateParam.split("-").map(Number);
         if (!y || !m || !d) return;
         const target = new Date(y, m - 1, d);
-        const action = searchParams.get("action");
         setCurrentDate(target);
         setSelectedDate(target);
         searchParams.delete("date");
-        searchParams.delete("action");
         setSearchParams(searchParams, { replace: true });
-
-        if (action === "add") {
-            if (isAdmin) openAddSession(target);
-            return;
-        }
 
         fetchSessions({ startDate: target, endDate: target })
             .then((daySessions) => {
