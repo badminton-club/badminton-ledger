@@ -125,6 +125,14 @@ describe('ExistingSessionView', () => {
 
     expect(screen.getByText('Balance: $100.00')).toBeInTheDocument();
     expect(screen.queryByText(/Balance: \$-/)).not.toBeInTheDocument();
+
+    // Sits above (not below) the settlement buttons, right-aligned under the cost.
+    const adaRow = screen.getByText('Ada Lovelace').closest('.list-group-item') as HTMLElement;
+    const balanceCallout = screen.getByText('Balance: $100.00');
+    const buttonGroup = adaRow.querySelector('.btn-group');
+    expect(
+      balanceCallout.compareDocumentPosition(buttonGroup as Node) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 
   it("hides the balance callout for a player with a zero or negative balance", () => {

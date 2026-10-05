@@ -245,6 +245,18 @@ function PlayerRow({
         <span className={isSettled ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
         {isAdmin ? (
           <div className="d-flex flex-column align-items-end">
+            {!!stored && stored.balance > 0 && (
+              <div
+                className="text-end"
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--color-text-success)',
+                }}
+              >
+                Balance: ${stored.balance.toFixed(2)}
+              </div>
+            )}
             <ButtonGroup size="sm" className="flex-wrap justify-content-end">
                 {options.map(o => {
                   const isActive = currentVia === o.method;
@@ -316,18 +328,6 @@ function PlayerRow({
                   );
                 })}
               </ButtonGroup>
-            {!!stored && stored.balance > 0 && (
-              <div
-                className="text-end"
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: 'var(--color-text-success)',
-                }}
-              >
-                Balance: ${stored.balance.toFixed(2)}
-              </div>
-            )}
             {player.settledAt && isSettled && (
               <div className="text-muted" style={{ fontSize: 10 }}>
                 Updated {format(player.settledAt.toDate(), 'MMM d, yyyy h:mm a')}
