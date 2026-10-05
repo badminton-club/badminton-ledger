@@ -318,14 +318,10 @@ function PlayerRow({
               </ButtonGroup>
             {!!stored && stored.balance > 0 && (
               <div
-                className="text-center"
+                className="text-end"
                 style={{
                   fontSize: 11,
                   fontWeight: 600,
-                  padding: '2px 8px',
-                  marginTop: 2,
-                  borderRadius: 4,
-                  border: '0.5px solid var(--color-border-tertiary)',
                   color: 'var(--color-text-success)',
                 }}
               >
