@@ -47,6 +47,8 @@ export const DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS = 7;
 
 /** Preset rolling-window choices offered in the e-Transfer search UI. */
 export const ETRANSFER_SEARCH_WINDOW_PRESETS: { days: number; label: string }[] = [
+  { days: 1, label: '1 day' },
+  { days: 2, label: '2 days' },
   { days: 7, label: '1 week' },
   { days: 14, label: '2 weeks' },
   { days: 30, label: '1 month' },
