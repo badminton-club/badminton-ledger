@@ -31,7 +31,12 @@ export default function HomePage() {
 
     const currentSession = sessions[sessionIndex] ?? null;
 
-    const negativeBalancePlayers = players.filter((p) => (p.owed ?? 0) > 0);
+    // Distinct concerns: "owed" is unsettled session costs (never paid in any
+    // form), while "overdrawn" is an actual negative prepaid balance (see the
+    // Help & FAQ page) — surfaced as two separate lists so neither masks the
+    // other.
+    const owingPlayers = players.filter((p) => (p.owed ?? 0) > 0);
+    const overdrawnPlayers = players.filter((p) => (p.balance ?? 0) < 0);
 
     // Deep-links into the calendar rendered further down this same page —
     // SessionCalendar watches for its own ?date= query param and opens the
@@ -104,25 +109,46 @@ export default function HomePage() {
                         )}
                     </Col>
 
-                    {/* ── Negative balances ── */}
+                    {/* ── Outstanding balances — unsettled session dues and overdrawn
+                        prepaid balances are distinct concerns, shown separately so
+                        neither list masks the other. ── */}
                     <Col md={6}>
                         <div className="session-card">
-                            <h2 className="session-title">Player Balances</h2>
-                            {negativeBalancePlayers.length > 0 ?
-                                <div className="balances-list-wrap">
-                                    <ul className="list-disc list-inside mb-0">
-                                        {negativeBalancePlayers.map((player) => (
-                                            <li key={player.id} className="player-balance">
-                                                <Link to={`/players?playerId=${player.id}`}>
-                                                    {player.firstName} {player.lastName ?? ""}
-                                                </Link>{" "}
-                                                —{" "}
-                                                <strong>${(player.owed ?? 0).toFixed(2)}</strong>
-                                            </li>
-                                        ))}
-                                    </ul>
+                            <h2 className="session-title">Outstanding Balances</h2>
+                            <div className="balances-list-wrap d-flex flex-column gap-3">
+                                <div>
+                                    <h3 className="small text-muted fw-bold mb-1">Owe for sessions</h3>
+                                    {owingPlayers.length > 0 ?
+                                        <ul className="list-disc list-inside mb-0">
+                                            {owingPlayers.map((player) => (
+                                                <li key={player.id} className="player-balance">
+                                                    <Link to={`/players?playerId=${player.id}`}>
+                                                        {player.firstName} {player.lastName ?? ""}
+                                                    </Link>{" "}
+                                                    —{" "}
+                                                    <strong>${(player.owed ?? 0).toFixed(2)}</strong>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    :   <p className="no-players mb-0">No players owe for sessions.</p>}
                                 </div>
-                            :   <p className="no-players">No players with outstanding balances.</p>}
+                                <div>
+                                    <h3 className="small text-muted fw-bold mb-1">Overdrawn balance</h3>
+                                    {overdrawnPlayers.length > 0 ?
+                                        <ul className="list-disc list-inside mb-0">
+                                            {overdrawnPlayers.map((player) => (
+                                                <li key={player.id} className="player-balance">
+                                                    <Link to={`/players?playerId=${player.id}`}>
+                                                        {player.firstName} {player.lastName ?? ""}
+                                                    </Link>{" "}
+                                                    —{" "}
+                                                    <strong>Overdrawn ${Math.abs(player.balance).toFixed(2)}</strong>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    :   <p className="no-players mb-0">No players are overdrawn.</p>}
+                                </div>
+                            </div>
                         </div>
                     </Col>
                 </Row>

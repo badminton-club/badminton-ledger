@@ -118,6 +118,7 @@ describe('HomePage', () => {
       makePlayer({ id: 'p2', firstName: 'Chris', firstNameLower: 'chris', lastName: 'Ng', lastNameLower: 'ng', owed: 20 }),
       makePlayer({ id: 'p3', firstName: 'Sam', firstNameLower: 'sam', lastName: 'Cho', lastNameLower: 'cho', owed: 15 }),
       makePlayer({ id: 'p4', firstName: 'Pat', firstNameLower: 'pat', lastName: 'Kim', lastNameLower: 'kim', owed: 10 }),
+      makePlayer({ id: 'p5', firstName: 'Drew', firstNameLower: 'drew', lastName: 'Bell', lastNameLower: 'bell', balance: -12 }),
     ];
 
     renderHomePage({
@@ -147,6 +148,16 @@ describe('HomePage', () => {
     // No artificial cap on the outstanding-balances list.
     expect(screen.getByRole('link', { name: 'Chris Ng' })).toHaveAttribute('href', '/players?playerId=p2');
     expect(screen.getByRole('link', { name: 'Pat Kim' })).toHaveAttribute('href', '/players?playerId=p4');
+
+    // "Owed" (unsettled session dues) and "overdrawn" (negative prepaid
+    // balance) are distinct concerns shown in their own sub-lists — Drew Bell
+    // only has a negative balance (no owed dues), so they appear in the
+    // Overdrawn section but not the "Owe for sessions" one.
+    expect(screen.getByText('Owe for sessions')).toBeInTheDocument();
+    expect(screen.getByText('Overdrawn balance')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Drew Bell' })).toHaveAttribute('href', '/players?playerId=p5');
+    expect(screen.getByText('Overdrawn $12.00')).toBeInTheDocument();
+    expect(screen.queryByText('No players are overdrawn.')).not.toBeInTheDocument();
 
     // "+ Add" doesn't make sense while browsing an already-existing session
     // (there's no "day" being picked, just a session being paged through).
@@ -178,7 +189,8 @@ describe('HomePage', () => {
       },
     });
 
-    expect(screen.getByText('No players with outstanding balances.')).toBeInTheDocument();
+    expect(screen.getByText('No players owe for sessions.')).toBeInTheDocument();
+    expect(screen.getByText('No players are overdrawn.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Mock calendar' })).toBeInTheDocument();
 
     await waitFor(() => expect(fetchSessions).toHaveBeenCalledTimes(1));
