@@ -289,3 +289,18 @@ body {
 .calendar-day.has-session {
     background-color: var(--color-background-secondary);
 }
+
+/* ── Mobile: claim back the horizontal space Bootstrap's default gutters eat
+ * into on narrow phones (container/row padding + card padding add up to a
+ * visible chunk of width on a ~375-390px screen) — shrinks them so more of
+ * the actual content fits. ── */
+@media (max-width: 576px) {
+    .container,
+    .row {
+        --bs-gutter-x: 0.5rem;
+    }
+
+    .session-card {
+        padding: 14px;
+    }
+}
