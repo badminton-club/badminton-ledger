@@ -212,6 +212,47 @@ describe('ExistingSessionView', () => {
     expect(within(adaRow).getByText('$20.00')).toBeInTheDocument();
   });
 
+  it('shows one combined status dropdown (not the full button row) in Compact, with the same settlement options plus "Paid by"', async () => {
+    const user = userEvent.setup();
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada' }),
+      makePlayer({ id: 'p2', firstName: 'Bea', firstNameLower: 'bea', lastName: null, lastNameLower: null, balance: 50 }),
+    ];
+    const sessionPlayers = [
+      makeSessionPlayer({ id: 'p1', cost: 20, paid: false, paidVia: null }),
+      makeSessionPlayer({ id: 'p2', cost: 10 }),
+    ];
+    seedClubDoc('players', 'p1', players[0]);
+    seedClubDoc('players', 'p2', players[1]);
+    // setPlayerSettlement/setPlayerPaidBy read/write this doc directly — must mirror the `session` prop.
+    seedClubDoc('sessions', 's1', { players: sessionPlayers });
+
+    const { onSessionUpdate } = renderView(players, sessionPlayers, { isAdmin: true });
+
+    await user.click(screen.getByRole('button', { name: 'Compact' }));
+
+    const adaRow = screen.getByText('Ada Lovelace').closest('.list-group-item') as HTMLElement;
+    // Just one small status control — the full multi-button row is gone.
+    expect(within(adaRow).queryByRole('button', { name: 'Comp' })).not.toBeInTheDocument();
+    const statusToggle = within(adaRow).getByRole('button', { name: 'Unpaid' });
+
+    await user.click(statusToggle);
+    await user.click(within(adaRow).getByText('e-Transfer'));
+
+    await waitFor(() => expect(onSessionUpdate).toHaveBeenCalledWith('s1'));
+    expect((getClubDocData('sessions', 's1')!.players as SessionPlayer[])[0])
+      .toMatchObject({ paid: true, paidVia: 'etransfer' });
+
+    // "Paid by" still works from within the same compact dropdown.
+    await user.click(within(adaRow).getByRole('button', { name: 'e-Transfer' }));
+    await user.type(within(adaRow).getByPlaceholderText('Search players…'), 'Bea');
+    await user.click(within(adaRow).getByText('Bea'));
+
+    await waitFor(() => expect(
+      (getClubDocData('sessions', 's1')!.players as SessionPlayer[])[0]
+    ).toMatchObject({ paidVia: 'transfer', paidBy: 'p2' }));
+  });
+
   it('warns before a Balance settlement would overdraw the player', async () => {
     const user = userEvent.setup();
     const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);

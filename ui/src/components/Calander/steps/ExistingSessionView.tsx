@@ -289,6 +289,74 @@ function PlayerRow({
                 Balance: ${stored.balance.toFixed(2)}
               </div>
             )}
+            {compact ? (
+              // One small dropdown (current status as its label) instead of
+              // the full button row below — same options, including "Paid
+              // by", just folded into a single control for a denser view.
+              <Dropdown
+                align="end"
+                onToggle={(isOpen) => { if (!isOpen) setPayerSearch(''); }}
+              >
+                <Dropdown.Toggle
+                  size="sm"
+                  variant={settlement.bg}
+                  title={
+                    currentVia === 'balance' && settledViaEtransferBalance
+                      ? 'Automatically settled from balance funded by a Gmail e-Transfer'
+                      : undefined
+                  }
+                >
+                  {settlement.label}
+                </Dropdown.Toggle>
+                <Dropdown.Menu style={{ maxHeight: 360, overflowY: 'auto' }}>
+                  {options.map(o => (
+                    <Dropdown.Item
+                      key={o.label}
+                      active={currentVia === o.method}
+                      onClick={() => handleSelect(o.method)}
+                    >
+                      {o.method === 'balance' && currentVia === o.method && settledViaEtransferBalance
+                        ? 'Gmail e-Transfer'
+                        : o.label}
+                    </Dropdown.Item>
+                  ))}
+                  {otherPlayers.length > 0 && (
+                    <>
+                      <Dropdown.Divider />
+                      <Dropdown.Header>Pay from another's balance</Dropdown.Header>
+                      <div className="px-2 pb-2">
+                        <Form.Control
+                          size="sm"
+                          autoFocus
+                          placeholder="Search players…"
+                          value={payerSearch}
+                          onChange={(e) => setPayerSearch(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        />
+                      </div>
+                      {filteredPayers.length === 0 ? (
+                        <Dropdown.ItemText className="text-muted small px-3">
+                          No players found.
+                        </Dropdown.ItemText>
+                      ) : (
+                        filteredPayers.map(op => (
+                          <Dropdown.Item
+                            key={op.id}
+                            active={currentVia === 'transfer' && player.paidBy === op.id}
+                            onClick={() => handlePaidBy(op.id)}
+                            className="d-flex justify-content-between align-items-center gap-3"
+                          >
+                            <span>{op.name}</span>
+                            <span className="text-muted small">${op.balance.toFixed(2)}</span>
+                          </Dropdown.Item>
+                        ))
+                      )}
+                    </>
+                  )}
+                </Dropdown.Menu>
+              </Dropdown>
+            ) : (
             <ButtonGroup size="sm" className="flex-wrap justify-content-end">
                 {options.map(o => {
                   const isActive = currentVia === o.method;
@@ -369,6 +437,7 @@ function PlayerRow({
                   );
                 })}
               </ButtonGroup>
+            )}
             {!compact && player.settledAt && isSettled && (
               <div className="text-muted" style={{ fontSize: 10 }}>
                 Updated {format(player.settledAt.toDate(), 'MMM d, yyyy h:mm a')}
