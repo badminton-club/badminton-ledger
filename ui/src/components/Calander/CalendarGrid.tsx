@@ -149,25 +149,22 @@ function DayCell({
                     style={{
                         alignSelf: "flex-start",
                         display: "inline-flex",
-                        // Stacks the icon above the number (rather than one
-                        // nowrap line) so the full number always stays
-                        // readable on a narrow mobile column — wrapping a
-                        // single "💳+40" line mid-number instead would be
-                        // confusing, and truncating it would hide the count.
-                        flexDirection: "column",
                         alignItems: "center",
-                        gap: 1,
                         marginTop: 4,
-                        // Still can't exceed the (possibly narrow, on mobile)
-                        // cell's own width, so it never overflows into the
-                        // neighboring day's cell.
+                        // Can't exceed the (possibly narrow, on mobile) cell's
+                        // own width, so it never overflows into the
+                        // neighboring day's cell. The number alone (no icon)
+                        // comfortably fits even the narrowest mobile column —
+                        // stacking an icon above it previously still didn't
+                        // leave room for 2-digit counts and got clipped.
                         maxWidth: "100%",
                         boxSizing: "border-box",
                         overflow: "hidden",
-                        fontSize: 13,
+                        whiteSpace: "nowrap",
+                        fontSize: 12,
                         fontWeight: 700,
                         lineHeight: 1.2,
-                        padding: "3px 6px",
+                        padding: "2px 5px",
                         border: "none",
                         borderRadius: 6,
                         color: "var(--color-text-success)",
@@ -175,8 +172,7 @@ function DayCell({
                         cursor: onCreditClick ? "pointer" : "default",
                     }}
                 >
-                    <span aria-hidden="true">💳</span>
-                    <span>+{creditHoursAdded}</span>
+                    +{creditHoursAdded}
                 </button>
             )}
 
