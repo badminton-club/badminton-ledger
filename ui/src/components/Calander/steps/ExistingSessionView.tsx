@@ -10,12 +10,6 @@ import type { PaidVia, Session, SessionPlayer } from 'types';
 import type { RootState } from '../../../store';
 import { getSessionPlayerPaidVia, isSessionPlayerUnpaid } from '../../../utils/sessionPayment';
 
-// Every settlement button/dropdown (Unpaid, Paid by, Comp, Balance, e-Transfer)
-// uses this same fixed width — wide enough for the longest label ("Gmail
-// e-Transfer") — so a row's wrap point never shifts depending on which
-// labels happen to be showing (see PlayerRow below).
-const SETTLEMENT_BUTTON_WIDTH = 140;
-
 interface Props {
   session:         Session;
   onSessionUpdate: (id: string) => void;
@@ -277,7 +271,7 @@ function PlayerRow({
       </div>
       <div className="d-flex flex-wrap align-items-start justify-content-end gap-2">
         {isAdmin ? (
-          <div className="d-flex flex-column align-items-end gap-1">
+          <div className="d-flex flex-column align-items-end gap-1 w-100">
             {!!stored && stored.balance > 0 && (
               <div
                 className="text-end"
@@ -365,7 +359,7 @@ function PlayerRow({
                 </ButtonGroup>
               </div>
             ) : (
-            <ButtonGroup size="sm" className="flex-wrap justify-content-end">
+            <div className="settlement-button-grid">
                 {options.map(o => {
                   const isActive = currentVia === o.method;
                   const displayLabel = o.method === 'balance' && isActive && settledViaEtransferBalance
@@ -374,6 +368,7 @@ function PlayerRow({
                   return (
                   <React.Fragment key={o.label}>
                     <Button
+                      size="sm"
                       variant={isActive ? o.activeVariant : 'outline-secondary'}
                       onClick={() => handleSelect(o.method)}
                       title={
@@ -381,15 +376,7 @@ function PlayerRow({
                           ? 'Automatically settled from balance funded by a Gmail e-Transfer'
                           : undefined
                       }
-                      className="text-truncate"
-                      // Fixed (not just capped) width, same as the "Paid by"
-                      // dropdown below — every button is otherwise sized to
-                      // its own label, and "Gmail e-Transfer" is much longer
-                      // than "Comp"/"Balance", so rows wrapped at a different
-                      // button depending on which labels happened to be
-                      // showing. A uniform width makes every row wrap at the
-                      // same spot regardless of label/settlement state.
-                      style={{ width: SETTLEMENT_BUTTON_WIDTH }}
+                      className="text-truncate w-100"
                     >
                       {displayLabel}
                     </Button>
@@ -397,14 +384,14 @@ function PlayerRow({
                       <Dropdown
                         as={ButtonGroup}
                         align="end"
+                        className="w-100"
                         onToggle={(isOpen) => { if (!isOpen) setPayerSearch(''); }}
                       >
                         <Dropdown.Toggle
                           size="sm"
                           variant={currentVia === 'transfer' ? 'primary' : 'outline-secondary'}
                           title="Pay this player's dues from another player's balance"
-                          className="text-truncate"
-                          style={{ width: SETTLEMENT_BUTTON_WIDTH }}
+                          className="text-truncate w-100"
                         >
                           {currentVia === 'transfer' && payerName ? payerName : 'Paid by'}
                         </Dropdown.Toggle>
@@ -444,7 +431,7 @@ function PlayerRow({
                   </React.Fragment>
                   );
                 })}
-              </ButtonGroup>
+              </div>
             )}
             {!compact && player.settledAt && isSettled && (
               <div className="text-muted" style={{ fontSize: 10 }}>

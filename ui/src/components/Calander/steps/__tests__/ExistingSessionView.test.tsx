@@ -110,7 +110,7 @@ describe('ExistingSessionView', () => {
 
     const row = screen.getByText('Ada Lovelace').closest('.list-group-item') as HTMLElement;
     expect(row).toHaveClass('flex-column');
-    expect(screen.getByRole('button', { name: 'e-Transfer' }).closest('.btn-group')).toHaveClass('flex-wrap');
+    expect(screen.getByRole('button', { name: 'e-Transfer' }).closest('.settlement-button-grid')).toBeInTheDocument();
   });
 
   it('keeps the player name and cost on the same row, name left and cost right', () => {
@@ -123,7 +123,7 @@ describe('ExistingSessionView', () => {
     expect(within(nameAndCostRow).getByText('$18.00')).toBeInTheDocument();
   });
 
-  it('gives every settlement button/dropdown the same fixed width, so rows always wrap at the same spot regardless of label length (e.g. "Gmail e-Transfer" vs "Balance")', () => {
+  it('places every settlement button/dropdown in the same responsive grid, regardless of label length', () => {
     const players = [
       makePlayer({ id: 'p1', firstName: 'Ada' }),
       makePlayer({ id: 'p2', firstName: 'Bea', firstNameLower: 'bea', lastName: null, lastNameLower: null }),
@@ -137,11 +137,19 @@ describe('ExistingSessionView', () => {
       makeSessionPlayer({ id: 'p2', cost: 10, paid: true, paidVia: 'etransfer' }),
     ], { isAdmin: true });
 
-    expect(screen.getByRole('button', { name: 'Gmail e-Transfer' })).toHaveStyle({ width: '140px' });
-    expect(screen.getByRole('button', { name: 'Balance' })).toHaveStyle({ width: '140px' });
+    const gmailButton = screen.getByRole('button', { name: 'Gmail e-Transfer' });
+    const balanceButton = screen.getByRole('button', { name: 'Balance' });
+    expect(gmailButton.closest('.settlement-button-grid')).toBeInTheDocument();
+    expect(balanceButton.closest('.settlement-button-grid')).toBeInTheDocument();
+    expect(gmailButton).toHaveClass('w-100');
+    expect(balanceButton).toHaveClass('w-100');
     const paidByButtons = screen.getAllByRole('button', { name: 'Paid by' });
     expect(paidByButtons).toHaveLength(2);
-    paidByButtons.forEach(btn => expect(btn).toHaveStyle({ width: '140px' }));
+    paidByButtons.forEach(btn => {
+      expect(btn).toHaveClass('w-100');
+      expect(btn.closest('.btn-group')).toHaveClass('w-100');
+      expect(btn.closest('.settlement-button-grid')).toBeInTheDocument();
+    });
   });
 
   it("shows an admin a player's positive balance alongside the settlement controls, but not an overdrawn (negative) one", () => {

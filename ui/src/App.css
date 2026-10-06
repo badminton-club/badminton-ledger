@@ -146,6 +146,16 @@ body {
     color: var(--color-text-secondary);
 }
 
+/* Keep all settlement actions aligned while allowing the row to reflow for
+ * narrow cards and phones. auto-fill preserves empty tracks on the final row,
+ * so its buttons do not stretch wider than the row above. */
+.settlement-button-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 4px;
+    width: 100%;
+}
+
 /* ── Bootstrap overrides ──────────────────────────────────────────────────── */
 
 .card {
