@@ -34,6 +34,10 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
   const [deleteText, setDeleteText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  // Compact trims each player row down to just cost/status (drops the balance
+  // line and "Updated at" timestamp, and tightens row padding) for sessions
+  // with a lot of players; Comfy (the default) keeps the fuller detail.
+  const [density, setDensity] = useState<'comfy' | 'compact'>('comfy');
 
   const handleDelete = async () => {
     setDeleteError('');
@@ -63,6 +67,25 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
 
   return (
     <>
+      <div className="d-flex justify-content-end mb-2">
+        <ButtonGroup size="sm">
+          <Button
+            variant={density === 'comfy' ? 'secondary' : 'outline-secondary'}
+            onClick={() => setDensity('comfy')}
+            active={density === 'comfy'}
+          >
+            Comfy
+          </Button>
+          <Button
+            variant={density === 'compact' ? 'secondary' : 'outline-secondary'}
+            onClick={() => setDensity('compact')}
+            active={density === 'compact'}
+          >
+            Compact
+          </Button>
+        </ButtonGroup>
+      </div>
+
       <h6>Session Date: {format(session.date, 'PPP')}</h6>
       {session.location && <p><strong>Location:</strong> {session.location}</p>}
       {birdiesEnabled && <p><strong>Birdies Used:</strong> {totalBirds || 'N/A'}</p>}
@@ -77,6 +100,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
             key={player.id}
             player={player}
             isAdmin={isAdmin}
+            compact={density === 'compact'}
             payerOptions={payerOptions}
             onSetSettlement={(method) => refresh(() => setPlayerSettlement(session.id, player.id, method))}
             onSetPaidBy={(payerId) => refresh(() => setPlayerPaidBy(session.id, player.id, payerId))}
@@ -144,10 +168,11 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
 }
 
 function PlayerRow({
-  player, isAdmin, payerOptions, onSetSettlement, onSetPaidBy,
+  player, isAdmin, compact, payerOptions, onSetSettlement, onSetPaidBy,
 }: {
   player:            SessionPlayer;
   isAdmin:           boolean;
+  compact:           boolean;
   payerOptions:      { id: string; name: string; balance: number }[];
   onSetSettlement:   (method: PaidVia) => void;
   onSetPaidBy:       (payerId: string) => void;
@@ -231,7 +256,7 @@ function PlayerRow({
 
   return (
     <ListGroup.Item
-      className="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2"
+      className={`d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2${compact ? ' py-1' : ''}`}
       style={{
         transition:      'background-color 0.2s',
       }}
@@ -245,7 +270,7 @@ function PlayerRow({
         {isAdmin ? (
           <div className="d-flex flex-column align-items-end gap-1">
             <span className={isSettled ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
-            {!!stored && stored.balance > 0 && (
+            {!compact && !!stored && stored.balance > 0 && (
               <div
                 className="text-end"
                 style={{
@@ -327,7 +352,7 @@ function PlayerRow({
                   );
                 })}
               </ButtonGroup>
-            {player.settledAt && isSettled && (
+            {!compact && player.settledAt && isSettled && (
               <div className="text-muted" style={{ fontSize: 10 }}>
                 Updated {format(player.settledAt.toDate(), 'MMM d, yyyy h:mm a')}
               </div>

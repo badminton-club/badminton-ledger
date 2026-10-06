@@ -1,5 +1,5 @@
 import React from 'react';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders, makePlayersState, makeClubState } from '../../../../test-utils/renderWithProviders';
 import { resetFirebaseTestState, seedClubDoc, getClubDocData } from '../../../../test-utils/firebaseTestHelpers';
@@ -151,6 +151,34 @@ describe('ExistingSessionView', () => {
     const players = [makePlayer({ id: 'p1', firstName: 'Ada', balance: 100 })];
     renderView(players, [makeSessionPlayer({ id: 'p1' })], { isAdmin: false });
     expect(screen.queryByText(/Balance: \$/)).not.toBeInTheDocument();
+  });
+
+  it('defaults to Comfy, and switching to Compact hides the balance callout/"Updated" timestamp and tightens row spacing', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer({ id: 'p1', firstName: 'Ada', balance: 100 })];
+    renderView(players, [
+      makeSessionPlayer({
+        id: 'p1', cost: 20, paid: true, paidVia: 'etransfer',
+        settledAt: { toDate: () => new Date('2026-02-16T10:00:00Z') } as never,
+      }),
+    ], { isAdmin: true });
+
+    // Comfy by default: both the balance callout and the settled-at
+    // timestamp show, and the row uses its normal (non-tightened) padding.
+    expect(screen.getByRole('button', { name: 'Comfy' })).toHaveClass('active');
+    expect(screen.getByText('Balance: $100.00')).toBeInTheDocument();
+    expect(screen.getByText(/^Updated /)).toBeInTheDocument();
+    const adaRow = screen.getByText('Ada Lovelace').closest('.list-group-item') as HTMLElement;
+    expect(adaRow).not.toHaveClass('py-1');
+
+    await user.click(screen.getByRole('button', { name: 'Compact' }));
+
+    expect(screen.getByRole('button', { name: 'Compact' })).toHaveClass('active');
+    expect(screen.queryByText('Balance: $100.00')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Updated /)).not.toBeInTheDocument();
+    expect(adaRow).toHaveClass('py-1');
+    // The cost/settlement controls themselves still show in Compact.
+    expect(within(adaRow).getByText('$20.00')).toBeInTheDocument();
   });
 
   it('warns before a Balance settlement would overdraw the player', async () => {
