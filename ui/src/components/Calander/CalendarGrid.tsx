@@ -148,31 +148,44 @@ function DayCell({
                     }}
                     style={{
                         alignSelf: "flex-start",
-                        display: "inline-flex",
-                        alignItems: "center",
+                        display: "inline-block",
                         marginTop: 4,
                         // Can't exceed the (possibly narrow, on mobile) cell's
                         // own width, so it never overflows into the
-                        // neighboring day's cell. The number alone (no icon)
-                        // comfortably fits even the narrowest mobile column —
-                        // stacking an icon above it previously still didn't
-                        // leave room for 2-digit counts and got clipped.
+                        // neighboring day's cell — wraps onto a second line
+                        // instead (cells are tall enough) rather than
+                        // truncating/hiding the hours count.
                         maxWidth: "100%",
                         boxSizing: "border-box",
-                        overflow: "hidden",
-                        whiteSpace: "nowrap",
-                        fontSize: 12,
+                        textAlign: "left",
+                        // A border (not just a fill color) and a small icon
+                        // make this read as its own clickable chip rather
+                        // than a plain label.
+                        border: "1px solid var(--color-border-success)",
+                        fontSize: 11,
                         fontWeight: 700,
-                        lineHeight: 1.2,
-                        padding: "2px 5px",
-                        border: "none",
+                        lineHeight: 1.3,
+                        padding: "2px 6px",
                         borderRadius: 6,
                         color: "var(--color-text-success)",
                         background: "var(--color-background-success)",
                         cursor: onCreditClick ? "pointer" : "default",
                     }}
                 >
-                    +{creditHoursAdded}
+                    <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        aria-hidden="true"
+                        style={{ verticalAlign: -1, marginRight: 3 }}
+                    >
+                        <g stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="1" y="4" width="22" height="16" rx="2" />
+                            <line x1="1" y1="10" x2="23" y2="10" />
+                        </g>
+                    </svg>
+                    +{creditHoursAdded} hrs
                 </button>
             )}
 
@@ -279,7 +292,11 @@ const styles: Record<string, React.CSSProperties> = {
     cell: {
         minHeight: 120,
         minWidth: 0,
-        padding: "10px 10px 14px",
+        // Horizontal padding is tighter than vertical — 7 columns on a phone
+        // leaves very little width per cell, so this is the main lever for
+        // fitting the day number and the court-credit badge's text without
+        // clipping/truncating on mobile.
+        padding: "10px 4px 14px",
         borderRight: "0.5px solid var(--color-border-tertiary)",
         borderBottom: "0.5px solid var(--color-border-tertiary)",
         display: "flex",

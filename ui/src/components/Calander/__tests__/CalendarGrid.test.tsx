@@ -154,7 +154,7 @@ describe('CalendarGrid', () => {
     const dayWithCredit = screen.getByText('5').parentElement as HTMLElement;
     const dayWithoutCredit = screen.getByText('6').parentElement as HTMLElement;
     const badge = within(dayWithCredit).getByRole('button', { name: /\+20 court credit hours added/ });
-    expect(badge).toHaveTextContent('+20');
+    expect(badge).toHaveTextContent('+20 hrs');
     expect(within(dayWithoutCredit).queryByRole('button', { name: /court credit hours added/ })).not.toBeInTheDocument();
   });
 
