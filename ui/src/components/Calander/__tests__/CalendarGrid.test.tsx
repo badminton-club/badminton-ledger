@@ -153,8 +153,10 @@ describe('CalendarGrid', () => {
 
     const dayWithCredit = screen.getByText('5').parentElement as HTMLElement;
     const dayWithoutCredit = screen.getByText('6').parentElement as HTMLElement;
-    expect(within(dayWithCredit).getByText('💳+20')).toBeInTheDocument();
-    expect(within(dayWithoutCredit).queryByText(/💳/)).not.toBeInTheDocument();
+    const badge = within(dayWithCredit).getByRole('button', { name: /\+20 court credit hours added/ });
+    expect(badge).toHaveTextContent('💳');
+    expect(badge).toHaveTextContent('+20');
+    expect(within(dayWithoutCredit).queryByRole('button', { name: /court credit hours added/ })).not.toBeInTheDocument();
   });
 
   it('calls onCreditClick with that day\'s batch ids when the court-credit badge is clicked, without also selecting the day', async () => {
@@ -174,7 +176,7 @@ describe('CalendarGrid', () => {
       />
     );
 
-    await user.click(screen.getByText('💳+20'));
+    await user.click(screen.getByRole('button', { name: /\+20 court credit hours added/ }));
 
     expect(onCreditClick).toHaveBeenCalledWith(['batch-1', 'batch-2']);
     expect(onDayClick).not.toHaveBeenCalled();

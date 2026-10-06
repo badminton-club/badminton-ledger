@@ -231,7 +231,7 @@ describe('SessionCalendar', () => {
 
     await screen.findByRole('button', { name: 'August 2026' });
     const dayWithCredit = (await screen.findByText('5')).parentElement as HTMLElement;
-    expect(within(dayWithCredit).getByText('💳+10')).toBeInTheDocument();
+    expect(within(dayWithCredit).getByRole('button', { name: /\+10 court credit hours added/ })).toBeInTheDocument();
   });
 
   it('navigates to the Credits page for that batch when the court-credit badge is clicked', async () => {
@@ -266,7 +266,7 @@ describe('SessionCalendar', () => {
     );
 
     await screen.findByRole('button', { name: 'August 2026' });
-    await user.click(await screen.findByText('💳+10'));
+    await user.click(await screen.findByRole('button', { name: /\+10 court credit hours added/ }));
 
     expect(screen.getByTestId('location')).toHaveTextContent('/credits?batchId=c1');
   });

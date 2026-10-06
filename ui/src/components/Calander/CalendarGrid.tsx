@@ -149,21 +149,25 @@ function DayCell({
                     style={{
                         alignSelf: "flex-start",
                         display: "inline-flex",
+                        // Stacks the icon above the number (rather than one
+                        // nowrap line) so the full number always stays
+                        // readable on a narrow mobile column — wrapping a
+                        // single "💳+40" line mid-number instead would be
+                        // confusing, and truncating it would hide the count.
+                        flexDirection: "column",
                         alignItems: "center",
-                        gap: 3,
+                        gap: 1,
                         marginTop: 4,
-                        // Caps it to the (possibly narrow, on mobile) cell's own
-                        // width and truncates instead of overflowing into the
+                        // Still can't exceed the (possibly narrow, on mobile)
+                        // cell's own width, so it never overflows into the
                         // neighboring day's cell.
                         maxWidth: "100%",
                         boxSizing: "border-box",
                         overflow: "hidden",
-                        whiteSpace: "nowrap",
-                        textOverflow: "ellipsis",
                         fontSize: 13,
                         fontWeight: 700,
-                        lineHeight: 1.3,
-                        padding: "3px 7px",
+                        lineHeight: 1.2,
+                        padding: "3px 6px",
                         border: "none",
                         borderRadius: 6,
                         color: "var(--color-text-success)",
@@ -171,7 +175,8 @@ function DayCell({
                         cursor: onCreditClick ? "pointer" : "default",
                     }}
                 >
-                    💳+{creditHoursAdded}
+                    <span aria-hidden="true">💳</span>
+                    <span>+{creditHoursAdded}</span>
                 </button>
             )}
 
