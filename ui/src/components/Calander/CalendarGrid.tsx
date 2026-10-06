@@ -245,7 +245,12 @@ const styles: Record<string, React.CSSProperties> = {
     },
     headerRow: {
         display: "grid",
-        gridTemplateColumns: "repeat(7, 1fr)",
+        // minmax(0, 1fr) (not just 1fr) lets columns actually shrink on narrow
+        // screens — grid's implicit minimum track size is otherwise each
+        // cell's content width (e.g. the credit badge or day number), which
+        // can add up past the viewport on mobile and clip the grid's right
+        // edge instead of letting each column compress.
+        gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
     },
     headerCell: {
         padding: "10px 0",
@@ -260,10 +265,11 @@ const styles: Record<string, React.CSSProperties> = {
     },
     weekRow: {
         display: "grid",
-        gridTemplateColumns: "repeat(7, 1fr)",
+        gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
     },
     cell: {
         minHeight: 120,
+        minWidth: 0,
         padding: "10px 10px 14px",
         borderRight: "0.5px solid var(--color-border-tertiary)",
         borderBottom: "0.5px solid var(--color-border-tertiary)",
