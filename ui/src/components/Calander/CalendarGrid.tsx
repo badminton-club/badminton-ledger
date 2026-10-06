@@ -152,6 +152,14 @@ function DayCell({
                         alignItems: "center",
                         gap: 3,
                         marginTop: 4,
+                        // Caps it to the (possibly narrow, on mobile) cell's own
+                        // width and truncates instead of overflowing into the
+                        // neighboring day's cell.
+                        maxWidth: "100%",
+                        boxSizing: "border-box",
+                        overflow: "hidden",
+                        whiteSpace: "nowrap",
+                        textOverflow: "ellipsis",
                         fontSize: 13,
                         fontWeight: 700,
                         lineHeight: 1.3,
