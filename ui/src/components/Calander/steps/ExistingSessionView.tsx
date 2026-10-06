@@ -278,12 +278,13 @@ function PlayerRow({
       <div className="d-flex flex-wrap align-items-start justify-content-end gap-2">
         {isAdmin ? (
           <div className="d-flex flex-column align-items-end gap-1">
-            {!compact && !!stored && stored.balance > 0 && (
+            {!!stored && stored.balance > 0 && (
               <div
                 className="text-end"
                 style={{
                   fontWeight: 600,
                   color: 'var(--color-text-success)',
+                  ...(compact ? { fontSize: 11 } : {}),
                 }}
               >
                 Balance: ${stored.balance.toFixed(2)}

@@ -184,7 +184,7 @@ describe('ExistingSessionView', () => {
     expect(screen.queryByText(/Balance: \$/)).not.toBeInTheDocument();
   });
 
-  it('defaults to Comfy, and switching to Compact hides the balance callout/"Updated" timestamp and tightens row spacing', async () => {
+  it('defaults to Comfy, and switching to Compact keeps the balance callout but hides the "Updated" timestamp and tightens row spacing', async () => {
     const user = userEvent.setup();
     const players = [makePlayer({ id: 'p1', firstName: 'Ada', balance: 100 })];
     renderView(players, [
@@ -205,7 +205,9 @@ describe('ExistingSessionView', () => {
     await user.click(screen.getByRole('button', { name: 'Compact' }));
 
     expect(screen.getByRole('button', { name: 'Compact' })).toHaveClass('active');
-    expect(screen.queryByText('Balance: $100.00')).not.toBeInTheDocument();
+    // The balance callout is important enough to keep even in Compact —
+    // only the "Updated" timestamp and the row's own padding shrink.
+    expect(screen.getByText('Balance: $100.00')).toBeInTheDocument();
     expect(screen.queryByText(/^Updated /)).not.toBeInTheDocument();
     expect(adaRow).toHaveClass('py-1');
     // The cost/settlement controls themselves still show in Compact.
