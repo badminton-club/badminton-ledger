@@ -109,8 +109,18 @@ describe('ExistingSessionView', () => {
     renderView(players, [makeSessionPlayer()], { isAdmin: true });
 
     const row = screen.getByText('Ada Lovelace').closest('.list-group-item') as HTMLElement;
-    expect(row).toHaveClass('flex-column', 'flex-sm-row');
+    expect(row).toHaveClass('flex-column');
     expect(screen.getByRole('button', { name: 'e-Transfer' }).closest('.btn-group')).toHaveClass('flex-wrap');
+  });
+
+  it('keeps the player name and cost on the same row, name left and cost right', () => {
+    const players = [makePlayer({ id: 'p1' })];
+    renderView(players, [makeSessionPlayer({ id: 'p1', cost: 18 })], { isAdmin: true });
+
+    const nameAndCostRow = screen.getByText('Ada Lovelace').closest('div') as HTMLElement;
+    expect(nameAndCostRow).toHaveClass('justify-content-between');
+    expect(within(nameAndCostRow).getByText('Ada Lovelace')).toBeInTheDocument();
+    expect(within(nameAndCostRow).getByText('$18.00')).toBeInTheDocument();
   });
 
   it('gives every settlement button/dropdown the same fixed width, so rows always wrap at the same spot regardless of label length (e.g. "Gmail e-Transfer" vs "Balance")', () => {

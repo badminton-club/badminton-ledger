@@ -262,20 +262,22 @@ function PlayerRow({
 
   return (
     <ListGroup.Item
-      className={`d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2${compact ? ' py-1' : ''}`}
+      className={`d-flex flex-column gap-2${compact ? ' py-1' : ''}`}
       style={{
         transition:      'background-color 0.2s',
       }}
     >
-      <span>
-        {isAdmin
-          ? <Link to={`/players?playerId=${player.id}`}>{name}</Link>
-          : name}
-      </span>
+      <div className="d-flex justify-content-between align-items-center gap-2">
+        <span>
+          {isAdmin
+            ? <Link to={`/players?playerId=${player.id}`}>{name}</Link>
+            : name}
+        </span>
+        <span className={isSettled ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
+      </div>
       <div className="d-flex flex-wrap align-items-start justify-content-end gap-2">
         {isAdmin ? (
           <div className="d-flex flex-column align-items-end gap-1">
-            <span className={isSettled ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
             {!compact && !!stored && stored.balance > 0 && (
               <div
                 className="text-end"
@@ -374,12 +376,9 @@ function PlayerRow({
             )}
           </div>
         ) : (
-          <>
-            <span className={isSettled ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
-            <Badge bg={settlement.bg} style={{ fontSize: 10, minWidth: 72 }}>
-              {settlement.label}
-            </Badge>
-          </>
+          <Badge bg={settlement.bg} style={{ fontSize: 10, minWidth: 72 }}>
+            {settlement.label}
+          </Badge>
         )}
       </div>
     </ListGroup.Item>
