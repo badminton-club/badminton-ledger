@@ -113,6 +113,27 @@ describe('ExistingSessionView', () => {
     expect(screen.getByRole('button', { name: 'e-Transfer' }).closest('.btn-group')).toHaveClass('flex-wrap');
   });
 
+  it('gives every settlement button/dropdown the same fixed width, so rows always wrap at the same spot regardless of label length (e.g. "Gmail e-Transfer" vs "Balance")', () => {
+    const players = [
+      makePlayer({ id: 'p1', firstName: 'Ada' }),
+      makePlayer({ id: 'p2', firstName: 'Bea', firstNameLower: 'bea', lastName: null, lastNameLower: null }),
+    ];
+    renderView(players, [
+      // Settled via a Gmail-sourced balance: shows the long "Gmail e-Transfer" label.
+      makeSessionPlayer({
+        id: 'p1', cost: 20, paid: true, paidVia: 'balance', settledByEtransferImportId: 'imp-1',
+      }),
+      // Settled via plain e-Transfer: every label stays short ("Balance", "e-Transfer").
+      makeSessionPlayer({ id: 'p2', cost: 10, paid: true, paidVia: 'etransfer' }),
+    ], { isAdmin: true });
+
+    expect(screen.getByRole('button', { name: 'Gmail e-Transfer' })).toHaveStyle({ width: '140px' });
+    expect(screen.getByRole('button', { name: 'Balance' })).toHaveStyle({ width: '140px' });
+    const paidByButtons = screen.getAllByRole('button', { name: 'Paid by' });
+    expect(paidByButtons).toHaveLength(2);
+    paidByButtons.forEach(btn => expect(btn).toHaveStyle({ width: '140px' }));
+  });
+
   it("shows an admin a player's positive balance alongside the settlement controls, but not an overdrawn (negative) one", () => {
     const players = [
       makePlayer({ id: 'p1', firstName: 'Ada', balance: 100 }),

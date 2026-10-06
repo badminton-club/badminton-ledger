@@ -10,6 +10,12 @@ import type { PaidVia, Session, SessionPlayer } from 'types';
 import type { RootState } from '../../../store';
 import { getSessionPlayerPaidVia, isSessionPlayerUnpaid } from '../../../utils/sessionPayment';
 
+// Every settlement button/dropdown (Unpaid, Paid by, Comp, Balance, e-Transfer)
+// uses this same fixed width — wide enough for the longest label ("Gmail
+// e-Transfer") — so a row's wrap point never shifts depending on which
+// labels happen to be showing (see PlayerRow below).
+const SETTLEMENT_BUTTON_WIDTH = 140;
+
 interface Props {
   session:         Session;
   onSessionUpdate: (id: string) => void;
@@ -297,6 +303,15 @@ function PlayerRow({
                           ? 'Automatically settled from balance funded by a Gmail e-Transfer'
                           : undefined
                       }
+                      className="text-truncate"
+                      // Fixed (not just capped) width, same as the "Paid by"
+                      // dropdown below — every button is otherwise sized to
+                      // its own label, and "Gmail e-Transfer" is much longer
+                      // than "Comp"/"Balance", so rows wrapped at a different
+                      // button depending on which labels happened to be
+                      // showing. A uniform width makes every row wrap at the
+                      // same spot regardless of label/settlement state.
+                      style={{ width: SETTLEMENT_BUTTON_WIDTH }}
                     >
                       {displayLabel}
                     </Button>
@@ -311,7 +326,7 @@ function PlayerRow({
                           variant={currentVia === 'transfer' ? 'primary' : 'outline-secondary'}
                           title="Pay this player's dues from another player's balance"
                           className="text-truncate"
-                          style={{ maxWidth: 150 }}
+                          style={{ width: SETTLEMENT_BUTTON_WIDTH }}
                         >
                           {currentVia === 'transfer' && payerName ? payerName : 'Paid by'}
                         </Dropdown.Toggle>
