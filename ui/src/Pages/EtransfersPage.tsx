@@ -16,9 +16,11 @@ import {
   deleteEtransferSenderMapping,
   setClubEtransferSearchAfterDate,
   setClubEtransferSearchWindowDays,
+  setClubEtransferIgnoreAboveAmount,
   formatPlayerName,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
   DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS,
+  DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT,
   ETRANSFER_SEARCH_WINDOW_PRESETS,
   resolveEtransferSearchAfterDate,
   type EtransferBatchPreview,
@@ -80,6 +82,15 @@ export default function EtransfersPage() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [searchMessage, setSearchMessage] = useState('');
+
+  // Newly found emails above this amount are ignored entirely — never even
+  // recorded as a pending import — as a safety net against an unusually
+  // large/unexpected transfer being picked up unattended.
+  const [ignoreAboveAmount, setIgnoreAboveAmount] = useState(DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT);
+  const [ignoreAboveAmountInput, setIgnoreAboveAmountInput] = useState(String(DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT));
+  const [savingIgnoreAbove, setSavingIgnoreAbove] = useState(false);
+  const [ignoreAboveMessage, setIgnoreAboveMessage] = useState('');
+  const [ignoreAboveError, setIgnoreAboveError] = useState('');
 
   // Always includes the presets, plus a fallback option for whatever value is
   // currently loaded/selected (e.g. a club's saved window from before the
@@ -159,6 +170,9 @@ export default function EtransfersPage() {
         setSearchWindowDays(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
         setCustomSearchDate('');
       }
+      const resolvedIgnoreAbove = club?.etransferIgnoreAboveAmount ?? DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT;
+      setIgnoreAboveAmount(resolvedIgnoreAbove);
+      setIgnoreAboveAmountInput(String(resolvedIgnoreAbove));
       setPending(pendingList);
       setHistory(historyList);
       setMappings(mappingList);
@@ -191,8 +205,12 @@ export default function EtransfersPage() {
     setSearchMessage('');
     try {
       await persistSearchSetting();
-      const { found, created, autoSettled } = await importEtransferEmails(senderAddress, searchAfterDate);
+      const { found, created, autoSettled, ignored } = await importEtransferEmails(senderAddress, searchAfterDate, ignoreAboveAmount);
       const pendingCreated = created - autoSettled;
+      const alreadyReviewed = found - ignored - created;
+      const ignoredNote = ignored > 0
+        ? ` ${ignored} ignored (over $${ignoreAboveAmount.toFixed(2)}).`
+        : '';
       setSearchMessage(
         found === 0
           ? 'No new autodeposit emails found.'
@@ -201,14 +219,39 @@ export default function EtransfersPage() {
               ? `Found ${found} email(s) — ${created} new; ${autoSettled} exact payment`
                 + `${autoSettled === 1 ? '' : 's'} automatically settled`
                 + `${pendingCreated > 0 ? ` and ${pendingCreated} added below for review` : ''}.`
-              : `Found ${found} email(s) — ${created} new, added below for review.`
-            : `Found ${found} email(s) — all already reviewed.`
+                + ignoredNote
+              : `Found ${found} email(s) — ${created} new, added below for review.${ignoredNote}`
+            : alreadyReviewed > 0
+              ? `Found ${found} email(s) — all already reviewed.${ignoredNote}`
+              : `Found ${found} email(s) — all ignored (over $${ignoreAboveAmount.toFixed(2)}).`
       );
       await load();
     } catch (err) {
       setSearchError(err instanceof Error ? err.message : 'Failed to search Gmail.');
     } finally {
       setSearching(false);
+    }
+  };
+
+  const handleSaveIgnoreAboveAmount = async () => {
+    if (!clubId) return;
+    const parsed = parseFloat(ignoreAboveAmountInput);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      setIgnoreAboveError('Enter a valid amount of $0 or more.');
+      return;
+    }
+    setIgnoreAboveError('');
+    setIgnoreAboveMessage('');
+    setSavingIgnoreAbove(true);
+    try {
+      await setClubEtransferIgnoreAboveAmount(clubId, parsed);
+      setIgnoreAboveAmount(parsed);
+      setIgnoreAboveAmountInput(parsed.toFixed(2));
+      setIgnoreAboveMessage('Saved.');
+    } catch (err) {
+      setIgnoreAboveError(err instanceof Error ? err.message : 'Failed to save the ignore-above amount.');
+    } finally {
+      setSavingIgnoreAbove(false);
     }
   };
 
@@ -491,7 +534,8 @@ export default function EtransfersPage() {
         Search Gmail for Interac e-Transfer autodeposit notifications, review the suggested player
         match and amount, then apply to credit their balance. A confidently matched transfer is
         applied automatically when its amount exactly equals all of that player's unpaid sessions;
-        everything else waits for review below.
+        everything else waits for review below. Any found email above the ignore-above amount is
+        skipped entirely — not picked up at all.
       </p>
 
       <Card className="mb-3">
@@ -544,9 +588,40 @@ export default function EtransfersPage() {
             onClick={handleSaveSearchDate}
             disabled={savingSearchDate || !searchAfterDate}
           >
-            {savingSearchDate ? <Spinner size="sm" animation="border" /> : 'Save'}
+            {savingSearchDate ? <Spinner size="sm" animation="border" /> : 'Save window'}
           </Button>
           {searchDateMessage && <span className="text-success small">{searchDateMessage}</span>}
+
+          <Form.Group controlId="etransfer-ignore-above">
+            <Form.Label className="small mb-1">Ignore amounts over</Form.Label>
+            <div className="d-flex align-items-center gap-2">
+              <span>$</span>
+              <Form.Control
+                type="number"
+                size="sm"
+                min={0}
+                step={0.01}
+                style={{ width: 100 }}
+                value={ignoreAboveAmountInput}
+                onChange={(e) => {
+                  setIgnoreAboveAmountInput(e.target.value);
+                  setIgnoreAboveMessage('');
+                  setIgnoreAboveError('');
+                }}
+                disabled={savingIgnoreAbove}
+              />
+            </div>
+          </Form.Group>
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            onClick={handleSaveIgnoreAboveAmount}
+            disabled={savingIgnoreAbove || !clubId}
+          >
+            {savingIgnoreAbove ? <Spinner size="sm" animation="border" /> : 'Save limit'}
+          </Button>
+          {ignoreAboveMessage && <span className="text-success small">{ignoreAboveMessage}</span>}
+          {ignoreAboveError && <span className="text-danger small">{ignoreAboveError}</span>}
         </Card.Body>
         {(searchMessage || searchError) && (
           <Card.Body className="pt-0">

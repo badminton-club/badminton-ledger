@@ -10,11 +10,13 @@ interface Props {
     currentDate: Date;
     sessions: Session[];
     selectedDate: Date | null;
+    creditDates?: Map<number, { hours: number; batchIds: string[] }>;
     onDayClick: (date: Date) => void;
     onExpandDay?: (date: Date) => void;
+    onCreditClick?: (batchIds: string[]) => void;
 }
 
-export default function CalendarGrid({ currentDate, sessions, selectedDate, onDayClick, onExpandDay }: Props) {
+export default function CalendarGrid({ currentDate, sessions, selectedDate, creditDates, onDayClick, onExpandDay, onCreditClick }: Props) {
     const totalDays = getTotalDaysInMonth(currentDate);
     const startDay = getFirstDayOfMonthWeekday(currentDate);
     const year = getYear(currentDate);
@@ -34,6 +36,7 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, onDa
         const allPaid =
             daySessions.length > 0 &&
             daySessions.every((s) => s.players.length > 0 && !s.players.some(isSessionPlayerUnpaid));
+        const creditInfo = creditDates?.get(+date);
 
         cells.push(
             <DayCell
@@ -43,6 +46,8 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, onDa
                 today={today}
                 selected={!!selected}
                 allPaid={allPaid}
+                creditHoursAdded={creditInfo?.hours}
+                onCreditClick={creditInfo && onCreditClick ? () => onCreditClick(creditInfo.batchIds) : undefined}
                 onClick={() => onDayClick(date)}
                 onExpand={daySessions.length > 0 && onExpandDay ? () => onExpandDay(date) : undefined}
             />,
@@ -83,16 +88,20 @@ function DayCell({
     today,
     selected,
     allPaid,
+    creditHoursAdded,
     onClick,
     onExpand,
+    onCreditClick,
 }: {
     day: number;
     sessionCount: number;
     today: boolean;
     selected: boolean;
     allPaid: boolean;
+    creditHoursAdded?: number;
     onClick: () => void;
     onExpand?: () => void;
+    onCreditClick?: () => void;
 }) {
     const [hovered, setHovered] = useState(false);
 
@@ -120,6 +129,65 @@ function DayCell({
             >
                 {day}
             </div>
+
+            {/* Court credit purchase badge — placed in normal flow right under the
+                day number (not absolutely positioned) so it has room to be large
+                enough to actually read, without overlapping the day number or the
+                multi-session count / expand shortcut in the top-right corner.
+                It's its own button (stopping propagation) so clicking it opens
+                the purchased batch on the Credits page instead of just
+                selecting the day underneath it. */}
+            {!!creditHoursAdded && (
+                <button
+                    type="button"
+                    title={`+${creditHoursAdded} court credit hr${creditHoursAdded === 1 ? "" : "s"} added — view in Credits`}
+                    aria-label={`+${creditHoursAdded} court credit hours added — view in Credits`}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onCreditClick?.();
+                    }}
+                    style={{
+                        alignSelf: "flex-start",
+                        display: "inline-block",
+                        marginTop: 4,
+                        // Can't exceed the (possibly narrow, on mobile) cell's
+                        // own width, so it never overflows into the
+                        // neighboring day's cell — wraps onto a second line
+                        // instead (cells are tall enough) rather than
+                        // truncating/hiding the hours count.
+                        maxWidth: "100%",
+                        boxSizing: "border-box",
+                        textAlign: "left",
+                        // A border (not just a fill color) and a small icon
+                        // make this read as its own clickable chip rather
+                        // than a plain label.
+                        border: "1px solid var(--color-border-success)",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        lineHeight: 1.3,
+                        padding: "2px 6px",
+                        borderRadius: 6,
+                        color: "var(--color-text-success)",
+                        background: "var(--color-background-success)",
+                        cursor: onCreditClick ? "pointer" : "default",
+                    }}
+                >
+                    <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        aria-hidden="true"
+                        style={{ verticalAlign: -1, marginRight: 3 }}
+                    >
+                        <g stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="1" y="4" width="22" height="16" rx="2" />
+                            <line x1="1" y1="10" x2="23" y2="10" />
+                        </g>
+                    </svg>
+                    +{creditHoursAdded} hrs
+                </button>
+            )}
 
             {/* Session indicator bar at bottom */}
             {sessionCount > 0 && (
@@ -199,7 +267,12 @@ const styles: Record<string, React.CSSProperties> = {
     },
     headerRow: {
         display: "grid",
-        gridTemplateColumns: "repeat(7, 1fr)",
+        // minmax(0, 1fr) (not just 1fr) lets columns actually shrink on narrow
+        // screens — grid's implicit minimum track size is otherwise each
+        // cell's content width (e.g. the credit badge or day number), which
+        // can add up past the viewport on mobile and clip the grid's right
+        // edge instead of letting each column compress.
+        gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
     },
     headerCell: {
         padding: "10px 0",
@@ -214,11 +287,16 @@ const styles: Record<string, React.CSSProperties> = {
     },
     weekRow: {
         display: "grid",
-        gridTemplateColumns: "repeat(7, 1fr)",
+        gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
     },
     cell: {
         minHeight: 120,
-        padding: "10px 10px 14px",
+        minWidth: 0,
+        // Horizontal padding is tighter than vertical — 7 columns on a phone
+        // leaves very little width per cell, so this is the main lever for
+        // fitting the day number and the court-credit badge's text without
+        // clipping/truncating on mobile.
+        padding: "10px 4px 14px",
         borderRight: "0.5px solid var(--color-border-tertiary)",
         borderBottom: "0.5px solid var(--color-border-tertiary)",
         display: "flex",

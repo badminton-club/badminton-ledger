@@ -137,4 +137,47 @@ describe('CalendarGrid', () => {
     const dayWithSession = screen.getByText('10').parentElement as HTMLElement;
     expect(within(dayWithSession).queryByRole('button', { name: 'View session details' })).not.toBeInTheDocument();
   });
+
+  it('shows a court-credit badge with the hours added on the matching day, and nowhere else', () => {
+    const creditDates = new Map([[+new Date(2026, 7, 5), { hours: 20, batchIds: ['batch-1'] }]]);
+
+    renderWithProviders(
+      <CalendarGrid
+        currentDate={new Date(2026, 7, 1)}
+        selectedDate={null}
+        onDayClick={jest.fn()}
+        sessions={[]}
+        creditDates={creditDates}
+      />
+    );
+
+    const dayWithCredit = screen.getByText('5').parentElement as HTMLElement;
+    const dayWithoutCredit = screen.getByText('6').parentElement as HTMLElement;
+    const badge = within(dayWithCredit).getByRole('button', { name: /\+20 court credit hours added/ });
+    expect(badge).toHaveTextContent('+20 hrs');
+    expect(within(dayWithoutCredit).queryByRole('button', { name: /court credit hours added/ })).not.toBeInTheDocument();
+  });
+
+  it('calls onCreditClick with that day\'s batch ids when the court-credit badge is clicked, without also selecting the day', async () => {
+    const user = userEvent.setup();
+    const onDayClick = jest.fn();
+    const onCreditClick = jest.fn();
+    const creditDates = new Map([[+new Date(2026, 7, 5), { hours: 20, batchIds: ['batch-1', 'batch-2'] }]]);
+
+    renderWithProviders(
+      <CalendarGrid
+        currentDate={new Date(2026, 7, 1)}
+        selectedDate={null}
+        onDayClick={onDayClick}
+        sessions={[]}
+        creditDates={creditDates}
+        onCreditClick={onCreditClick}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /\+20 court credit hours added/ }));
+
+    expect(onCreditClick).toHaveBeenCalledWith(['batch-1', 'batch-2']);
+    expect(onDayClick).not.toHaveBeenCalled();
+  });
 });

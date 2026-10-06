@@ -23,6 +23,7 @@ describe('AppNavBar', () => {
 
     expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/');
     expect(screen.getByRole('link', { name: 'Attendance' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Help & FAQ' })).toHaveAttribute('href', '/faq');
     expect(screen.getByRole('button', { name: 'Account' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Birdies' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Credits' })).not.toBeInTheDocument();
@@ -52,6 +53,24 @@ describe('AppNavBar', () => {
     expect(screen.queryByRole('link', { name: 'Payout' })).not.toBeInTheDocument();
   });
 
+  it('places Help & FAQ right after Settings in the admin tab order', () => {
+    renderWithProviders(<AppNavBar />, {
+      preloadedState: {
+        club: makeClubState({
+          role: 'admin',
+          currentClubId: 'club-a',
+          clubs: [{ id: 'club-a', name: 'Alpha Club', role: 'admin' }],
+        }),
+      },
+    });
+
+    const linkNames = screen.getAllByRole('link').map((el) => el.textContent);
+    const settingsIndex = linkNames.indexOf('Settings');
+    const faqIndex = linkNames.indexOf('Help & FAQ');
+    expect(settingsIndex).toBeGreaterThan(-1);
+    expect(faqIndex).toBe(settingsIndex + 1);
+  });
+
   it('hides Attendance for a non-admin member when disabled for the club', () => {
     renderWithProviders(<AppNavBar />, {
       preloadedState: {
@@ -64,6 +83,15 @@ describe('AppNavBar', () => {
       },
     });
     expect(screen.queryByRole('link', { name: 'Attendance' })).not.toBeInTheDocument();
+  });
+
+  it('hides Help & FAQ when no club is selected yet', () => {
+    renderWithProviders(<AppNavBar />, {
+      preloadedState: {
+        club: makeClubState({ currentClubId: null, clubs: [] }),
+      },
+    });
+    expect(screen.queryByRole('link', { name: 'Help & FAQ' })).not.toBeInTheDocument();
   });
 
   it('hides Attendance for an admin when disabled, without a leftover duplicate in the admin tab list', () => {

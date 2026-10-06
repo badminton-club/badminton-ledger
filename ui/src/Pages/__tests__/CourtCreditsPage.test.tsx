@@ -1,6 +1,7 @@
 import React from 'react';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useLocation } from 'react-router-dom';
 import { renderWithProviders } from '../../test-utils/renderWithProviders';
 import {
   getClubDocData,
@@ -31,8 +32,8 @@ function adjustmentDocIds() {
     .map(path => path.split('/').pop()!);
 }
 
-function renderPage() {
-  return renderWithProviders(<CourtCreditsPage />, { route: '/credits' });
+function renderPage(route = '/credits') {
+  return renderWithProviders(<CourtCreditsPage />, { route });
 }
 
 describe('CourtCreditsPage', () => {
@@ -105,6 +106,47 @@ describe('CourtCreditsPage', () => {
     expect(screen.getByText('Used: 2 hrs').closest('tr')).toHaveClass('inventory-history-session');
     expect(screen.getByText(/Reason: Manual correction/).closest('tr')).toHaveClass('inventory-history-adjustment');
     expect(screen.getByRole('link', { name: 'View on calendar' })).toHaveAttribute('href', '/?date=2026-03-03');
+  });
+
+  it('expands the matching batch from a ?batchId= deep link (e.g. from the calendar\'s court-credit badge) and clears the param', async () => {
+    seedClubDoc('courtCredits', 'older', {
+      name: 'Fall block',
+      totalCost: 120,
+      costPerHour: 15,
+      hoursPurchased: 8,
+      remainingHours: 8,
+      purchaserName: 'Alex',
+      purchaseDate: ts('2026-01-12T12:00:00Z'),
+      createdAt: ts('2026-01-12T12:00:00Z'),
+    });
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Richmond block',
+      totalCost: 180,
+      costPerHour: 20,
+      hoursPurchased: 9,
+      remainingHours: 4.5,
+      purchaserName: 'Pat',
+      purchaseDate: ts('2026-02-18T12:00:00Z'),
+      createdAt: ts('2026-02-18T12:00:00Z'),
+    });
+
+    function LocationProbe() {
+      const location = useLocation();
+      return <div data-testid="location">{location.pathname}{location.search}</div>;
+    }
+    renderWithProviders(
+      <>
+        <CourtCreditsPage />
+        <LocationProbe />
+      </>,
+      { route: '/credits?batchId=c1' }
+    );
+
+    // The batch's own accordion content (only visible once expanded) shows up
+    // without any click, and the deep-link param is consumed from the URL.
+    expect(await screen.findByText((_, node) => node?.textContent === 'Remaining Hours: 4.5')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/credits'));
+    expect(screen.getByTestId('location')).not.toHaveTextContent('batchId');
   });
 
   it('reverses a manual adjustment\'s own stock change when reconstructing "Remaining" for older history rows', async () => {

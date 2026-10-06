@@ -34,6 +34,10 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
   const [deleteText, setDeleteText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  // Compact trims each player row down to just cost/status (drops the balance
+  // line and "Updated at" timestamp, and tightens row padding) for sessions
+  // with a lot of players; Comfy (the default) keeps the fuller detail.
+  const [density, setDensity] = useState<'comfy' | 'compact'>('comfy');
 
   const handleDelete = async () => {
     setDeleteError('');
@@ -63,6 +67,25 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
 
   return (
     <>
+      <div className="d-flex justify-content-end mb-2">
+        <ButtonGroup size="sm">
+          <Button
+            variant={density === 'comfy' ? 'secondary' : 'outline-secondary'}
+            onClick={() => setDensity('comfy')}
+            active={density === 'comfy'}
+          >
+            Comfy
+          </Button>
+          <Button
+            variant={density === 'compact' ? 'secondary' : 'outline-secondary'}
+            onClick={() => setDensity('compact')}
+            active={density === 'compact'}
+          >
+            Compact
+          </Button>
+        </ButtonGroup>
+      </div>
+
       <h6>Session Date: {format(session.date, 'PPP')}</h6>
       {session.location && <p><strong>Location:</strong> {session.location}</p>}
       {birdiesEnabled && <p><strong>Birdies Used:</strong> {totalBirds || 'N/A'}</p>}
@@ -77,6 +100,7 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
             key={player.id}
             player={player}
             isAdmin={isAdmin}
+            compact={density === 'compact'}
             payerOptions={payerOptions}
             onSetSettlement={(method) => refresh(() => setPlayerSettlement(session.id, player.id, method))}
             onSetPaidBy={(payerId) => refresh(() => setPlayerPaidBy(session.id, player.id, payerId))}
@@ -144,10 +168,11 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
 }
 
 function PlayerRow({
-  player, isAdmin, payerOptions, onSetSettlement, onSetPaidBy,
+  player, isAdmin, compact, payerOptions, onSetSettlement, onSetPaidBy,
 }: {
   player:            SessionPlayer;
   isAdmin:           boolean;
+  compact:           boolean;
   payerOptions:      { id: string; name: string; balance: number }[];
   onSetSettlement:   (method: PaidVia) => void;
   onSetPaidBy:       (payerId: string) => void;
@@ -231,21 +256,110 @@ function PlayerRow({
 
   return (
     <ListGroup.Item
-      className="d-flex justify-content-between align-items-center"
+      className={`d-flex flex-column gap-2${compact ? ' py-1' : ''}`}
       style={{
         transition:      'background-color 0.2s',
       }}
     >
-      <span>
-        {isAdmin
-          ? <Link to={`/players?playerId=${player.id}`}>{name}</Link>
-          : name}
-      </span>
-      <div className="d-flex align-items-center gap-2">
+      <div className="d-flex justify-content-between align-items-center gap-2">
+        <span>
+          {isAdmin
+            ? <Link to={`/players?playerId=${player.id}`}>{name}</Link>
+            : name}
+        </span>
         <span className={isSettled ? 'text-muted' : ''}>${player.cost.toFixed(2)}</span>
+      </div>
+      <div className="d-flex flex-wrap align-items-start justify-content-end gap-2">
         {isAdmin ? (
-          <div className="d-flex flex-column align-items-end">
-            <ButtonGroup size="sm">
+          <div className="d-flex flex-column align-items-end gap-1 w-100">
+            {!!stored && stored.balance > 0 && (
+              <div
+                className="text-end"
+                style={{
+                  fontWeight: 600,
+                  color: 'var(--color-text-success)',
+                  ...(compact ? { fontSize: 11 } : {}),
+                }}
+              >
+                Balance: ${stored.balance.toFixed(2)}
+              </div>
+            )}
+            {compact ? (
+              // Same buttons as Comfy, just sized down and kept to one
+              // scrollable line (instead of fixed-width + wrapping across
+              // multiple lines) for a denser view.
+              <div style={{ maxWidth: '100%', overflowX: 'auto' }}>
+                <ButtonGroup size="sm" className="flex-nowrap justify-content-end">
+                  {options.map(o => {
+                    const isActive = currentVia === o.method;
+                    const isGmailBalance = o.method === 'balance' && isActive && settledViaEtransferBalance;
+                    const displayLabel = isGmailBalance ? 'Gmail' : o.label;
+                    return (
+                    <React.Fragment key={o.label}>
+                      <Button
+                        variant={isActive ? o.activeVariant : 'outline-secondary'}
+                        onClick={() => handleSelect(o.method)}
+                        title={isGmailBalance ? 'Automatically settled from balance funded by a Gmail e-Transfer' : undefined}
+                        className="text-truncate"
+                        style={{ fontSize: 11, padding: '2px 6px' }}
+                      >
+                        {displayLabel}
+                      </Button>
+                      {o.method === null && otherPlayers.length > 0 && (
+                        <Dropdown
+                          as={ButtonGroup}
+                          align="end"
+                          onToggle={(isOpen) => { if (!isOpen) setPayerSearch(''); }}
+                        >
+                          <Dropdown.Toggle
+                            size="sm"
+                            variant={currentVia === 'transfer' ? 'primary' : 'outline-secondary'}
+                            title="Pay this player's dues from another player's balance"
+                            className="text-truncate"
+                            style={{ fontSize: 11, padding: '2px 6px', maxWidth: 90 }}
+                          >
+                            {currentVia === 'transfer' && payerName ? payerName : 'Paid by'}
+                          </Dropdown.Toggle>
+                          <Dropdown.Menu style={{ maxHeight: 360, overflowY: 'auto' }}>
+                            <Dropdown.Header>Pay from another's balance</Dropdown.Header>
+                            <div className="px-2 pb-2">
+                              <Form.Control
+                                size="sm"
+                                autoFocus
+                                placeholder="Search players…"
+                                value={payerSearch}
+                                onChange={(e) => setPayerSearch(e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => e.stopPropagation()}
+                              />
+                            </div>
+                            {filteredPayers.length === 0 ? (
+                              <Dropdown.ItemText className="text-muted small px-3">
+                                No players found.
+                              </Dropdown.ItemText>
+                            ) : (
+                              filteredPayers.map(op => (
+                                <Dropdown.Item
+                                  key={op.id}
+                                  active={currentVia === 'transfer' && player.paidBy === op.id}
+                                  onClick={() => handlePaidBy(op.id)}
+                                  className="d-flex justify-content-between align-items-center gap-3"
+                                >
+                                  <span>{op.name}</span>
+                                  <span className="text-muted small">${op.balance.toFixed(2)}</span>
+                                </Dropdown.Item>
+                              ))
+                            )}
+                          </Dropdown.Menu>
+                        </Dropdown>
+                      )}
+                    </React.Fragment>
+                    );
+                  })}
+                </ButtonGroup>
+              </div>
+            ) : (
+            <div className="settlement-button-grid">
                 {options.map(o => {
                   const isActive = currentVia === o.method;
                   const displayLabel = o.method === 'balance' && isActive && settledViaEtransferBalance
@@ -254,6 +368,7 @@ function PlayerRow({
                   return (
                   <React.Fragment key={o.label}>
                     <Button
+                      size="sm"
                       variant={isActive ? o.activeVariant : 'outline-secondary'}
                       onClick={() => handleSelect(o.method)}
                       title={
@@ -261,6 +376,7 @@ function PlayerRow({
                           ? 'Automatically settled from balance funded by a Gmail e-Transfer'
                           : undefined
                       }
+                      className="text-truncate w-100"
                     >
                       {displayLabel}
                     </Button>
@@ -268,14 +384,14 @@ function PlayerRow({
                       <Dropdown
                         as={ButtonGroup}
                         align="end"
+                        className="w-100"
                         onToggle={(isOpen) => { if (!isOpen) setPayerSearch(''); }}
                       >
                         <Dropdown.Toggle
                           size="sm"
                           variant={currentVia === 'transfer' ? 'primary' : 'outline-secondary'}
                           title="Pay this player's dues from another player's balance"
-                          className="text-truncate"
-                          style={{ maxWidth: 150 }}
+                          className="text-truncate w-100"
                         >
                           {currentVia === 'transfer' && payerName ? payerName : 'Paid by'}
                         </Dropdown.Toggle>
@@ -315,8 +431,9 @@ function PlayerRow({
                   </React.Fragment>
                   );
                 })}
-              </ButtonGroup>
-            {player.settledAt && isSettled && (
+              </div>
+            )}
+            {!compact && player.settledAt && isSettled && (
               <div className="text-muted" style={{ fontSize: 10 }}>
                 Updated {format(player.settledAt.toDate(), 'MMM d, yyyy h:mm a')}
               </div>

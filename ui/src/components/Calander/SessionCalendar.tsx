@@ -1,27 +1,37 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Button, ButtonGroup, Spinner } from "react-bootstrap";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { getMonth, getYear, lastDayOfMonth } from "date-fns";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 
 import { useAppDispatch, useAppSelector } from "../../hooks";
 import { selectModalMode, setMode } from "../../features/SessionModal/sessionModalSlice";
 import { selectCurrentClubId, selectIsClubAdmin } from "../../features/club/clubSlice";
 import { fetchSessions, fetchSessionById, addSession, editSession, deleteSession } from "../../services/firebase";
+import { fetchCourtCredits } from "../../services/firebase/inventory";
 import { getMonthYear, getNextMonth, getPrevMonth } from "../../utils/dateUtils";
 import type { Session } from "../../types";
 import type { NewSessionData } from "../../services/firebase/sessions";
 
 import CalendarGrid from "./CalendarGrid";
 import SessionModal from "./SessionModal";
-import SessionQuickView from "./SessionQuickView";
 
-export default function SessionCalendar({ onSessionsChanged }: { onSessionsChanged?: () => void }) {
+interface Props {
+    onSessionsChanged?: () => void;
+    onDaySelected?: (date: Date) => void;
+    // Lets a parent (e.g. the homepage paging through its own "Latest/Previous
+    // Session" card) highlight a date here without opening any modal — unlike
+    // the ?date= deep link, which is for actually opening a session/add flow.
+    highlightDate?: Date | null;
+}
+
+export default function SessionCalendar({ onSessionsChanged, onDaySelected, highlightDate }: Props) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [clickedDate, setClickedDate] = useState<Date | null>(null);
     const [sessions, setSessions] = useState<Session[]>([]);
+    const [creditDates, setCreditDates] = useState<Map<number, { hours: number; batchIds: string[] }>>(new Map());
     const [modalSession, setModalSession] = useState<Session | undefined>();
     const [showModal, setShowModal] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
@@ -29,12 +39,21 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
     const currentClubId = useAppSelector(selectCurrentClubId);
     const isAdmin = useAppSelector(selectIsClubAdmin);
     const dispatch = useAppDispatch();
+    const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
 
-    const selectedSessions = useMemo(
-        () => (selectedDate ? sessions.filter((s) => +s.date === +selectedDate) : []),
-        [selectedDate, sessions],
-    );
+    // Jumps to (and highlights) whatever date the parent reports, e.g. paging
+    // the homepage's Latest/Previous Session card — guarded so it's a no-op
+    // once already showing that month/day, rather than fighting a user's own
+    // in-progress month navigation or day selection every render.
+    useEffect(() => {
+        if (!highlightDate) return;
+        setSelectedDate((prev) => (prev && +prev === +highlightDate ? prev : highlightDate));
+        setCurrentDate((prev) => (
+            getYear(prev) === getYear(highlightDate) && getMonth(prev) === getMonth(highlightDate)
+                ? prev : highlightDate
+        ));
+    }, [highlightDate]);
 
     const loadMonth = useCallback(async () => {
         if (!currentClubId) return;
@@ -56,16 +75,76 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
         loadMonth();
     }, [loadMonth]);
 
-    // Deep link: /?date=YYYY-MM-DD opens the calendar on that month and selects the day.
+    // Shows a small badge on any day in the visible month that a court credit
+    // batch was purchased on, so admins/members can see at a glance when
+    // credits were topped up without opening the Credits tab — clicking it
+    // jumps straight to that batch there (see handleCreditClick).
+    const loadCourtCreditDates = useCallback(async () => {
+        if (!currentClubId) return;
+        try {
+            const batches = await fetchCourtCredits();
+            const monthStart = new Date(getYear(currentDate), getMonth(currentDate), 1);
+            const monthEnd = lastDayOfMonth(currentDate);
+            const byDay = new Map<number, { hours: number; batchIds: string[] }>();
+            batches.forEach((batch) => {
+                if (batch.purchaseDate < monthStart || batch.purchaseDate > monthEnd) return;
+                const day = new Date(
+                    batch.purchaseDate.getFullYear(),
+                    batch.purchaseDate.getMonth(),
+                    batch.purchaseDate.getDate(),
+                ).getTime();
+                const existing = byDay.get(day);
+                byDay.set(day, {
+                    hours: (existing?.hours ?? 0) + batch.hoursPurchased,
+                    batchIds: [...(existing?.batchIds ?? []), batch.id],
+                });
+            });
+            setCreditDates(byDay);
+        } catch (err) {
+            console.error("Failed to load court credit purchase dates:", err);
+        }
+    }, [currentDate, currentClubId]);
+
+    // Deep-links into the Credits page (?batchId=...), which expands and
+    // scrolls to that batch — same pattern as this calendar's own ?date=
+    // deep link. When more than one batch was purchased the same day, this
+    // just opens the first one rather than trying to show several at once.
+    const handleCreditClick = (batchIds: string[]) => {
+        if (batchIds.length === 0) return;
+        navigate(`/credits?batchId=${batchIds[0]}`);
+    };
+
+    useEffect(() => {
+        loadCourtCreditDates();
+    }, [loadCourtCreditDates]);
+
+    // Deep link: /?date=YYYY-MM-DD opens the calendar on that month, selects
+    // the day, and opens the full session-details popup directly for that
+    // day (via its own narrow fetch, so it doesn't race the month-level
+    // `sessions` load below) — instead of just selecting the day and leaving
+    // the user to find it via the Latest Session card alongside the calendar.
     useEffect(() => {
         const dateParam = searchParams.get("date");
         if (!dateParam) return;
         const [y, m, d] = dateParam.split("-").map(Number);
         if (!y || !m || !d) return;
-        setCurrentDate(new Date(y, m - 1, d));
-        setSelectedDate(new Date(y, m - 1, d));
+        // "new=1" (set by e.g. the homepage's "+ Add Session" button) opens
+        // the add-session flow directly for an empty day, instead of just
+        // selecting it and leaving an admin to click "+ Add Session" again.
+        const wantsNew = searchParams.get("new") === "1";
+        const target = new Date(y, m - 1, d);
+        setCurrentDate(target);
+        setSelectedDate(target);
         searchParams.delete("date");
+        searchParams.delete("new");
         setSearchParams(searchParams, { replace: true });
+
+        fetchSessions({ startDate: target, endDate: target })
+            .then((daySessions) => {
+                if (daySessions.length > 0) handleOpenModal(daySessions[0], target);
+                else if (wantsNew && isAdmin) openAddSession(target);
+            })
+            .catch((err) => console.error("Failed to open deep-linked session:", err));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchParams]);
 
@@ -78,6 +157,7 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
 
     const handleDayClick = (date: Date) => {
         setSelectedDate(date);
+        onDaySelected?.(date);
         const hasSession = sessions.some((session) => +session.date === +date);
         // Only admins can create sessions — clicking an empty day should just
         // select it (so members can see "no session" state), not launch the
@@ -94,18 +174,14 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
         setShowModal(true);
     };
 
-    const handleAddSession = () => {
-        if (!selectedDate || !isAdmin) return;
-        openAddSession(selectedDate);
-    };
-
     // Calendar-grid shortcut: jump straight to the "View details" modal for a
-    // day's session without first selecting it in the quick-view panel. Only
-    // wired up for days that actually have a session (see CalendarGrid).
+    // day's session without first selecting it. Only wired up for days that
+    // actually have a session (see CalendarGrid).
     const handleExpandDay = (date: Date) => {
         const daySessions = sessions.filter((s) => +s.date === +date);
         if (daySessions.length === 0) return;
         setSelectedDate(date);
+        onDaySelected?.(date);
         handleOpenModal(daySessions[0], date);
     };
 
@@ -141,10 +217,9 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
     };
 
     // Navigating months should deselect whatever day was picked in the
-    // previous month — otherwise a stale selectedDate lingers (invisible in
-    // the newly displayed grid) and "+ Add Session" in the quick-view panel
-    // would silently create a session back in the month the user navigated
-    // away from, instead of the month currently on screen.
+    // previous month — otherwise a stale selection lingers highlighted in
+    // the newly displayed grid even though it belongs to the month just
+    // navigated away from.
     const goToMonth = (nextDate: Date) => {
         setCurrentDate(nextDate);
         setSelectedDate(null);
@@ -196,24 +271,11 @@ export default function SessionCalendar({ onSessionsChanged }: { onSessionsChang
                         currentDate={currentDate}
                         sessions={sessions}
                         selectedDate={selectedDate}
+                        creditDates={creditDates}
                         onDayClick={handleDayClick}
                         onExpandDay={handleExpandDay}
+                        onCreditClick={handleCreditClick}
                     />
-                }
-            </div>
-
-            {/* ── Quick view panel ─────────────────────────────────────────── */}
-            <div style={styles.quickViewPanel}>
-                {selectedDate ?
-                    <SessionQuickView
-                        date={selectedDate}
-                        sessions={selectedSessions}
-                        onAddSession={handleAddSession}
-                        onOpenModal={handleOpenModal}
-                    />
-                :   <div style={styles.quickViewEmpty}>
-                        <p style={styles.quickViewEmptyText}>Select a day to see session details</p>
-                    </div>
                 }
             </div>
 
@@ -237,13 +299,16 @@ const styles: Record<string, React.CSSProperties> = {
         flexWrap: "wrap",
         gap: 16,
         width: "100%",
-        paddingBottom: 40, 
     },
 
-    // Calendar panel — its own card with header + grid inside
+    // Calendar panel — its own card with header + grid inside. No minWidth —
+    // this is the only child here now (the side panel that used to sit next
+    // to it is gone), and a hard floor risked overflowing the narrowest phone
+    // screens when this sits inside a homepage column that's already
+    // narrower than that floor.
     calendarPanel: {
         flex: 1,
-        minWidth: 300,
+        minWidth: 0,
         border: "0.5px solid var(--color-border-tertiary)",
         borderRadius: 12,
         overflow: "hidden",
@@ -263,33 +328,5 @@ const styles: Record<string, React.CSSProperties> = {
         alignItems: "center",
         justifyContent: "center",
         minHeight: 500,
-    },
-
-    // Quick view — separate card, no header
-    quickViewPanel: {
-        width: 300,
-        flexShrink: 0,
-        border: "0.5px solid var(--color-border-tertiary)",
-        borderRadius: 12,
-        overflow: "hidden",
-        background: "var(--color-background-primary)",
-        alignSelf: "flex-start", // don't stretch to calendar height
-        position: "sticky",
-        top: 20,
-    },
-
-    quickViewEmpty: {
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 40,
-        minHeight: 200,
-    },
-
-    quickViewEmptyText: {
-        fontSize: 13,
-        color: "var(--color-text-tertiary)",
-        textAlign: "center",
-        margin: 0,
     },
 };

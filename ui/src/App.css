@@ -111,7 +111,6 @@ body {
     border-radius: var(--border-radius-lg);
     padding: 20px;
     width: 100%;
-    max-width: 500px;
     /* Fills the full height of its Bootstrap column (which the Row's default
      * flex `align-items: stretch` already sizes to match the taller sibling
      * card), so the shorter card visually stretches instead of leaving a gap. */
@@ -124,38 +123,6 @@ body {
     font-size: 22px;
     font-weight: 500;
     color: var(--color-text-primary);
-}
-
-.session-date {
-    font-size: 14px;
-    color: var(--color-text-secondary);
-}
-
-.session-details {
-    margin-top: 8px;
-}
-
-.session-info {
-    font-size: 16px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-    margin-bottom: 8px;
-}
-
-.unpaid-title {
-    font-size: 16px;
-    font-weight: 500;
-    color: var(--color-text-danger);
-}
-
-.unpaid-player {
-    font-size: 14px;
-    color: var(--color-text-primary);
-}
-
-.no-unpaid {
-    font-size: 14px;
-    color: var(--color-text-secondary);
 }
 
 .player-balance {
@@ -177,6 +144,16 @@ body {
 .no-players {
     font-size: 14px;
     color: var(--color-text-secondary);
+}
+
+/* Keep all settlement actions aligned while allowing the row to reflow for
+ * narrow cards and phones. auto-fill preserves empty tracks on the final row,
+ * so its buttons do not stretch wider than the row above. */
+.settlement-button-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 4px;
+    width: 100%;
 }
 
 /* ── Bootstrap overrides ──────────────────────────────────────────────────── */
@@ -321,4 +298,19 @@ body {
 
 .calendar-day.has-session {
     background-color: var(--color-background-secondary);
+}
+
+/* ── Mobile: claim back the horizontal space Bootstrap's default gutters eat
+ * into on narrow phones (container/row padding + card padding add up to a
+ * visible chunk of width on a ~375-390px screen) — shrinks them so more of
+ * the actual content fits. ── */
+@media (max-width: 576px) {
+    .container,
+    .row {
+        --bs-gutter-x: 0.5rem;
+    }
+
+    .session-card {
+        padding: 14px;
+    }
 }

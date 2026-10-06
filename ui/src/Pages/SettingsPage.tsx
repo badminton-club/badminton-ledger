@@ -12,7 +12,7 @@ import {
   type DriveBackupFile,
 } from '../services/firebase/drive';
 import { encryptBackupPayload, decryptBackupPayload, isEncryptedBackupPayload } from '../services/backupCrypto';
-import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, createClubInvitation, fetchClubInvitations, deleteClubInvitation, setClubTabEnabled, setClubDefaultCourtCount, deleteClub, fetchUserClubs, fetchClub, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, updatePlayerProfile } from '../services/firebase';
+import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, createClubInvitation, fetchClubInvitations, deleteClubInvitation, setClubTabEnabled, setClubDefaultCourtCount, setClubEtransferSearchWindowDays, setClubEtransferIgnoreAboveAmount, DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS, DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT, ETRANSFER_SEARCH_WINDOW_PRESETS, deleteClub, fetchUserClubs, fetchClub, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, fetchSuggestions, deleteSuggestion, updatePlayerProfile } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
@@ -26,7 +26,7 @@ import {
   setCurrentClub,
 } from '../features/club/clubSlice';
 import { TOGGLEABLE_TABS } from '../features/club/tabs';
-import type { ClubMember, ClubInvitation, ClubRole, LinkRequest, ProfileEditRequest, Player } from '../types';
+import type { ClubMember, ClubInvitation, ClubRole, LinkRequest, ProfileEditRequest, Suggestion, Player } from '../types';
 
 const CONFIRM_PHRASE = 'CLEAR ALL DATA';
 
@@ -86,6 +86,19 @@ export default function SettingsPage() {
   const [defaultCourtsError, setDefaultCourtsError] = useState('');
   const [defaultCourtsMessage, setDefaultCourtsMessage] = useState('');
 
+  // Defaults for the e-Transfer Gmail import — same underlying club fields
+  // (and save functions) as the e-Transfers page itself, so editing either
+  // place keeps the other in sync.
+  const [etransferDefaultsLoading, setEtransferDefaultsLoading] = useState(false);
+  const [etransferSearchWindowDays, setEtransferSearchWindowDays] = useState(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
+  const [savingSearchWindow, setSavingSearchWindow] = useState(false);
+  const [searchWindowError, setSearchWindowError] = useState('');
+  const [searchWindowMessage, setSearchWindowMessage] = useState('');
+  const [ignoreAboveAmountInput, setIgnoreAboveAmountInput] = useState(String(DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT));
+  const [savingIgnoreAbove, setSavingIgnoreAbove] = useState(false);
+  const [ignoreAboveError, setIgnoreAboveError] = useState('');
+  const [ignoreAboveMessage, setIgnoreAboveMessage] = useState('');
+
   const [requests, setRequests] = useState<LinkRequest[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [requestsError, setRequestsError] = useState('');
@@ -96,6 +109,11 @@ export default function SettingsPage() {
   const [editRequestsLoading, setEditRequestsLoading] = useState(false);
   const [editRequestsError, setEditRequestsError] = useState('');
   const [processingEditReq, setProcessingEditReq] = useState<string | null>(null);
+
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState('');
+  const [processingSuggestionId, setProcessingSuggestionId] = useState<string | null>(null);
 
   const [deleteClubText, setDeleteClubText] = useState('');
   const [deletingClub, setDeletingClub] = useState(false);
@@ -135,20 +153,87 @@ export default function SettingsPage() {
     setDefaultCourtsLoading(true);
     setDefaultCourtsError('');
     setDefaultCourtsMessage('');
+    setEtransferDefaultsLoading(true);
+    setSearchWindowError('');
+    setSearchWindowMessage('');
+    setIgnoreAboveError('');
+    setIgnoreAboveMessage('');
     fetchClub(clubId)
       .then((club) => {
-        if (!cancelled) setDefaultCourtCount(String(club?.defaultCourtCount ?? 4));
+        if (cancelled) return;
+        setDefaultCourtCount(String(club?.defaultCourtCount ?? 4));
+        setEtransferSearchWindowDays(club?.etransferSearchWindowDays ?? DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
+        const resolvedIgnoreAbove = club?.etransferIgnoreAboveAmount ?? DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT;
+        setIgnoreAboveAmountInput(String(resolvedIgnoreAbove));
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setDefaultCourtsError(err instanceof Error ? err.message : 'Failed to load session defaults.');
+          const message = err instanceof Error ? err.message : 'Failed to load session defaults.';
+          setDefaultCourtsError(message);
+          setSearchWindowError(message);
         }
       })
       .finally(() => {
-        if (!cancelled) setDefaultCourtsLoading(false);
+        if (!cancelled) {
+          setDefaultCourtsLoading(false);
+          setEtransferDefaultsLoading(false);
+        }
       });
     return () => { cancelled = true; };
   }, [isAdmin, clubId]);
+
+  // Always includes the presets, plus a fallback option for whatever value is
+  // currently loaded/selected (e.g. a club's saved window from before the
+  // preset list changed) — so the <select> never silently mismatches the
+  // real underlying state. Mirrors the same logic on the e-Transfers page.
+  const searchWindowOptions = useMemo(() => {
+    const presetDays = new Set(ETRANSFER_SEARCH_WINDOW_PRESETS.map((preset) => preset.days));
+    const options = ETRANSFER_SEARCH_WINDOW_PRESETS.map((preset) => ({
+      days: preset.days,
+      label: `${preset.label} before today`,
+    }));
+    if (!presetDays.has(etransferSearchWindowDays)) {
+      options.push({ days: etransferSearchWindowDays, label: `${etransferSearchWindowDays} days before today` });
+    }
+    return options;
+  }, [etransferSearchWindowDays]);
+
+  const handleSaveSearchWindow = async () => {
+    if (!clubId) return;
+    setSavingSearchWindow(true);
+    setSearchWindowError('');
+    setSearchWindowMessage('');
+    try {
+      await setClubEtransferSearchWindowDays(clubId, etransferSearchWindowDays);
+      setSearchWindowMessage('Saved.');
+    } catch (err) {
+      setSearchWindowError(err instanceof Error ? err.message : 'Failed to save the search window.');
+    } finally {
+      setSavingSearchWindow(false);
+    }
+  };
+
+  const handleSaveIgnoreAboveAmount = async () => {
+    if (!clubId) return;
+    const parsed = parseFloat(ignoreAboveAmountInput);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      setIgnoreAboveError('Enter a valid amount of $0 or more.');
+      setIgnoreAboveMessage('');
+      return;
+    }
+    setSavingIgnoreAbove(true);
+    setIgnoreAboveError('');
+    setIgnoreAboveMessage('');
+    try {
+      await setClubEtransferIgnoreAboveAmount(clubId, parsed);
+      setIgnoreAboveAmountInput(parsed.toFixed(2));
+      setIgnoreAboveMessage('Saved.');
+    } catch (err) {
+      setIgnoreAboveError(err instanceof Error ? err.message : 'Failed to save the ignore-above amount.');
+    } finally {
+      setSavingIgnoreAbove(false);
+    }
+  };
 
   const handleCreateInvitation = async () => {
     if (!clubId || !uid) return;
@@ -382,6 +467,34 @@ export default function SettingsPage() {
       setEditRequestsError(err instanceof Error ? err.message : 'Failed to dismiss request.');
     } finally {
       setProcessingEditReq(null);
+    }
+  };
+
+  const loadSuggestions = useCallback(async () => {
+    if (!clubId) { setSuggestions([]); return; }
+    setSuggestionsLoading(true);
+    setSuggestionsError('');
+    try {
+      setSuggestions(await fetchSuggestions(clubId));
+    } catch (err) {
+      setSuggestionsError(err instanceof Error ? err.message : 'Failed to load suggestions.');
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  }, [clubId]);
+
+  useEffect(() => { if (isAdmin && clubId) loadSuggestions(); }, [isAdmin, clubId, loadSuggestions]);
+
+  const handleDismissSuggestion = async (id: string) => {
+    if (!clubId) return;
+    setProcessingSuggestionId(id);
+    try {
+      await deleteSuggestion(clubId, id);
+      await loadSuggestions();
+    } catch (err) {
+      setSuggestionsError(err instanceof Error ? err.message : 'Failed to dismiss suggestion.');
+    } finally {
+      setProcessingSuggestionId(null);
     }
   };
 
@@ -656,6 +769,75 @@ export default function SettingsPage() {
       </Card>
 
       <Card className="mt-3">
+        <Card.Header>e-Transfer import defaults</Card.Header>
+        <Card.Body>
+          <Card.Text className="text-muted">
+            Defaults used by the Gmail e-Transfer import (e-Transfers tab). Changing these here or
+            there updates the same club setting either way.
+          </Card.Text>
+          <div className="d-flex flex-wrap align-items-end gap-3">
+            <Form.Group controlId="settings-etransfer-search-window">
+              <Form.Label className="small mb-1">Search window</Form.Label>
+              <Form.Select
+                size="sm"
+                value={String(etransferSearchWindowDays)}
+                onChange={(e) => {
+                  setEtransferSearchWindowDays(Number(e.target.value));
+                  setSearchWindowMessage('');
+                }}
+                disabled={etransferDefaultsLoading || savingSearchWindow || !clubId}
+              >
+                {searchWindowOptions.map((preset) => (
+                  <option key={preset.days} value={preset.days}>{preset.label}</option>
+                ))}
+              </Form.Select>
+            </Form.Group>
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              onClick={handleSaveSearchWindow}
+              disabled={etransferDefaultsLoading || savingSearchWindow || !clubId}
+            >
+              {savingSearchWindow ? <Spinner size="sm" animation="border" /> : 'Save window'}
+            </Button>
+            {searchWindowMessage && <span className="text-success small">{searchWindowMessage}</span>}
+
+            <Form.Group controlId="settings-etransfer-ignore-above">
+              <Form.Label className="small mb-1">Ignore amounts over</Form.Label>
+              <div className="d-flex align-items-center gap-2">
+                <span>$</span>
+                <Form.Control
+                  type="number"
+                  size="sm"
+                  min={0}
+                  step={0.01}
+                  style={{ width: 100 }}
+                  value={ignoreAboveAmountInput}
+                  onChange={(e) => {
+                    setIgnoreAboveAmountInput(e.target.value);
+                    setIgnoreAboveMessage('');
+                    setIgnoreAboveError('');
+                  }}
+                  disabled={etransferDefaultsLoading || savingIgnoreAbove || !clubId}
+                />
+              </div>
+            </Form.Group>
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              onClick={handleSaveIgnoreAboveAmount}
+              disabled={etransferDefaultsLoading || savingIgnoreAbove || !clubId}
+            >
+              {savingIgnoreAbove ? <Spinner size="sm" animation="border" /> : 'Save limit'}
+            </Button>
+            {ignoreAboveMessage && <span className="text-success small">{ignoreAboveMessage}</span>}
+          </div>
+          {searchWindowError && <Alert variant="danger" className="mt-2 mb-0 py-2">{searchWindowError}</Alert>}
+          {ignoreAboveError && <Alert variant="danger" className="mt-2 mb-0 py-2">{ignoreAboveError}</Alert>}
+        </Card.Body>
+      </Card>
+
+      <Card className="mt-3">
         <Card.Header>Tabs</Card.Header>
         <Card.Body>
           <Card.Text className="text-muted">
@@ -804,6 +986,55 @@ export default function SettingsPage() {
                   </ListGroup.Item>
                 );
               })}
+            </ListGroup>
+          )}
+        </Card.Body>
+      </Card>
+
+      <Card className="mt-3">
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <span>Suggestions</span>
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            onClick={loadSuggestions}
+            disabled={suggestionsLoading}
+          >
+            {suggestionsLoading ? <Spinner size="sm" animation="border" /> : 'Refresh'}
+          </Button>
+        </Card.Header>
+        <Card.Body>
+          <Card.Text className="text-muted">
+            Feedback submitted from the Help &amp; FAQ page's suggestion box. Dismiss one once
+            you've read/addressed it.
+          </Card.Text>
+          {suggestionsError && <Alert variant="danger" className="py-2">{suggestionsError}</Alert>}
+          {suggestionsLoading ? (
+            <Spinner animation="border" size="sm" />
+          ) : suggestions.length === 0 ? (
+            <p className="text-muted mb-0">No suggestions submitted yet.</p>
+          ) : (
+            <ListGroup variant="flush">
+              {suggestions.map((s) => (
+                <ListGroup.Item key={s.id} className="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                  <span>
+                    <span style={{ whiteSpace: 'pre-wrap' }}>{s.message}</span>
+                    <br />
+                    <span className="text-muted small">
+                      {s.submittedByName}
+                      {s.createdAt?.toDate && ` — ${format(s.createdAt.toDate(), 'MMMM d, yyyy')}`}
+                    </span>
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline-secondary"
+                    disabled={processingSuggestionId === s.id}
+                    onClick={() => handleDismissSuggestion(s.id)}
+                  >
+                    {processingSuggestionId === s.id ? <Spinner size="sm" animation="border" /> : 'Dismiss'}
+                  </Button>
+                </ListGroup.Item>
+              ))}
             </ListGroup>
           )}
         </Card.Body>

@@ -77,7 +77,19 @@ export interface EtransferImportResult {
   found: number;
   created: number;
   autoSettled: number;
+  // Newly found emails skipped entirely (never even recorded as a pending
+  // import) because their amount exceeded ignoreAboveAmount.
+  ignored: number;
 }
+
+/**
+ * Default cutoff (dollars) above which a newly found e-Transfer is ignored
+ * entirely — not recorded as a pending import at all, auto-settled or
+ * otherwise — as a safety net against an unusually large/unexpected transfer
+ * being picked up unattended. Clubs can override this via
+ * Club.etransferIgnoreAboveAmount (see clubs.ts).
+ */
+export const DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT = 20;
 
 /**
  * Converts a dollar amount to whole cents, rounding away any floating-point
@@ -264,14 +276,23 @@ export async function deleteEtransferSenderMapping(id: string): Promise<void> {
  * sender mapping over a plain name lookup. A newly found, matched transfer is
  * automatically applied only when its amount exactly equals the player's full
  * unpaid-session debt and the session records reconcile with that debt.
+ * Any newly found email above ignoreAboveAmount is skipped entirely — never
+ * recorded as a pending import at all — so an unusually large/unexpected
+ * transfer isn't picked up unattended.
  */
 export async function importEtransferEmails(
   senderAddress: string = DEFAULT_ETRANSFER_SENDER_ADDRESS,
-  searchAfterDate: string = getDefaultEtransferSearchAfterDate()
+  searchAfterDate: string = getDefaultEtransferSearchAfterDate(),
+  ignoreAboveAmount: number = DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT
 ): Promise<EtransferImportResult> {
   return serviceCall('importEtransferEmails', async () => {
-    const parsed = await searchEtransferEmails(senderAddress, searchAfterDate);
-    if (parsed.length === 0) return { found: 0, created: 0, autoSettled: 0 };
+    const allFound = await searchEtransferEmails(senderAddress, searchAfterDate);
+    if (allFound.length === 0) return { found: 0, created: 0, autoSettled: 0, ignored: 0 };
+
+    const ignoreAboveCents = toCents(ignoreAboveAmount);
+    const parsed = allFound.filter((p) => toCents(p.amount) <= ignoreAboveCents);
+    const ignored = allFound.length - parsed.length;
+    if (parsed.length === 0) return { found: allFound.length, created: 0, autoSettled: 0, ignored };
 
     // A club's search results are a handful of emails at a time, so checking
     // each message id individually keeps this simple and avoids Firestore's
@@ -324,7 +345,7 @@ export async function importEtransferEmails(
       autoSettled += 1;
     }
 
-    return { found: parsed.length, created: toCreate.length, autoSettled };
+    return { found: allFound.length, created: toCreate.length, autoSettled, ignored };
   });
 }
 

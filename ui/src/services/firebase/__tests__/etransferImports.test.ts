@@ -21,10 +21,14 @@ function makeParsedEmail(overrides: Partial<ParsedEtransferEmail> = {}): ParsedE
   return {
     gmailMessageId: 'msg-1',
     gmailThreadId: 'thread-1',
-    subject: "Interac e-Transfer: You've received $200.00 from CAI FANG WU and it has been automatically deposited.",
+    subject: "Interac e-Transfer: You've received $15.00 from CAI FANG WU and it has been automatically deposited.",
     senderName: 'CAI FANG WU',
     senderEmail: 'caifang1966@gmail.com',
-    amount: 200,
+    // Deliberately within the default $20 ignore-above cutoff (see
+    // DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT) so tests unrelated to that
+    // feature aren't affected by it; tests that care about specific amounts
+    // or the cutoff itself pass their own override.
+    amount: 15,
     memo: 'cash for shoppers',
     referenceNumber: 'C1AYd8eJYUcY',
     emailDate: new Date('2026-08-26T14:47:00.000Z'),
@@ -78,7 +82,7 @@ describe('importEtransferEmails', () => {
         gmailMessageId: 'msg-2',
         senderName: 'J LEE PAYMENTS INC',
         senderEmail: 'jordan1966@gmail.com',
-        amount: 40,
+        amount: 18,
       }),
       makeParsedEmail({ gmailMessageId: 'msg-3', senderName: 'TOTALLY UNKNOWN SENDER', senderEmail: null }),
     ]);
@@ -86,14 +90,14 @@ describe('importEtransferEmails', () => {
     const result = await etransfer.importEtransferEmails();
 
     expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca', '2026-08-27');
-    expect(result).toEqual({ found: 3, created: 3, autoSettled: 0 });
+    expect(result).toEqual({ found: 3, created: 3, autoSettled: 0, ignored: 0 });
 
     const mapped = helpers.getClubDocData('etransferImports', 'msg-2');
     expect(mapped).toMatchObject({
       status: 'pending',
       matchedPlayerId: 'p2',
       matchSource: 'mapping',
-      amount: 40,
+      amount: 18,
     });
 
     const nameMatched = helpers.getClubDocData('etransferImports', 'msg-1');
@@ -114,7 +118,7 @@ describe('importEtransferEmails', () => {
 
     const result = await etransfer.importEtransferEmails('custom@bank.example');
 
-    expect(result).toEqual({ found: 1, created: 0, autoSettled: 0 });
+    expect(result).toEqual({ found: 1, created: 0, autoSettled: 0, ignored: 0 });
     expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'applied' });
   });
 
@@ -165,7 +169,7 @@ describe('importEtransferEmails', () => {
   });
 
   it('automatically applies a matched transfer that exactly covers all unpaid sessions', async () => {
-    seedPlayer('p1', { balance: 0, owed: 30 });
+    seedPlayer('p1', { balance: 0, owed: 20 });
     helpers.seedClubDoc('sessions', 'oldest', {
       date: helpers.ts('2026-08-01'),
       players: [{
@@ -176,7 +180,31 @@ describe('importEtransferEmails', () => {
     helpers.seedClubDoc('sessions', 'newest', {
       date: helpers.ts('2026-08-08'),
       players: [{
-        id: 'p1', percentage: 100, cost: 20, paid: false, paidVia: null,
+        id: 'p1', percentage: 100, cost: 10, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([
+      makeParsedEmail({ amount: 20 }),
+    ]);
+
+    const result = await etransfer.importEtransferEmails();
+
+    expect(result).toEqual({ found: 1, created: 1, autoSettled: 1, ignored: 0 });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
+      status: 'applied',
+      applicationMethod: 'auto-exact-owed',
+      autoSettledSessionIds: ['oldest', 'newest'],
+    });
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
+  });
+
+  it('ignores a newly found transfer above the ignore-above cutoff entirely, even if it exactly matches owed', async () => {
+    seedPlayer('p1', { balance: 0, owed: 30 });
+    helpers.seedClubDoc('sessions', 'oldest', {
+      date: helpers.ts('2026-08-01'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 30, paid: false, paidVia: null,
         comped: false, highlighted: false,
       }],
     });
@@ -186,12 +214,28 @@ describe('importEtransferEmails', () => {
 
     const result = await etransfer.importEtransferEmails();
 
-    expect(result).toEqual({ found: 1, created: 1, autoSettled: 1 });
-    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
-      status: 'applied',
-      applicationMethod: 'auto-exact-owed',
-      autoSettledSessionIds: ['oldest', 'newest'],
+    expect(result).toEqual({ found: 1, created: 0, autoSettled: 0, ignored: 1 });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toBeUndefined();
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 30 });
+  });
+
+  it('respects a custom ignore-above cutoff passed to importEtransferEmails', async () => {
+    seedPlayer('p1', { balance: 0, owed: 30 });
+    helpers.seedClubDoc('sessions', 'oldest', {
+      date: helpers.ts('2026-08-01'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 30, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
     });
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([
+      makeParsedEmail({ amount: 30 }),
+    ]);
+
+    const result = await etransfer.importEtransferEmails(undefined, undefined, 50);
+
+    expect(result).toEqual({ found: 1, created: 1, autoSettled: 1, ignored: 0 });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'applied' });
     expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
   });
 
@@ -210,7 +254,7 @@ describe('importEtransferEmails', () => {
 
     const result = await etransfer.importEtransferEmails();
 
-    expect(result).toEqual({ found: 1, created: 1, autoSettled: 0 });
+    expect(result).toEqual({ found: 1, created: 1, autoSettled: 0, ignored: 0 });
     expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
       status: 'pending',
     });
@@ -230,9 +274,9 @@ describe('importEtransferEmails', () => {
       makeParsedEmail({ amount: 30 }),
     ]);
 
-    const result = await etransfer.importEtransferEmails();
+    const result = await etransfer.importEtransferEmails(undefined, undefined, 50);
 
-    expect(result).toEqual({ found: 1, created: 1, autoSettled: 0 });
+    expect(result).toEqual({ found: 1, created: 1, autoSettled: 0, ignored: 0 });
     expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
       status: 'pending',
     });
@@ -379,7 +423,7 @@ describe('dismissEtransferImport', () => {
       gmailMessageId: 'msg-1', senderName: 'CAI FANG WU',
     })]);
     const result = await etransfer.importEtransferEmails();
-    expect(result).toEqual({ found: 1, created: 1, autoSettled: 0 });
+    expect(result).toEqual({ found: 1, created: 1, autoSettled: 0, ignored: 0 });
     expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({ status: 'pending' });
   });
 

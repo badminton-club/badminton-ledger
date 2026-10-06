@@ -86,6 +86,11 @@ export default function AppNavbar() {
                                 </Nav.Link>
                             </>
                         )}
+                        {currentClubId && (
+                            <Nav.Link as={Link} to="/faq">
+                                Help &amp; FAQ
+                            </Nav.Link>
+                        )}
                         <NavDropdown
                             title={accountName || "Account"}
                             id="account-menu"

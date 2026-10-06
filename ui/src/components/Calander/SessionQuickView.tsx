@@ -11,8 +11,15 @@ import { isSessionPlayerUnpaid } from "../../utils/sessionPayment";
 interface Props {
     date: Date;
     sessions: Session[];
-    onAddSession: () => void;
+    onAddSession?: () => void;
     onOpenModal: (session: Session) => void;
+    // Defaults preserve how this component originally rendered embedded in
+    // the calendar grid; the homepage's "Latest Session" card (its only
+    // remaining caller) overrides both to false, since it's flush with no
+    // sibling panel and browses an already-existing session rather than
+    // picking a day.
+    bordered?: boolean;
+    allowAdd?: boolean;
 }
 
 // The weekday and month/day sit on their own lines (e.g. "Saturday" then
@@ -27,19 +34,24 @@ function DateLabel({ date }: { date: Date }) {
     );
 }
 
-export default function SessionQuickView({ date, sessions, onAddSession, onOpenModal }: Props) {
+export default function SessionQuickView({ date, sessions, onAddSession, onOpenModal, bordered = true, allowAdd = true }: Props) {
     const isAdmin = useAppSelector(selectIsClubAdmin);
     const [activeIndex, setActiveIndex] = React.useState(0);
     React.useEffect(() => {
         setActiveIndex(0);
     }, [date, sessions.length]);
 
+    const wrapStyle: React.CSSProperties = {
+        ...styles.wrap,
+        ...(bordered ? {} : { borderLeftWidth: 0 }),
+    };
+
     if (sessions.length === 0) {
         return (
-            <div style={styles.wrap}>
+            <div style={wrapStyle}>
                 <div style={styles.header}>
                     <DateLabel date={date} />
-                    {isAdmin && (
+                    {allowAdd && isAdmin && (
                         <Button size="sm" variant="primary" onClick={onAddSession}>
                             + Add Session
                         </Button>
@@ -59,7 +71,7 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
     const allPaid = unpaidPlayers === 0 && totalPlayers > 0;
 
     return (
-        <div style={styles.wrap}>
+        <div style={wrapStyle}>
             <div style={styles.header}>
                 <div>
                     <DateLabel date={date} />
@@ -74,7 +86,7 @@ export default function SessionQuickView({ date, sessions, onAddSession, onOpenM
                     </div>
                 </div>
                 <div className="d-flex gap-2">
-                    {isAdmin && (
+                    {allowAdd && isAdmin && (
                         <Button size="sm" variant="primary" onClick={onAddSession}>
                             + Add
                         </Button>
@@ -195,9 +207,12 @@ function PlayerRow({ playerId, cost, paid, comped }: { playerId: string; cost: n
 
 const styles: Record<string, React.CSSProperties> = {
     wrap: {
-        padding: "16px",
-        borderLeft: "0.5px solid var(--color-border-tertiary)",
+        padding: "20px",
+        borderLeftWidth: "0.5px",
+        borderLeftStyle: "solid",
+        borderLeftColor: "var(--color-border-tertiary)",
         height: "100%",
+        flex: "1 1 auto",
         display: "flex",
         flexDirection: "column",
         gap: 0,
@@ -288,7 +303,11 @@ const styles: Record<string, React.CSSProperties> = {
         flexDirection: "column",
         gap: 4,
         overflowY: "auto",
-        maxHeight: 280,
+        // Fixed (not just capped) so the whole card's height stays the same
+        // session to session — otherwise a session with fewer players
+        // renders a shorter card, which shifts page layout/scroll position
+        // when paging through the homepage's Latest/Previous Session card.
+        height: 280,
     },
     playerRow: {
         display: "flex",
