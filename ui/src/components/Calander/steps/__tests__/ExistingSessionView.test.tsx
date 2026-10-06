@@ -214,7 +214,7 @@ describe('ExistingSessionView', () => {
     expect(within(adaRow).getByText('$20.00')).toBeInTheDocument();
   });
 
-  it('shows one combined status dropdown (not the full button row) in Compact, with the same settlement options plus "Paid by"', async () => {
+  it('shows all the same settlement buttons in Compact, just sized down to fit one (scrollable) line instead of wrapping', async () => {
     const user = userEvent.setup();
     const players = [
       makePlayer({ id: 'p1', firstName: 'Ada' }),
@@ -234,19 +234,21 @@ describe('ExistingSessionView', () => {
     await user.click(screen.getByRole('button', { name: 'Compact' }));
 
     const adaRow = screen.getByText('Ada Lovelace').closest('.list-group-item') as HTMLElement;
-    // Just one small status control — the full multi-button row is gone.
-    expect(within(adaRow).queryByRole('button', { name: 'Comp' })).not.toBeInTheDocument();
-    const statusToggle = within(adaRow).getByRole('button', { name: 'Unpaid' });
+    // Every option is still its own button — just small and on one line.
+    ['Unpaid', 'Comp', 'Balance', 'e-Transfer'].forEach(label => {
+      expect(within(adaRow).getByRole('button', { name: label })).toBeInTheDocument();
+    });
+    expect(within(adaRow).getByRole('button', { name: 'Paid by' })).toBeInTheDocument();
+    expect(within(adaRow).getByRole('button', { name: 'Unpaid' }).closest('.btn-group')).toHaveClass('flex-nowrap');
 
-    await user.click(statusToggle);
-    await user.click(within(adaRow).getByText('e-Transfer'));
+    await user.click(within(adaRow).getByRole('button', { name: 'e-Transfer' }));
 
     await waitFor(() => expect(onSessionUpdate).toHaveBeenCalledWith('s1'));
     expect((getClubDocData('sessions', 's1')!.players as SessionPlayer[])[0])
       .toMatchObject({ paid: true, paidVia: 'etransfer' });
 
-    // "Paid by" still works from within the same compact dropdown.
-    await user.click(within(adaRow).getByRole('button', { name: 'e-Transfer' }));
+    // "Paid by" still works the same way as in Comfy.
+    await user.click(within(adaRow).getByRole('button', { name: 'Paid by' }));
     await user.type(within(adaRow).getByPlaceholderText('Search players…'), 'Bea');
     await user.click(within(adaRow).getByText('Bea'));
 

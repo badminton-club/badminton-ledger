@@ -291,72 +291,79 @@ function PlayerRow({
               </div>
             )}
             {compact ? (
-              // One small dropdown (current status as its label) instead of
-              // the full button row below — same options, including "Paid
-              // by", just folded into a single control for a denser view.
-              <Dropdown
-                align="end"
-                onToggle={(isOpen) => { if (!isOpen) setPayerSearch(''); }}
-              >
-                <Dropdown.Toggle
-                  size="sm"
-                  variant={settlement.bg}
-                  title={
-                    currentVia === 'balance' && settledViaEtransferBalance
-                      ? 'Automatically settled from balance funded by a Gmail e-Transfer'
-                      : undefined
-                  }
-                >
-                  {settlement.label}
-                </Dropdown.Toggle>
-                <Dropdown.Menu style={{ maxHeight: 360, overflowY: 'auto' }}>
-                  {options.map(o => (
-                    <Dropdown.Item
-                      key={o.label}
-                      active={currentVia === o.method}
-                      onClick={() => handleSelect(o.method)}
-                    >
-                      {o.method === 'balance' && currentVia === o.method && settledViaEtransferBalance
-                        ? 'Gmail e-Transfer'
-                        : o.label}
-                    </Dropdown.Item>
-                  ))}
-                  {otherPlayers.length > 0 && (
-                    <>
-                      <Dropdown.Divider />
-                      <Dropdown.Header>Pay from another's balance</Dropdown.Header>
-                      <div className="px-2 pb-2">
-                        <Form.Control
-                          size="sm"
-                          autoFocus
-                          placeholder="Search players…"
-                          value={payerSearch}
-                          onChange={(e) => setPayerSearch(e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => e.stopPropagation()}
-                        />
-                      </div>
-                      {filteredPayers.length === 0 ? (
-                        <Dropdown.ItemText className="text-muted small px-3">
-                          No players found.
-                        </Dropdown.ItemText>
-                      ) : (
-                        filteredPayers.map(op => (
-                          <Dropdown.Item
-                            key={op.id}
-                            active={currentVia === 'transfer' && player.paidBy === op.id}
-                            onClick={() => handlePaidBy(op.id)}
-                            className="d-flex justify-content-between align-items-center gap-3"
+              // Same buttons as Comfy, just sized down and kept to one
+              // scrollable line (instead of fixed-width + wrapping across
+              // multiple lines) for a denser view.
+              <div style={{ maxWidth: '100%', overflowX: 'auto' }}>
+                <ButtonGroup size="sm" className="flex-nowrap justify-content-end">
+                  {options.map(o => {
+                    const isActive = currentVia === o.method;
+                    const isGmailBalance = o.method === 'balance' && isActive && settledViaEtransferBalance;
+                    const displayLabel = isGmailBalance ? 'Gmail' : o.label;
+                    return (
+                    <React.Fragment key={o.label}>
+                      <Button
+                        variant={isActive ? o.activeVariant : 'outline-secondary'}
+                        onClick={() => handleSelect(o.method)}
+                        title={isGmailBalance ? 'Automatically settled from balance funded by a Gmail e-Transfer' : undefined}
+                        className="text-truncate"
+                        style={{ fontSize: 11, padding: '2px 6px' }}
+                      >
+                        {displayLabel}
+                      </Button>
+                      {o.method === null && otherPlayers.length > 0 && (
+                        <Dropdown
+                          as={ButtonGroup}
+                          align="end"
+                          onToggle={(isOpen) => { if (!isOpen) setPayerSearch(''); }}
+                        >
+                          <Dropdown.Toggle
+                            size="sm"
+                            variant={currentVia === 'transfer' ? 'primary' : 'outline-secondary'}
+                            title="Pay this player's dues from another player's balance"
+                            className="text-truncate"
+                            style={{ fontSize: 11, padding: '2px 6px', maxWidth: 90 }}
                           >
-                            <span>{op.name}</span>
-                            <span className="text-muted small">${op.balance.toFixed(2)}</span>
-                          </Dropdown.Item>
-                        ))
+                            {currentVia === 'transfer' && payerName ? payerName : 'Paid by'}
+                          </Dropdown.Toggle>
+                          <Dropdown.Menu style={{ maxHeight: 360, overflowY: 'auto' }}>
+                            <Dropdown.Header>Pay from another's balance</Dropdown.Header>
+                            <div className="px-2 pb-2">
+                              <Form.Control
+                                size="sm"
+                                autoFocus
+                                placeholder="Search players…"
+                                value={payerSearch}
+                                onChange={(e) => setPayerSearch(e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => e.stopPropagation()}
+                              />
+                            </div>
+                            {filteredPayers.length === 0 ? (
+                              <Dropdown.ItemText className="text-muted small px-3">
+                                No players found.
+                              </Dropdown.ItemText>
+                            ) : (
+                              filteredPayers.map(op => (
+                                <Dropdown.Item
+                                  key={op.id}
+                                  active={currentVia === 'transfer' && player.paidBy === op.id}
+                                  onClick={() => handlePaidBy(op.id)}
+                                  className="d-flex justify-content-between align-items-center gap-3"
+                                >
+                                  <span>{op.name}</span>
+                                  <span className="text-muted small">${op.balance.toFixed(2)}</span>
+                                </Dropdown.Item>
+                              ))
+                            )}
+                          </Dropdown.Menu>
+                        </Dropdown>
                       )}
-                    </>
-                  )}
-                </Dropdown.Menu>
-              </Dropdown>
+                    </React.Fragment>
+                    );
+                  })}
+                </ButtonGroup>
+              </div>
             ) : (
             <ButtonGroup size="sm" className="flex-wrap justify-content-end">
                 {options.map(o => {
