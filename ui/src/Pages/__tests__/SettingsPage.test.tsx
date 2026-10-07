@@ -102,6 +102,34 @@ afterEach(() => {
 });
 
 describe('SettingsPage', () => {
+  it('lets admins load and save a normalized allowed sender list', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club', etransferSenderAddresses: ['notify@payments.interac.ca', 'old@example.com'] });
+    renderPage({ role: 'admin' });
+    const input = await screen.findByLabelText('Allowed sender addresses');
+    await waitFor(() => expect(input).toHaveValue('notify@payments.interac.ca, old@example.com'));
+    await user.clear(input);
+    await user.type(input, 'Notify@Payments.Interac.ca\nFORWARDER@Example.com\nforwarder@example.com');
+    await user.click(screen.getByRole('button', { name: 'Save senders' }));
+    await waitFor(() => expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+      etransferSenderAddresses: ['notify@payments.interac.ca', 'forwarder@example.com'],
+    }));
+    expect(input).toHaveValue('notify@payments.interac.ca, forwarder@example.com');
+  });
+
+  it('loads legacy senders and displays an error for invalid sender input without persisting it', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club', etransferSenderAddress: 'bank@example.com' });
+    renderPage({ role: 'admin' });
+    const input = await screen.findByLabelText('Allowed sender addresses');
+    await waitFor(() => expect(input).toHaveValue('bank@example.com'));
+    await user.clear(input);
+    await user.type(input, 'invalid) OR in:anywhere');
+    await user.click(screen.getByRole('button', { name: 'Save senders' }));
+    expect(await screen.findByText(/Enter at least one valid allowed sender/)).toBeInTheDocument();
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).not.toHaveProperty('etransferSenderAddresses');
+  });
+
   it('lets admins load, save, and clear a custom Gmail query', async () => {
     const user = userEvent.setup();
     seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club', etransferCustomGmailQuery: 'label:forwarded' });
@@ -134,6 +162,7 @@ describe('SettingsPage', () => {
     expect(screen.getByText('You do not have permission to view this page.')).toBeInTheDocument();
     expect(screen.queryByText('Club settings')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Custom Gmail query (optional)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Allowed sender addresses')).not.toBeInTheDocument();
   });
 
   it('shows the page to admins but hides super-admin-only controls', async () => {

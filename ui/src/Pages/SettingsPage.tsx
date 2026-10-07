@@ -14,6 +14,7 @@ import {
 import { encryptBackupPayload, decryptBackupPayload, isEncryptedBackupPayload } from '../services/backupCrypto';
 import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, createClubInvitation, fetchClubInvitations, deleteClubInvitation, setClubTabEnabled, setClubDefaultCourtCount, setClubEtransferSearchWindowDays, setClubEtransferIgnoreAboveAmount, setClubEtransferCustomGmailQuery, DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS, DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT, ETRANSFER_SEARCH_WINDOW_PRESETS, deleteClub, fetchUserClubs, fetchClub, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, fetchSuggestions, deleteSuggestion, updatePlayerProfile } from '../services/firebase';
 import { auth } from '../services/firebase/client';
+import { setClubEtransferSenderAddresses, normalizeEtransferSenderAddresses, resolveEtransferSenderAddresses, DEFAULT_ETRANSFER_SENDER_ADDRESS } from '../services/firebase';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
 import {
@@ -102,6 +103,10 @@ export default function SettingsPage() {
   const [savingCustomQuery, setSavingCustomQuery] = useState(false);
   const [customQueryError, setCustomQueryError] = useState('');
   const [customQueryMessage, setCustomQueryMessage] = useState('');
+  const [senderAddressesInput, setSenderAddressesInput] = useState(DEFAULT_ETRANSFER_SENDER_ADDRESS);
+  const [savingSenders, setSavingSenders] = useState(false);
+  const [sendersError, setSendersError] = useState('');
+  const [sendersMessage, setSendersMessage] = useState('');
 
   const [requests, setRequests] = useState<LinkRequest[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
@@ -164,6 +169,8 @@ export default function SettingsPage() {
     setIgnoreAboveMessage('');
     setCustomQueryError('');
     setCustomQueryMessage('');
+    setSendersError('');
+    setSendersMessage('');
     fetchClub(clubId)
       .then((club) => {
         if (cancelled) return;
@@ -172,6 +179,7 @@ export default function SettingsPage() {
         const resolvedIgnoreAbove = club?.etransferIgnoreAboveAmount ?? DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT;
         setIgnoreAboveAmountInput(String(resolvedIgnoreAbove));
         setCustomGmailQuery(club?.etransferCustomGmailQuery ?? '');
+        setSenderAddressesInput(resolveEtransferSenderAddresses(club).join(', '));
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -239,6 +247,23 @@ export default function SettingsPage() {
       setIgnoreAboveError(err instanceof Error ? err.message : 'Failed to save the ignore-above amount.');
     } finally {
       setSavingIgnoreAbove(false);
+    }
+  };
+
+  const handleSaveSenders = async () => {
+    if (!clubId) return;
+    setSavingSenders(true);
+    setSendersError('');
+    setSendersMessage('');
+    try {
+      const addresses = normalizeEtransferSenderAddresses(senderAddressesInput);
+      await setClubEtransferSenderAddresses(clubId, addresses);
+      setSenderAddressesInput(addresses.join(', '));
+      setSendersMessage('Saved.');
+    } catch (err) {
+      setSendersError(err instanceof Error ? err.message : 'Failed to save allowed senders.');
+    } finally {
+      setSavingSenders(false);
     }
   };
 
@@ -857,6 +882,30 @@ export default function SettingsPage() {
           </div>
           {searchWindowError && <Alert variant="danger" className="mt-2 mb-0 py-2">{searchWindowError}</Alert>}
           {ignoreAboveError && <Alert variant="danger" className="mt-2 mb-0 py-2">{ignoreAboveError}</Alert>}
+          <Form.Group controlId="settings-etransfer-allowed-senders" className="mt-3">
+            <Form.Label className="small mb-1">Allowed sender addresses</Form.Label>
+            <Form.Control
+              as="textarea"
+              rows={2}
+              size="sm"
+              value={senderAddressesInput}
+              onChange={(e) => {
+                setSenderAddressesInput(e.target.value);
+                setSendersMessage('');
+                setSendersError('');
+              }}
+              disabled={etransferDefaultsLoading || savingSenders || !clubId}
+            />
+            <Form.Text className="text-muted d-block">
+              Separate addresses with commas or newlines. Keep notify@payments.interac.ca and add only trusted forwarding addresses.
+              Only these From mailboxes are accepted, including with custom queries (not sender authenticity verification).
+            </Form.Text>
+            <Button size="sm" variant="outline-secondary" className="mt-2" onClick={handleSaveSenders} disabled={etransferDefaultsLoading || savingSenders || !clubId}>
+              {savingSenders ? <Spinner size="sm" animation="border" /> : 'Save senders'}
+            </Button>
+            {sendersMessage && <span className="text-success small ms-2">{sendersMessage}</span>}
+            {sendersError && <Alert variant="danger" className="mt-2 mb-0 py-2">{sendersError}</Alert>}
+          </Form.Group>
           <Form.Group controlId="settings-etransfer-custom-query" className="mt-3">
             <Form.Label className="small mb-1">Custom Gmail query (optional)</Form.Label>
             <Form.Control
@@ -872,9 +921,9 @@ export default function SettingsPage() {
               disabled={etransferDefaultsLoading || savingCustomQuery || !clubId}
             />
             <Form.Text className="text-muted d-block">
-              Replaces all default sender, subject, and search-window filters. Leave blank to use the default.
-              {' '}For forwarded emails, try <code>subject:"automatically deposited"</code> or add
-              {' '}<code>from:your-address@example.com</code>. Use <code>after:YYYY/MM/DD</code> to limit dates.
+              Replaces default subject and search-window filters, never the allowed sender list. Leave blank to use the default.
+              {' '}For forwarded emails, add their From address to allowed senders and try <code>subject:"automatically deposited"</code>.
+              {' '}Use <code>after:YYYY/MM/DD</code> to limit dates.
               {' '}<a href="https://support.google.com/mail/answer/7190" target="_blank" rel="noopener noreferrer">Gmail search syntax</a>.
             </Form.Text>
             <Button

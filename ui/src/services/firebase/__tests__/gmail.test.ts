@@ -254,6 +254,26 @@ describe('resolveEtransferSearchAfterDate', () => {
     expect(gmail.resolveEtransferSearchAfterDate({ etransferSearchWindowDays: 30 }, reference)).toBe('2026-07-28');
   });
 
+  describe('resolveEtransferSenderAddresses', () => {
+    it('uses the Interac default for an unconfigured club', () => {
+      expect(gmail.resolveEtransferSenderAddresses(null)).toEqual(['notify@payments.interac.ca']);
+      expect(gmail.resolveEtransferSenderAddresses({})).toEqual(['notify@payments.interac.ca']);
+    });
+
+    it('keeps legacy configured senders until a list is configured', () => {
+      expect(gmail.resolveEtransferSenderAddresses({ etransferSenderAddress: ' Bank@Example.com ' })).toEqual(['bank@example.com']);
+      expect(gmail.resolveEtransferSenderAddresses({
+        etransferSenderAddress: 'bank@example.com', etransferSenderAddresses: ['forwarder@example.com'],
+      })).toEqual(['forwarder@example.com']);
+    });
+
+    it('fails closed for a saved empty list instead of falling back to a legacy/default sender', () => {
+      expect(() => gmail.resolveEtransferSenderAddresses({
+        etransferSenderAddress: 'bank@example.com', etransferSenderAddresses: [],
+      })).toThrow('Enter at least one valid allowed sender');
+    });
+  });
+
   it('falls back to a saved custom absolute date when no rolling window is set', () => {
     expect(gmail.resolveEtransferSearchAfterDate(
       { etransferSearchWindowDays: null, etransferSearchAfterDate: '2026-01-01' },
@@ -268,7 +288,7 @@ describe('resolveEtransferSearchAfterDate', () => {
 });
 
 describe('searchEtransferEmails', () => {
-  it('uses only the trimmed custom query and parses forwarded results', async () => {
+  it('combines allowed senders with the trimmed custom query and parses forwarded results', async () => {
     helpers.setCurrentUser(userOne);
     fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
     const customQuery = 'from:personal@example.com subject:"automatically deposited" after:2026/08/01 & label:club';
@@ -280,11 +300,63 @@ describe('searchEtransferEmails', () => {
       .mockResolvedValueOnce(jsonResponse({ messages: [{ id: 'msg-1', threadId: 'thread-1' }] }))
       .mockResolvedValueOnce(jsonResponse(message));
 
-    const results = await gmail.searchEtransferEmails('notify@payments.interac.ca', '', `  ${customQuery}  `);
+    const results = await gmail.searchEtransferEmails('personal@example.com', '', `  ${customQuery}  `);
 
-    expect(new URL(fetchMock().mock.calls[0][0]).searchParams.get('q')).toBe(customQuery);
+    expect(new URL(fetchMock().mock.calls[0][0]).searchParams.get('q')).toBe(`(from:personal@example.com) AND (${customQuery})`);
     expect(results).toEqual([expect.objectContaining({ senderName: 'XXX', amount: 10.71 })]);
   });
+
+  it('normalizes and deduplicates a multiple-sender OR search', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+    fetchMock().mockResolvedValueOnce(jsonResponse({}));
+    await gmail.searchEtransferEmails(
+      [' Notify@Payments.Interac.ca ', 'Forwarder@Example.com', 'notify@payments.interac.ca'], '2026-08-27'
+    );
+    expect(new URL(fetchMock().mock.calls[0][0]).searchParams.get('q')).toBe(
+      `(from:notify@payments.interac.ca OR from:forwarder@example.com) subject:"automatically deposited" after:${Date.UTC(2026, 7, 27) / 1000}`
+    );
+  });
+
+  it('checks From independently of an OR custom query, preserving unrelated Reply-To payer identities', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+    const missingFrom = sampleMessage({ id: 'missing' });
+    missingFrom.payload.headers = missingFrom.payload.headers.filter((h) => h.name !== 'From');
+    const duplicateFrom = sampleMessage({ id: 'duplicate' });
+    duplicateFrom.payload.headers.push({ name: 'From', value: 'evil@example.com' });
+    const messages = [
+      sampleMessage({ id: 'default' }),
+      sampleMessage({ id: 'forwarded', from: '"Trusted, Forwarder" <FORWARDER@EXAMPLE.COM>' }),
+      sampleMessage({ id: 'untrusted', from: 'Evil <evil@example.com>' }),
+      sampleMessage({ id: 'bare', from: 'NOTIFY@PAYMENTS.INTERAC.CA' }),
+      sampleMessage({ id: 'unrecognized', from: 'notify@payments.interac.ca via evil.example' }),
+      sampleMessage({ id: 'multiple', from: 'evil@example.com, Notify <notify@payments.interac.ca>' }),
+      sampleMessage({ id: 'display-only', from: '"notify@payments.interac.ca" <evil@example.com>' }),
+      missingFrom,
+      duplicateFrom,
+    ];
+    fetchMock().mockResolvedValueOnce(jsonResponse({ messages }));
+    messages.forEach((message) => fetchMock().mockResolvedValueOnce(jsonResponse(message)));
+    const customQuery = 'label:forwarded OR from:evil@example.com';
+    const results = await gmail.searchEtransferEmails(
+      ['notify@payments.interac.ca', 'forwarder@example.com'], '', customQuery
+    );
+    expect(new URL(fetchMock().mock.calls[0][0]).searchParams.get('q')).toBe(
+      `((from:notify@payments.interac.ca OR from:forwarder@example.com)) AND (${customQuery})`
+    );
+    expect(results.map((result) => result.gmailMessageId)).toEqual(['default', 'forwarded', 'bare']);
+    expect(results.every((result) => result.senderEmail === 'caifang1966@gmail.com')).toBe(true);
+  });
+
+  it.each(['', ' ', [], ['evil@example.com) OR in:anywhere'], ['valid@example.com', 'bad']])(
+    'rejects empty/invalid senders before authorizing Gmail (%s)', async (senders) => {
+      await expect(gmail.searchEtransferEmails(senders as string | string[], '', 'in:anywhere')).rejects.toThrow(
+        'Enter at least one valid allowed sender'
+      );
+      expect(fetchMock()).not.toHaveBeenCalled();
+    }
+  );
 
   it.each([undefined, null, '', '   '])('uses default filters for a blank/unset query (%s)', async (query) => {
     helpers.setCurrentUser(userOne);

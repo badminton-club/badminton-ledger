@@ -94,7 +94,7 @@ describe('EtransfersPage', () => {
     await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
     await screen.findByText('No new autodeposit emails found.');
     expect(searchEtransferEmails).toHaveBeenLastCalledWith(
-      'notify@payments.interac.ca', getDefaultEtransferSearchAfterDate(), 'subject:"automatically deposited"'
+      ['notify@payments.interac.ca'], getDefaultEtransferSearchAfterDate(), 'subject:"automatically deposited"'
     );
 
     await user.clear(input);
@@ -106,8 +106,56 @@ describe('EtransfersPage', () => {
     await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
     await screen.findByText('No new autodeposit emails found.');
     expect(searchEtransferEmails).toHaveBeenLastCalledWith(
-      'notify@payments.interac.ca', getDefaultEtransferSearchAfterDate(), ''
+      ['notify@payments.interac.ca'], getDefaultEtransferSearchAfterDate(), ''
     );
+  });
+
+  it('loads, saves, and searches with allowed senders even when a custom query is active', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc('test-club', {
+      name: 'Test Club', etransferSenderAddresses: ['notify@payments.interac.ca', 'old@example.com'],
+      etransferCustomGmailQuery: 'label:forwarded',
+    });
+    jest.mocked(searchEtransferEmails).mockResolvedValue([]);
+    renderPage();
+    const input = await screen.findByLabelText('Allowed sender addresses');
+    expect(input).toHaveValue('notify@payments.interac.ca, old@example.com');
+    await user.clear(input);
+    await user.type(input, 'Notify@Payments.Interac.ca, FORWARDER@Example.com, forwarder@example.com');
+    await user.click(screen.getByRole('button', { name: 'Save senders' }));
+    await waitFor(() => expect(getClubMetaDocData('test-club')).toMatchObject({
+      etransferSenderAddresses: ['notify@payments.interac.ca', 'forwarder@example.com'],
+    }));
+    expect(input).toHaveValue('notify@payments.interac.ca, forwarder@example.com');
+    expect(screen.getByText(/using custom gmail query/i)).toHaveTextContent('Allowed senders: notify@payments.interac.ca, forwarder@example.com');
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await screen.findByText('No new autodeposit emails found.');
+    expect(searchEtransferEmails).toHaveBeenLastCalledWith(
+      ['notify@payments.interac.ca', 'forwarder@example.com'], getDefaultEtransferSearchAfterDate(), 'label:forwarded'
+    );
+  });
+
+  it('loads a legacy sender and rejects an empty sender list without widening the saved search', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc('test-club', { name: 'Test Club', etransferSenderAddress: 'bank@example.com' });
+    jest.mocked(searchEtransferEmails).mockResolvedValue([]);
+    renderPage();
+    const input = await screen.findByLabelText('Allowed sender addresses');
+    expect(input).toHaveValue('bank@example.com');
+    await user.clear(input);
+    await user.click(screen.getByRole('button', { name: 'Save senders' }));
+    expect(await screen.findByText(/Enter at least one valid allowed sender/)).toBeInTheDocument();
+    expect(getClubMetaDocData('test-club')).not.toHaveProperty('etransferSenderAddresses');
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await screen.findByText('No new autodeposit emails found.');
+    expect(searchEtransferEmails).toHaveBeenLastCalledWith(['bank@example.com'], getDefaultEtransferSearchAfterDate(), '');
+  });
+
+  it('disables searching when the saved sender list is invalid', async () => {
+    seedClubMetaDoc('test-club', { name: 'Test Club', etransferSenderAddresses: [] });
+    renderPage();
+    expect(await screen.findByText(/Enter at least one valid allowed sender/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /connect gmail & search/i })).toBeDisabled();
   });
 
   it('finds new e-Transfer emails via search, matches by name, and lists them for review', async () => {
@@ -136,7 +184,7 @@ describe('EtransfersPage', () => {
 
     await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
 
-    expect(searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca', defaultSearchDate, '');
+    expect(searchEtransferEmails).toHaveBeenCalledWith(['notify@payments.interac.ca'], defaultSearchDate, '');
     expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
     expect(screen.getByText('cash for shoppers')).toBeInTheDocument();
     expect(await screen.findByText(/found 1 email\(s\) — 1 new/i)).toBeInTheDocument();

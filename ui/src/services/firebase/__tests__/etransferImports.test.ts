@@ -128,6 +128,13 @@ describe('importEtransferEmails', () => {
     expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith('custom@bank.example', '2026-08-27', undefined);
   });
 
+  it('passes an allowed sender list and custom query through to the Gmail search', async () => {
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([]);
+    const senders = ['notify@payments.interac.ca', 'forwarder@example.com'];
+    await etransfer.importEtransferEmails(senders, '2026-08-27', 20, 'label:forwarded');
+    expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith(senders, '2026-08-27', 'label:forwarded');
+  });
+
   it('auto-matches the uniquely strongest player despite middle or reordered sender names', async () => {
     seedPlayer('p1');
     seedPlayer('p2', {

@@ -28,10 +28,12 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   player's balance. Every import is recorded and undoable, and processed emails are labelled
   in Gmail so they aren't found again.
   Forward/reply subject prefixes (`FW:`, `RE:`, `FWD:`, case-insensitive) are supported.
-  For mail forwarded from a personal address, admins can save a custom Gmail query in
-  Settings or e-Transfers, such as `subject:"automatically deposited"`. This replaces
-  all default sender, subject, and date filters; include `after:YYYY/MM/DD` to limit
-  dates, or clear the query to restore the default search. See
+  Admins manage allowed sender addresses in Settings or e-Transfers (default:
+  `notify@payments.interac.ca`), adding trusted forwarding addresses as needed.
+  A custom Gmail query such as `subject:"automatically deposited"` replaces only
+  default subject and date filters; include `after:YYYY/MM/DD` to limit dates,
+  or clear the query to restore the default search. Allowed From mailboxes are
+  always checked, even with custom queries; this is not cryptographic sender verification. See
   [Gmail search syntax](https://support.google.com/mail/answer/7190).
 
 ## Tech stack

@@ -281,7 +281,7 @@ export async function deleteEtransferSenderMapping(id: string): Promise<void> {
  * transfer isn't picked up unattended.
  */
 export async function importEtransferEmails(
-  senderAddress: string = DEFAULT_ETRANSFER_SENDER_ADDRESS,
+  senderAddress: string | string[] = DEFAULT_ETRANSFER_SENDER_ADDRESS,
   searchAfterDate: string = getDefaultEtransferSearchAfterDate(),
   ignoreAboveAmount: number = DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT,
   customGmailQuery?: string | null

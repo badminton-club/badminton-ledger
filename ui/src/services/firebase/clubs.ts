@@ -1,3 +1,4 @@
+import { normalizeEtransferSenderAddresses } from './gmail';
 import {
   getDoc,
   getDocs,
@@ -212,7 +213,15 @@ export async function setClubEtransferIgnoreAboveAmount(clubId: string, amount: 
   });
 }
 
-/** Persists a full Gmail query override; blank/null restores the default search. */
+export async function setClubEtransferSenderAddresses(clubId: string, addresses: string | string[]): Promise<void> {
+  return serviceCall('setClubEtransferSenderAddresses', async () => {
+    await setDoc(clubDoc(clubId), {
+      etransferSenderAddresses: normalizeEtransferSenderAddresses(addresses),
+    }, { merge: true });
+  });
+}
+
+/** Overrides Gmail subject/date filters; allowed senders are always enforced. */
 export async function setClubEtransferCustomGmailQuery(clubId: string, query: string | null): Promise<void> {
   return serviceCall('setClubEtransferCustomGmailQuery', async () => {
     await setDoc(
