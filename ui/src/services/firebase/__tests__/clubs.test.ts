@@ -25,6 +25,7 @@ import {
   setClubTabEnabled,
   setClubEtransferSearchAfterDate,
   setClubEtransferSearchWindowDays,
+  setClubEtransferAutoSettleExactAmounts,
   setClubEtransferCustomGmailQuery,
   setClubEtransferSenderAddresses,
   resetClubEtransferSearchSetting,
@@ -581,6 +582,16 @@ describe('e-Transfer search cutoff settings', () => {
     expect(__getDocData('clubs/club-a')).toMatchObject({
       etransferSearchWindowDays: null,
       etransferSearchAfterDate: null,
+    });
+  });
+
+  it('setClubEtransferAutoSettleExactAmounts saves the club default', async () => {
+    seedClubMetaDoc('club-a', { name: 'Alpha Club' });
+
+    await setClubEtransferAutoSettleExactAmounts('club-a', false);
+
+    expect(__getDocData('clubs/club-a')).toMatchObject({
+      etransferAutoSettleExactAmounts: false,
     });
   });
 });

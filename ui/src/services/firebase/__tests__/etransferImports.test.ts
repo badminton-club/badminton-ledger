@@ -206,6 +206,34 @@ describe('importEtransferEmails', () => {
     expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
   });
 
+  it('keeps an exact matched transfer pending when automatic settlement is disabled', async () => {
+    seedPlayer('p1', { balance: 0, owed: 20 });
+    helpers.seedClubDoc('sessions', 'unpaid', {
+      date: helpers.ts('2026-08-01'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 20, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([
+      makeParsedEmail({ amount: 20 }),
+    ]);
+
+    const result = await etransfer.importEtransferEmails(
+      undefined, undefined, undefined, undefined, false
+    );
+
+    expect(result).toEqual({ found: 1, created: 1, autoSettled: 0, ignored: 0 });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
+      status: 'pending',
+      matchedPlayerId: 'p1',
+    });
+    expect(helpers.getClubDocData('sessions', 'unpaid')?.players).toEqual([
+      expect.objectContaining({ paid: false, paidVia: null }),
+    ]);
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 20 });
+  });
+
   it.each([false, true])('keeps an unconfirmed name-only exact-debt transfer pending (ambiguous: %s)', async (ambiguous) => {
     seedPlayer('p1', { balance: 5, owed: 15 });
     if (ambiguous) seedPlayer('p2', { balance: 5, owed: 15 });

@@ -239,12 +239,13 @@ describe('SettingsPage', () => {
     });
   });
 
-  it('loads and saves e-Transfer import defaults (search window and ignore-above amount), same club fields the e-Transfers page edits', async () => {
+  it('loads and saves the e-Transfer import defaults', async () => {
     const user = userEvent.setup();
     seedClubMetaDoc(TEST_CLUB_ID, {
       name: 'Test Club',
       etransferSearchWindowDays: 14,
       etransferIgnoreAboveAmount: 30,
+      etransferAutoSettleExactAmounts: false,
     });
     renderPage({ role: 'admin' });
 
@@ -252,6 +253,8 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(windowSelect).toHaveValue('14'));
     const ignoreInput = screen.getByRole('spinbutton', { name: 'Ignore amounts over' });
     await waitFor(() => expect(ignoreInput).toHaveValue(30));
+    const autoSettle = screen.getByRole('checkbox', { name: 'Auto-settle exact amounts by default' });
+    expect(autoSettle).not.toBeChecked();
 
     await user.selectOptions(windowSelect, '30');
     await user.click(screen.getByRole('button', { name: 'Save window' }));
@@ -264,6 +267,12 @@ describe('SettingsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save limit' }));
     await waitFor(() => expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
       etransferIgnoreAboveAmount: 50,
+    }));
+
+    await user.click(autoSettle);
+    await user.click(screen.getByRole('button', { name: 'Save auto-settle default' }));
+    await waitFor(() => expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+      etransferAutoSettleExactAmounts: true,
     }));
   });
 

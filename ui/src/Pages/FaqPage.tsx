@@ -189,10 +189,19 @@ const FAQ_SECTIONS: { question: string; answer: React.ReactNode }[] = [
 
 export default function FaqPage() {
   const clubId = useAppSelector(selectCurrentClubId);
+  const [testerEmail, setTesterEmail] = useState('');
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [sent, setSent] = useState(false);
+  const validTesterEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testerEmail.trim());
+  const testerRequestHref = validTesterEmail
+    ? `mailto:wedclub2026@gmail.com?subject=${encodeURIComponent('Badminton Ledger e-Transfer tester access request')}`
+      + `&body=${encodeURIComponent(
+        `Hello,\n\nPlease add ${testerEmail.trim()} to the Google OAuth tester list for Badminton Ledger e-Transfer imports.\n\n`
+        + 'I understand that this feature currently supports Canadian Interac e-Transfer autodeposit notifications.\n\nThank you.'
+      )}`
+    : undefined;
 
   const handleSubmit = async () => {
     if (!clubId) return;
@@ -219,6 +228,64 @@ export default function FaqPage() {
         A quick explanation of the terms and concepts used throughout the ledger.
       </p>
       <Accordion alwaysOpen={false}>
+        <Accordion.Item eventKey="etransfer-access">
+          <Accordion.Header>How do I get access to Gmail e-Transfer imports?</Accordion.Header>
+          <Accordion.Body>
+            <Alert variant="info">
+              Gmail e-Transfer imports are currently supported only for Canadian Interac
+              e-Transfer autodeposit notifications.
+            </Alert>
+            <p>Before using the e-Transfers tab for the first time:</p>
+            <ol>
+              <li>
+                Choose the Google/Gmail account that receives your e-Transfer notification emails.
+              </li>
+              <li>
+                Request tester access for that email address and wait for confirmation that the
+                account has been approved.
+              </li>
+              <li>
+                As a club admin, configure the Gmail import options under
+                {' '}<strong>Settings → e-Transfer import defaults</strong>.
+              </li>
+              <li>
+                Open the <strong>e-Transfers</strong> tab, select the approved Google account when
+                connecting to Gmail, and review the imported payments.
+              </li>
+            </ol>
+            <div className="bg-light rounded p-3">
+              <Form.Group controlId="etransfer-tester-email">
+                <Form.Label>Google/Gmail email to approve</Form.Label>
+                <Form.Control
+                  type="email"
+                  value={testerEmail}
+                  placeholder="your-email@gmail.com"
+                  onChange={(e) => setTesterEmail(e.target.value)}
+                  isInvalid={testerEmail.length > 0 && !validTesterEmail}
+                />
+                <Form.Control.Feedback type="invalid">
+                  Enter a valid email address.
+                </Form.Control.Feedback>
+                <Form.Text>
+                  This opens a prefilled message to wedclub2026@gmail.com in your email app.
+                  Review and send it to request approval.
+                </Form.Text>
+              </Form.Group>
+              <Button
+                as="a"
+                className={`mt-2${validTesterEmail ? '' : ' disabled'}`}
+                href={testerRequestHref ?? '#'}
+                aria-disabled={!validTesterEmail}
+                tabIndex={validTesterEmail ? 0 : -1}
+                onClick={(e) => {
+                  if (!validTesterEmail) e.preventDefault();
+                }}
+              >
+                Open access request email
+              </Button>
+            </div>
+          </Accordion.Body>
+        </Accordion.Item>
         {FAQ_SECTIONS.map((section, i) => (
           <Accordion.Item eventKey={String(i)} key={section.question}>
             <Accordion.Header>{section.question}</Accordion.Header>

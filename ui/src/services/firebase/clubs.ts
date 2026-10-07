@@ -213,6 +213,19 @@ export async function setClubEtransferIgnoreAboveAmount(clubId: string, amount: 
   });
 }
 
+export async function setClubEtransferAutoSettleExactAmounts(
+  clubId: string,
+  enabled: boolean
+): Promise<void> {
+  return serviceCall('setClubEtransferAutoSettleExactAmounts', async () => {
+    await setDoc(
+      clubDoc(clubId),
+      { etransferAutoSettleExactAmounts: enabled },
+      { merge: true }
+    );
+  });
+}
+
 export async function setClubEtransferSenderAddresses(clubId: string, addresses: string | string[]): Promise<void> {
   return serviceCall('setClubEtransferSenderAddresses', async () => {
     await setDoc(clubDoc(clubId), {

@@ -27,6 +27,11 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   notifications, review the suggested player match and amount, then apply to credit a
   player's balance. Every import is recorded and undoable, and processed emails are labelled
   in Gmail so they aren't found again.
+  This feature is currently supported only for Canadian Interac e-Transfer autodeposit
+  notifications. Before first use, submit the Google account email that receives these
+  notifications to the Badminton Ledger administrator; it must be approved on the Google
+  OAuth tester list before it can connect to Gmail. Help & FAQ includes a field that opens
+  a prefilled tester-access request addressed to `wedclub2026@gmail.com`.
   Forward/reply subject prefixes (`FW:`, `RE:`, `FWD:`, case-insensitive) are supported.
   Admins manage allowed sender addresses in Settings (default:
   `notify@payments.interac.ca`), adding trusted forwarding addresses as needed.
@@ -37,8 +42,12 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   Select the player and use Remember to save a name mapping; future transfers with that
   confirmed mapping can auto-settle exact unpaid debt when session records reconcile.
   Original Interac messages retain distinct payer Reply-To matching and existing email mappings.
-  The e-Transfer page shows a lightweight read-only search summary with a link to Settings;
-  search-window and ignore-amount controls remain available on the page.
+  The e-Transfer page initializes its search window and ignore-amount limit from Settings,
+  then lets admins adjust either value for the current visit without changing the saved defaults.
+  Auto-settlement of confidently matched exact amounts has a saved club default in Settings
+  (enabled when unset) and can still be changed per visit so all newly imported payments remain
+  pending for review when desired.
+  Gmail search options and saved defaults are configured in Settings.
   A custom Gmail query configured in Settings such as `subject:"automatically deposited"` replaces only
   default subject and date filters; include `after:YYYY/MM/DD` to limit dates,
   or clear the query to restore the default search. Allowed From mailboxes are

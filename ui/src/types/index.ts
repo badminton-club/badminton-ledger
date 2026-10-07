@@ -250,6 +250,9 @@ export interface Club {
   // unattended. Defaults to $20 when unset (see
   // DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT).
   etransferIgnoreAboveAmount?: number | null;
+  // Whether confidently matched payments that exactly cover all reconciled
+  // unpaid sessions start enabled for automatic settlement. Defaults to true.
+  etransferAutoSettleExactAmounts?: boolean | null;
   createdAt?: Timestamp;
 }
 
