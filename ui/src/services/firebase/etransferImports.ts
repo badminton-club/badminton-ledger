@@ -90,6 +90,7 @@ export interface EtransferImportResult {
  * Club.etransferIgnoreAboveAmount (see clubs.ts).
  */
 export const DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT = 20;
+export const DEFAULT_ETRANSFER_AUTO_SETTLE_EXACT_AMOUNTS = true;
 
 /**
  * Converts a dollar amount to whole cents, rounding away any floating-point
@@ -275,18 +276,23 @@ export async function deleteEtransferSenderMapping(id: string): Promise<void> {
  * re-run. Each new import is pre-matched to a player, preferring a remembered
  * sender mapping over a plain name lookup. A newly found, matched transfer is
  * automatically applied only when its amount exactly equals the player's full
- * unpaid-session debt and the session records reconcile with that debt.
+ * unpaid-session debt and the session records reconcile with that debt. Without
+ * a payer email, a name-only suggestion needs an admin-confirmed mapping first.
+ * Automatic application can be disabled per search, in which case every new
+ * import remains pending for admin review.
  * Any newly found email above ignoreAboveAmount is skipped entirely — never
  * recorded as a pending import at all — so an unusually large/unexpected
  * transfer isn't picked up unattended.
  */
 export async function importEtransferEmails(
-  senderAddress: string = DEFAULT_ETRANSFER_SENDER_ADDRESS,
+  senderAddress: string | string[] = DEFAULT_ETRANSFER_SENDER_ADDRESS,
   searchAfterDate: string = getDefaultEtransferSearchAfterDate(),
-  ignoreAboveAmount: number = DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT
+  ignoreAboveAmount: number = DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT,
+  customGmailQuery?: string | null,
+  autoSettleExactAmounts: boolean = true
 ): Promise<EtransferImportResult> {
   return serviceCall('importEtransferEmails', async () => {
-    const allFound = await searchEtransferEmails(senderAddress, searchAfterDate);
+    const allFound = await searchEtransferEmails(senderAddress, searchAfterDate, customGmailQuery);
     if (allFound.length === 0) return { found: 0, created: 0, autoSettled: 0, ignored: 0 };
 
     const ignoreAboveCents = toCents(ignoreAboveAmount);
@@ -314,11 +320,13 @@ export async function importEtransferEmails(
     let autoSettled = 0;
     const playerById = new Map(players.map((player) => [player.id, player]));
     for (const etransferImport of newImports) {
+      if (!autoSettleExactAmounts) continue;
       const matchedPlayer = etransferImport.matchedPlayerId
         ? playerById.get(etransferImport.matchedPlayerId)
         : null;
       if (
         !matchedPlayer
+        || (!etransferImport.senderEmail && etransferImport.matchSource !== 'mapping')
         || toCents(etransferImport.amount) <= 0
         || toCents(etransferImport.amount) !== toCents(matchedPlayer.owed ?? 0)
       ) {

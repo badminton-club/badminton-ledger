@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Container, Card, Button, Table, Spinner, Alert, Form, Modal, Badge } from 'react-bootstrap';
+import { Container, Card, Button, Table, Spinner, Alert, Form, Modal, Badge, OverlayTrigger, Popover } from 'react-bootstrap';
 import { format } from 'date-fns';
+import { Link } from 'react-router-dom';
 import {
   fetchClub,
   fetchPendingEtransferImports,
@@ -14,13 +15,12 @@ import {
   fetchEtransferSenderMappings,
   saveEtransferSenderMapping,
   deleteEtransferSenderMapping,
-  setClubEtransferSearchAfterDate,
-  setClubEtransferSearchWindowDays,
-  setClubEtransferIgnoreAboveAmount,
+  resolveEtransferSenderAddresses,
   formatPlayerName,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
   DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS,
   DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT,
+  DEFAULT_ETRANSFER_AUTO_SETTLE_EXACT_AMOUNTS,
   ETRANSFER_SEARCH_WINDOW_PRESETS,
   resolveEtransferSearchAfterDate,
   type EtransferBatchPreview,
@@ -72,30 +72,30 @@ export default function EtransfersPage() {
   const [history, setHistory] = useState<EtransferImport[]>([]);
   const [rowEdits, setRowEdits] = useState<Record<string, RowEdit>>({});
 
-  const [senderAddress, setSenderAddress] = useState(DEFAULT_ETRANSFER_SENDER_ADDRESS);
+  const [senderAddresses, setSenderAddresses] = useState([DEFAULT_ETRANSFER_SENDER_ADDRESS]);
+  const [customGmailQuery, setCustomGmailQuery] = useState('');
   // null means "custom date" mode; otherwise a rolling window in days (recomputed fresh
   // from today on every search, so it never goes stale like a saved absolute date would).
   const [searchWindowDays, setSearchWindowDays] = useState<number | null>(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
   const [customSearchDate, setCustomSearchDate] = useState('');
-  const [savingSearchDate, setSavingSearchDate] = useState(false);
-  const [searchDateMessage, setSearchDateMessage] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [searchMessage, setSearchMessage] = useState('');
+  const [autoSettleExactAmounts, setAutoSettleExactAmounts] = useState(
+    DEFAULT_ETRANSFER_AUTO_SETTLE_EXACT_AMOUNTS
+  );
 
   // Newly found emails above this amount are ignored entirely — never even
   // recorded as a pending import — as a safety net against an unusually
   // large/unexpected transfer being picked up unattended.
-  const [ignoreAboveAmount, setIgnoreAboveAmount] = useState(DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT);
   const [ignoreAboveAmountInput, setIgnoreAboveAmountInput] = useState(String(DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT));
-  const [savingIgnoreAbove, setSavingIgnoreAbove] = useState(false);
-  const [ignoreAboveMessage, setIgnoreAboveMessage] = useState('');
-  const [ignoreAboveError, setIgnoreAboveError] = useState('');
 
-  // Always includes the presets, plus a fallback option for whatever value is
-  // currently loaded/selected (e.g. a club's saved window from before the
-  // preset list changed, or a value only ever set via Firestore directly) —
-  // so the <select> never silently mismatches the real underlying state.
+  const ignoreAboveAmount = useMemo(() => {
+    if (!ignoreAboveAmountInput.trim()) return null;
+    const parsed = Number(ignoreAboveAmountInput);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }, [ignoreAboveAmountInput]);
+
   const searchWindowOptions = useMemo(() => {
     const presetDays = new Set(ETRANSFER_SEARCH_WINDOW_PRESETS.map((preset) => preset.days));
     const options = ETRANSFER_SEARCH_WINDOW_PRESETS.map((preset) => ({
@@ -148,7 +148,7 @@ export default function EtransfersPage() {
     return p ? formatPlayerName(p) : 'Unknown player';
   }, [players]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (resetSearchOptions = false) => {
     if (!isAdmin) { setLoading(false); return; }
     setLoading(true);
     setLoadError('');
@@ -159,20 +159,26 @@ export default function EtransfersPage() {
         fetchEtransferImportHistory(),
         fetchEtransferSenderMappings(),
       ]);
-      setSenderAddress(club?.etransferSenderAddress || DEFAULT_ETRANSFER_SENDER_ADDRESS);
-      if (club?.etransferSearchWindowDays != null) {
-        setSearchWindowDays(club.etransferSearchWindowDays);
-        setCustomSearchDate('');
-      } else if (club?.etransferSearchAfterDate) {
-        setSearchWindowDays(null);
-        setCustomSearchDate(club.etransferSearchAfterDate);
-      } else {
-        setSearchWindowDays(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
-        setCustomSearchDate('');
+      const allowedSenders = resolveEtransferSenderAddresses(club);
+      setSenderAddresses(allowedSenders);
+      setCustomGmailQuery(club?.etransferCustomGmailQuery?.trim() || '');
+      if (resetSearchOptions) {
+        if (club?.etransferSearchWindowDays != null) {
+          setSearchWindowDays(club.etransferSearchWindowDays);
+          setCustomSearchDate('');
+        } else if (club?.etransferSearchAfterDate) {
+          setSearchWindowDays(null);
+          setCustomSearchDate(club.etransferSearchAfterDate);
+        } else {
+          setSearchWindowDays(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
+          setCustomSearchDate('');
+        }
+        const resolvedIgnoreAbove = club?.etransferIgnoreAboveAmount ?? DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT;
+        setIgnoreAboveAmountInput(String(resolvedIgnoreAbove));
+        setAutoSettleExactAmounts(
+          club?.etransferAutoSettleExactAmounts ?? DEFAULT_ETRANSFER_AUTO_SETTLE_EXACT_AMOUNTS
+        );
       }
-      const resolvedIgnoreAbove = club?.etransferIgnoreAboveAmount ?? DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT;
-      setIgnoreAboveAmount(resolvedIgnoreAbove);
-      setIgnoreAboveAmountInput(String(resolvedIgnoreAbove));
       setPending(pendingList);
       setHistory(historyList);
       setMappings(mappingList);
@@ -190,22 +196,24 @@ export default function EtransfersPage() {
     }
   }, [isAdmin, clubId]);
 
-  useEffect(() => { load(); }, [load]);
-
-  /** Persists whichever search-cutoff mode (rolling window or custom date) is active. */
-  const persistSearchSetting = async () => {
-    if (!clubId) return;
-    if (searchWindowDays != null) await setClubEtransferSearchWindowDays(clubId, searchWindowDays);
-    else await setClubEtransferSearchAfterDate(clubId, customSearchDate);
-  };
+  useEffect(() => { load(true); }, [load]);
 
   const handleSearch = async () => {
+    if (ignoreAboveAmount == null) {
+      setSearchError('Enter a valid transfer limit of $0 or more.');
+      return;
+    }
     setSearching(true);
     setSearchError('');
     setSearchMessage('');
     try {
-      await persistSearchSetting();
-      const { found, created, autoSettled, ignored } = await importEtransferEmails(senderAddress, searchAfterDate, ignoreAboveAmount);
+      const { found, created, autoSettled, ignored } = await importEtransferEmails(
+        senderAddresses,
+        searchAfterDate,
+        ignoreAboveAmount,
+        customGmailQuery,
+        autoSettleExactAmounts
+      );
       const pendingCreated = created - autoSettled;
       const alreadyReviewed = found - ignored - created;
       const ignoredNote = ignored > 0
@@ -230,43 +238,6 @@ export default function EtransfersPage() {
       setSearchError(err instanceof Error ? err.message : 'Failed to search Gmail.');
     } finally {
       setSearching(false);
-    }
-  };
-
-  const handleSaveIgnoreAboveAmount = async () => {
-    if (!clubId) return;
-    const parsed = parseFloat(ignoreAboveAmountInput);
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      setIgnoreAboveError('Enter a valid amount of $0 or more.');
-      return;
-    }
-    setIgnoreAboveError('');
-    setIgnoreAboveMessage('');
-    setSavingIgnoreAbove(true);
-    try {
-      await setClubEtransferIgnoreAboveAmount(clubId, parsed);
-      setIgnoreAboveAmount(parsed);
-      setIgnoreAboveAmountInput(parsed.toFixed(2));
-      setIgnoreAboveMessage('Saved.');
-    } catch (err) {
-      setIgnoreAboveError(err instanceof Error ? err.message : 'Failed to save the ignore-above amount.');
-    } finally {
-      setSavingIgnoreAbove(false);
-    }
-  };
-
-  const handleSaveSearchDate = async () => {
-    if (!clubId) return;
-    setSavingSearchDate(true);
-    setSearchError('');
-    setSearchDateMessage('');
-    try {
-      await persistSearchSetting();
-      setSearchDateMessage('Saved.');
-    } catch (err) {
-      setSearchError(err instanceof Error ? err.message : 'Failed to save the search setting.');
-    } finally {
-      setSavingSearchDate(false);
     }
   };
 
@@ -531,19 +502,67 @@ export default function EtransfersPage() {
     <Container className="py-4">
       <h2>e-Transfer Import</h2>
       <p className="text-muted">
-        Search Gmail for Interac e-Transfer autodeposit notifications, review the suggested player
-        match and amount, then apply to credit their balance. A confidently matched transfer is
-        applied automatically when its amount exactly equals all of that player's unpaid sessions;
-        everything else waits for review below. Any found email above the ignore-above amount is
-        skipped entirely — not picked up at all.
+        Search Gmail for Interac e-Transfer notifications, review suggested player matches, and
+        apply confirmed payments. Exact unpaid-session matches may be applied automatically.
       </p>
 
       <Card className="mb-3">
         <Card.Body className="d-flex flex-wrap align-items-end gap-3">
-          <Button onClick={handleSearch} disabled={searching || !searchAfterDate}>
-            {searching ? <><Spinner size="sm" animation="border" className="me-2" />Connecting to Gmail…</> : 'Connect Gmail & Search'}
-          </Button>
-          <span className="text-muted small">Searching e-Transfers from: {senderAddress}</span>
+          <div className="d-flex flex-column align-items-start gap-2">
+            <Button
+              onClick={handleSearch}
+              disabled={!!loadError || searching || ignoreAboveAmount == null || (!customGmailQuery && !searchAfterDate)}
+            >
+              {searching ? <><Spinner size="sm" animation="border" className="me-2" />Connecting to Gmail…</> : 'Connect Gmail & Search'}
+            </Button>
+            <div className="d-flex align-items-center gap-1">
+              <Form.Check
+                id="etransfer-auto-settle"
+                type="checkbox"
+                label="Auto-settle exact amounts"
+                checked={autoSettleExactAmounts}
+                onChange={(e) => setAutoSettleExactAmounts(e.target.checked)}
+              />
+              <OverlayTrigger
+                trigger="click"
+                placement="bottom"
+                rootClose
+                overlay={(
+                  <Popover id="etransfer-auto-settle-help" className="etransfer-auto-settle-help">
+                    <Popover.Header as="h3">Auto-settle exact amounts</Popover.Header>
+                    <Popover.Body>
+                      When enabled, a new payment is applied automatically only when the payer is
+                      confidently matched and the amount exactly covers all of that player's
+                      reconciled unpaid sessions. Otherwise it stays pending for review. Turn this
+                      off to send every new payment to review.
+                    </Popover.Body>
+                  </Popover>
+                )}
+              >
+                <button
+                  type="button"
+                  className="etransfer-help-toggle"
+                  aria-label="Explain auto-settle exact amounts"
+                >
+                  ?
+                </button>
+              </OverlayTrigger>
+            </div>
+          </div>
+          <div className="etransfer-search-summary text-muted small">
+            {customGmailQuery ? (
+              <>
+                Using custom Gmail query (search window overridden).
+                <span className="etransfer-search-senders">Allowed senders: {senderAddresses.join(', ')}</span>
+              </>
+            ) : (
+              <>
+                Searching e-Transfers from:
+                <span className="etransfer-search-senders">{senderAddresses.join(', ')}</span>
+              </>
+            )}
+            <Link className="d-inline-block mt-1" to="/settings">Edit search defaults</Link>
+          </div>
           <Form.Group controlId="etransfer-search-window">
             <Form.Label className="small mb-1">Search window</Form.Label>
             <Form.Select
@@ -557,9 +576,8 @@ export default function EtransfersPage() {
                 } else {
                   setSearchWindowDays(Number(value));
                 }
-                setSearchDateMessage('');
               }}
-              disabled={savingSearchDate}
+              disabled={!!customGmailQuery}
             >
               {searchWindowOptions.map((preset) => (
                 <option key={preset.days} value={preset.days}>{preset.label}</option>
@@ -574,24 +592,11 @@ export default function EtransfersPage() {
                 type="date"
                 size="sm"
                 value={customSearchDate}
-                onChange={(e) => {
-                  setCustomSearchDate(e.target.value);
-                  setSearchDateMessage('');
-                }}
-                disabled={savingSearchDate}
+                onChange={(e) => setCustomSearchDate(e.target.value)}
+                disabled={!!customGmailQuery}
               />
             </Form.Group>
           )}
-          <Button
-            size="sm"
-            variant="outline-secondary"
-            onClick={handleSaveSearchDate}
-            disabled={savingSearchDate || !searchAfterDate}
-          >
-            {savingSearchDate ? <Spinner size="sm" animation="border" /> : 'Save window'}
-          </Button>
-          {searchDateMessage && <span className="text-success small">{searchDateMessage}</span>}
-
           <Form.Group controlId="etransfer-ignore-above">
             <Form.Label className="small mb-1">Ignore amounts over</Form.Label>
             <div className="d-flex align-items-center gap-2">
@@ -603,25 +608,11 @@ export default function EtransfersPage() {
                 step={0.01}
                 style={{ width: 100 }}
                 value={ignoreAboveAmountInput}
-                onChange={(e) => {
-                  setIgnoreAboveAmountInput(e.target.value);
-                  setIgnoreAboveMessage('');
-                  setIgnoreAboveError('');
-                }}
-                disabled={savingIgnoreAbove}
+                onChange={(e) => setIgnoreAboveAmountInput(e.target.value)}
+                isInvalid={ignoreAboveAmount == null}
               />
             </div>
           </Form.Group>
-          <Button
-            size="sm"
-            variant="outline-secondary"
-            onClick={handleSaveIgnoreAboveAmount}
-            disabled={savingIgnoreAbove || !clubId}
-          >
-            {savingIgnoreAbove ? <Spinner size="sm" animation="border" /> : 'Save limit'}
-          </Button>
-          {ignoreAboveMessage && <span className="text-success small">{ignoreAboveMessage}</span>}
-          {ignoreAboveError && <span className="text-danger small">{ignoreAboveError}</span>}
         </Card.Body>
         {(searchMessage || searchError) && (
           <Card.Body className="pt-0">

@@ -1,3 +1,4 @@
+import { normalizeEtransferSenderAddresses } from './gmail';
 import {
   getDoc,
   getDocs,
@@ -207,6 +208,38 @@ export async function setClubEtransferIgnoreAboveAmount(clubId: string, amount: 
     await setDoc(
       clubDoc(clubId),
       { etransferIgnoreAboveAmount: amount },
+      { merge: true }
+    );
+  });
+}
+
+export async function setClubEtransferAutoSettleExactAmounts(
+  clubId: string,
+  enabled: boolean
+): Promise<void> {
+  return serviceCall('setClubEtransferAutoSettleExactAmounts', async () => {
+    await setDoc(
+      clubDoc(clubId),
+      { etransferAutoSettleExactAmounts: enabled },
+      { merge: true }
+    );
+  });
+}
+
+export async function setClubEtransferSenderAddresses(clubId: string, addresses: string | string[]): Promise<void> {
+  return serviceCall('setClubEtransferSenderAddresses', async () => {
+    await setDoc(clubDoc(clubId), {
+      etransferSenderAddresses: normalizeEtransferSenderAddresses(addresses),
+    }, { merge: true });
+  });
+}
+
+/** Overrides Gmail subject/date filters; allowed senders are always enforced. */
+export async function setClubEtransferCustomGmailQuery(clubId: string, query: string | null): Promise<void> {
+  return serviceCall('setClubEtransferCustomGmailQuery', async () => {
+    await setDoc(
+      clubDoc(clubId),
+      { etransferCustomGmailQuery: query?.trim() || null },
       { merge: true }
     );
   });

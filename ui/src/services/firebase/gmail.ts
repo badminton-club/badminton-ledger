@@ -42,6 +42,25 @@ function getGmailAuthInstance(): Auth {
 /** The default sender address for Interac e-Transfer autodeposit notifications. */
 export const DEFAULT_ETRANSFER_SENDER_ADDRESS = 'notify@payments.interac.ca';
 
+const SENDER_EMAIL_PATTERN = /^[a-z0-9](?:[a-z0-9._%+-]*[a-z0-9])?@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
+
+export function normalizeEtransferSenderAddresses(value: string | string[]): string[] {
+  const entries = typeof value === 'string' ? value.split(/[,\n]/) : value;
+  const addresses = entries.map((entry) => entry.trim().toLowerCase());
+  if (!addresses.length || addresses.some((address) => !SENDER_EMAIL_PATTERN.test(address))) {
+    throw new Error('Enter at least one valid allowed sender email address, separated by commas or newlines.');
+  }
+  return Array.from(new Set(addresses));
+}
+
+export function resolveEtransferSenderAddresses(
+  club: { etransferSenderAddresses?: string[]; etransferSenderAddress?: string } | null | undefined
+): string[] {
+  return normalizeEtransferSenderAddresses(
+    club?.etransferSenderAddresses ?? club?.etransferSenderAddress ?? DEFAULT_ETRANSFER_SENDER_ADDRESS
+  );
+}
+
 /** The default rolling search window: one calendar week back. */
 export const DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS = 7;
 
@@ -227,11 +246,12 @@ function extractBodyText(payload: GmailMessagePart | undefined): string {
   return '';
 }
 
-/** Extracts the display name and (if present) email address from a `Name <email>` header value. */
+/** Extracts an address from a bare email or `Name <email>` header value. */
 function parseAddressHeader(value: string | undefined): { name: string; email: string | null } {
   if (!value) return { name: '', email: null };
   const match = value.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
   if (match) return { name: match[1].trim(), email: match[2].trim().toLowerCase() };
+  if (SENDER_EMAIL_PATTERN.test(value.trim())) return { name: '', email: value.trim().toLowerCase() };
   return { name: value.trim(), email: null };
 }
 
@@ -260,7 +280,7 @@ export function parseEtransferMessage(message: {
 
   const subject = header('Subject') ?? '';
   const subjectMatch = subject.match(
-    /received\s+\$([\d,]+\.\d{2})\s+from\s+(.+?)\s+and it has been automatically deposited/i
+    /(?:(?:fw|re|fwd):\s*)*(?:Interac e-Transfer:\s*You've\s+)?received\s+\$([\d,]+\.\d{2})\s+from\s+(.+?)\s+and it has been automatically deposited/i
   );
   if (!subjectMatch) return null; // not an autodeposit notification — skip it
 
@@ -278,6 +298,13 @@ export function parseEtransferMessage(message: {
 
   const fromHeader = parseAddressHeader(header('From'));
   const replyTo = parseAddressHeader(header('Reply-To'));
+  const isForwarded = /^\s*(?:fw|fwd|re):/i.test(subject)
+    || fromHeader.email !== DEFAULT_ETRANSFER_SENDER_ADDRESS;
+  // Outer headers on a forwarded message identify the forwarder, not the payer.
+  // Even a distinct Reply-To could belong to another forwarder in the chain.
+  const senderEmail = !isForwarded && replyTo.email !== fromHeader.email
+    ? replyTo.email
+    : null;
 
   // Subject wins over the body's "Sent From"/"Amount" fields — the body is
   // scanned for those labels anywhere in the decoded text, and the sender's own
@@ -299,10 +326,7 @@ export function parseEtransferMessage(message: {
     gmailThreadId: message.threadId,
     subject,
     senderName,
-    // Reply-To carries the e-Transfer sender's own email (distinct from the
-    // notify@payments.interac.ca address every autodeposit email is *sent* from),
-    // which is the stable identifier used for remembered sender→player mappings.
-    senderEmail: replyTo.email,
+    senderEmail,
     amount,
     memo,
     referenceNumber,
@@ -312,7 +336,8 @@ export function parseEtransferMessage(message: {
 
 /**
  * Searches Gmail for Interac e-Transfer autodeposit notifications from the given
- * sender address on or after `searchAfterDate`. This is purely a read — nothing
+ * allowed sender addresses on or after `searchAfterDate`. A nonblank custom query
+ * replaces default subject/date filters, never the allowed senders. This is purely a read — nothing
  * is ever written back to Gmail. Deduplication of already-reviewed emails is
  * handled entirely in Firestore (the Gmail message id is the doc id — see
  * `importEtransferEmails` in etransferImports.ts), so a message already
@@ -343,15 +368,22 @@ function gmailAfterEpochSeconds(date: string): number {
 const GMAIL_LIST_MAX_PAGES = 20;
 
 export async function searchEtransferEmails(
-  senderAddress: string,
-  searchAfterDate: string = getDefaultEtransferSearchAfterDate()
+  senderAddress: string | string[],
+  searchAfterDate: string = getDefaultEtransferSearchAfterDate(),
+  customGmailQuery?: string | null
 ): Promise<ParsedEtransferEmail[]> {
   return serviceCall('searchEtransferEmails', async () => {
     // Gmail accepts Unix seconds, which avoids its documented PST-based
     // interpretation of calendar dates and makes the lower bound unambiguous.
-    const after = gmailAfterEpochSeconds(searchAfterDate);
+    const addresses = normalizeEtransferSenderAddresses(senderAddress);
+    const senderClause = addresses.length === 1
+      ? `from:${addresses[0]}`
+      : `(${addresses.map((address) => `from:${address}`).join(' OR ')})`;
+    const customQuery = customGmailQuery?.trim();
+    const q = customQuery
+      ? `(${senderClause}) AND (${customQuery})`
+      : `${senderClause} subject:"automatically deposited" after:${gmailAfterEpochSeconds(searchAfterDate)}`;
     const accessToken = await getGmailAccessToken();
-    const q = `from:${senderAddress} subject:"automatically deposited" after:${after}`;
 
     const messages: { id: string; threadId: string }[] = [];
     let pageToken: string | undefined;
@@ -376,6 +408,18 @@ export async function searchEtransferEmails(
     );
 
     return fullMessages
+      .filter((message) => {
+        // Gmail search syntax is not a trust boundary. Check the actual From
+        // mailbox too; Reply-To identifies the payer, not the notification sender.
+        const headers = message.payload?.headers?.filter((h) => h.name.toLowerCase() === 'from') ?? [];
+        if (headers.length !== 1) return false;
+        const value = headers[0].value.trim();
+        const namedMailbox = value.match(/^(?:"[^"\r\n]*"|[^"<>,@\r\n]*)\s*<([^<>\r\n]+)>$/)?.[1]?.trim().toLowerCase();
+        const mailbox = SENDER_EMAIL_PATTERN.test(value)
+          ? value.toLowerCase()
+          : namedMailbox;
+        return !!mailbox && SENDER_EMAIL_PATTERN.test(mailbox) && addresses.includes(mailbox);
+      })
       .map(parseEtransferMessage)
       .filter((e): e is ParsedEtransferEmail => e !== null);
   });

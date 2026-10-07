@@ -12,8 +12,9 @@ import {
   type DriveBackupFile,
 } from '../services/firebase/drive';
 import { encryptBackupPayload, decryptBackupPayload, isEncryptedBackupPayload } from '../services/backupCrypto';
-import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, createClubInvitation, fetchClubInvitations, deleteClubInvitation, setClubTabEnabled, setClubDefaultCourtCount, setClubEtransferSearchWindowDays, setClubEtransferIgnoreAboveAmount, DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS, DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT, ETRANSFER_SEARCH_WINDOW_PRESETS, deleteClub, fetchUserClubs, fetchClub, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, fetchSuggestions, deleteSuggestion, updatePlayerProfile } from '../services/firebase';
+import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, createClubInvitation, fetchClubInvitations, deleteClubInvitation, setClubTabEnabled, setClubDefaultCourtCount, setClubEtransferSearchWindowDays, setClubEtransferIgnoreAboveAmount, setClubEtransferAutoSettleExactAmounts, setClubEtransferCustomGmailQuery, DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS, DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT, DEFAULT_ETRANSFER_AUTO_SETTLE_EXACT_AMOUNTS, ETRANSFER_SEARCH_WINDOW_PRESETS, deleteClub, fetchUserClubs, fetchClub, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, fetchSuggestions, deleteSuggestion, updatePlayerProfile } from '../services/firebase';
 import { auth } from '../services/firebase/client';
+import { setClubEtransferSenderAddresses, normalizeEtransferSenderAddresses, resolveEtransferSenderAddresses, DEFAULT_ETRANSFER_SENDER_ADDRESS } from '../services/firebase';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
 import {
@@ -86,9 +87,7 @@ export default function SettingsPage() {
   const [defaultCourtsError, setDefaultCourtsError] = useState('');
   const [defaultCourtsMessage, setDefaultCourtsMessage] = useState('');
 
-  // Defaults for the e-Transfer Gmail import — same underlying club fields
-  // (and save functions) as the e-Transfers page itself, so editing either
-  // place keeps the other in sync.
+  // Defaults for the e-Transfer Gmail import.
   const [etransferDefaultsLoading, setEtransferDefaultsLoading] = useState(false);
   const [etransferSearchWindowDays, setEtransferSearchWindowDays] = useState(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
   const [savingSearchWindow, setSavingSearchWindow] = useState(false);
@@ -98,6 +97,20 @@ export default function SettingsPage() {
   const [savingIgnoreAbove, setSavingIgnoreAbove] = useState(false);
   const [ignoreAboveError, setIgnoreAboveError] = useState('');
   const [ignoreAboveMessage, setIgnoreAboveMessage] = useState('');
+  const [autoSettleExactAmounts, setAutoSettleExactAmounts] = useState(
+    DEFAULT_ETRANSFER_AUTO_SETTLE_EXACT_AMOUNTS
+  );
+  const [savingAutoSettle, setSavingAutoSettle] = useState(false);
+  const [autoSettleError, setAutoSettleError] = useState('');
+  const [autoSettleMessage, setAutoSettleMessage] = useState('');
+  const [customGmailQuery, setCustomGmailQuery] = useState('');
+  const [savingCustomQuery, setSavingCustomQuery] = useState(false);
+  const [customQueryError, setCustomQueryError] = useState('');
+  const [customQueryMessage, setCustomQueryMessage] = useState('');
+  const [senderAddressesInput, setSenderAddressesInput] = useState(DEFAULT_ETRANSFER_SENDER_ADDRESS);
+  const [savingSenders, setSavingSenders] = useState(false);
+  const [sendersError, setSendersError] = useState('');
+  const [sendersMessage, setSendersMessage] = useState('');
 
   const [requests, setRequests] = useState<LinkRequest[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
@@ -158,6 +171,12 @@ export default function SettingsPage() {
     setSearchWindowMessage('');
     setIgnoreAboveError('');
     setIgnoreAboveMessage('');
+    setAutoSettleError('');
+    setAutoSettleMessage('');
+    setCustomQueryError('');
+    setCustomQueryMessage('');
+    setSendersError('');
+    setSendersMessage('');
     fetchClub(clubId)
       .then((club) => {
         if (cancelled) return;
@@ -165,6 +184,11 @@ export default function SettingsPage() {
         setEtransferSearchWindowDays(club?.etransferSearchWindowDays ?? DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
         const resolvedIgnoreAbove = club?.etransferIgnoreAboveAmount ?? DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT;
         setIgnoreAboveAmountInput(String(resolvedIgnoreAbove));
+        setAutoSettleExactAmounts(
+          club?.etransferAutoSettleExactAmounts ?? DEFAULT_ETRANSFER_AUTO_SETTLE_EXACT_AMOUNTS
+        );
+        setCustomGmailQuery(club?.etransferCustomGmailQuery ?? '');
+        setSenderAddressesInput(resolveEtransferSenderAddresses(club).join(', '));
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -232,6 +256,54 @@ export default function SettingsPage() {
       setIgnoreAboveError(err instanceof Error ? err.message : 'Failed to save the ignore-above amount.');
     } finally {
       setSavingIgnoreAbove(false);
+    }
+  };
+
+  const handleSaveAutoSettle = async () => {
+    if (!clubId) return;
+    setSavingAutoSettle(true);
+    setAutoSettleError('');
+    setAutoSettleMessage('');
+    try {
+      await setClubEtransferAutoSettleExactAmounts(clubId, autoSettleExactAmounts);
+      setAutoSettleMessage('Saved.');
+    } catch (err) {
+      setAutoSettleError(err instanceof Error ? err.message : 'Failed to save the auto-settle default.');
+    } finally {
+      setSavingAutoSettle(false);
+    }
+  };
+
+  const handleSaveSenders = async () => {
+    if (!clubId) return;
+    setSavingSenders(true);
+    setSendersError('');
+    setSendersMessage('');
+    try {
+      const addresses = normalizeEtransferSenderAddresses(senderAddressesInput);
+      await setClubEtransferSenderAddresses(clubId, addresses);
+      setSenderAddressesInput(addresses.join(', '));
+      setSendersMessage('Saved.');
+    } catch (err) {
+      setSendersError(err instanceof Error ? err.message : 'Failed to save allowed senders.');
+    } finally {
+      setSavingSenders(false);
+    }
+  };
+
+  const handleSaveCustomGmailQuery = async () => {
+    if (!clubId) return;
+    setSavingCustomQuery(true);
+    setCustomQueryError('');
+    setCustomQueryMessage('');
+    try {
+      await setClubEtransferCustomGmailQuery(clubId, customGmailQuery);
+      setCustomGmailQuery(customGmailQuery.trim());
+      setCustomQueryMessage('Saved.');
+    } catch (err) {
+      setCustomQueryError(err instanceof Error ? err.message : 'Failed to save the custom Gmail query.');
+    } finally {
+      setSavingCustomQuery(false);
     }
   };
 
@@ -771,10 +843,9 @@ export default function SettingsPage() {
       <Card className="mt-3">
         <Card.Header>e-Transfer import defaults</Card.Header>
         <Card.Body>
-          <Card.Text className="text-muted">
-            Defaults used by the Gmail e-Transfer import (e-Transfers tab). Changing these here or
-            there updates the same club setting either way.
-          </Card.Text>
+        <Card.Text className="text-muted">
+          Configure the defaults used by Gmail imports on the e-Transfers tab.
+        </Card.Text>
           <div className="d-flex flex-wrap align-items-end gap-3">
             <Form.Group controlId="settings-etransfer-search-window">
               <Form.Label className="small mb-1">Search window</Form.Label>
@@ -831,9 +902,92 @@ export default function SettingsPage() {
               {savingIgnoreAbove ? <Spinner size="sm" animation="border" /> : 'Save limit'}
             </Button>
             {ignoreAboveMessage && <span className="text-success small">{ignoreAboveMessage}</span>}
+
+            <Form.Group controlId="settings-etransfer-auto-settle">
+              <Form.Check
+                type="checkbox"
+                label="Auto-settle exact amounts by default"
+                checked={autoSettleExactAmounts}
+                onChange={(e) => {
+                  setAutoSettleExactAmounts(e.target.checked);
+                  setAutoSettleMessage('');
+                  setAutoSettleError('');
+                }}
+                disabled={etransferDefaultsLoading || savingAutoSettle || !clubId}
+              />
+              <Form.Text className="text-muted">
+                Initializes the checkbox on the e-Transfers tab; admins can override it per visit.
+              </Form.Text>
+            </Form.Group>
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              onClick={handleSaveAutoSettle}
+              disabled={etransferDefaultsLoading || savingAutoSettle || !clubId}
+            >
+              {savingAutoSettle ? <Spinner size="sm" animation="border" /> : 'Save auto-settle default'}
+            </Button>
+            {autoSettleMessage && <span className="text-success small">{autoSettleMessage}</span>}
           </div>
           {searchWindowError && <Alert variant="danger" className="mt-2 mb-0 py-2">{searchWindowError}</Alert>}
           {ignoreAboveError && <Alert variant="danger" className="mt-2 mb-0 py-2">{ignoreAboveError}</Alert>}
+          {autoSettleError && <Alert variant="danger" className="mt-2 mb-0 py-2">{autoSettleError}</Alert>}
+          <Form.Group controlId="settings-etransfer-allowed-senders" className="mt-3">
+            <Form.Label className="small mb-1">Allowed sender addresses</Form.Label>
+            <Form.Control
+              as="textarea"
+              rows={2}
+              size="sm"
+              value={senderAddressesInput}
+              onChange={(e) => {
+                setSenderAddressesInput(e.target.value);
+                setSendersMessage('');
+                setSendersError('');
+              }}
+              disabled={etransferDefaultsLoading || savingSenders || !clubId}
+            />
+            <Form.Text className="text-muted d-block">
+              Separate addresses with commas or newlines. Keep notify@payments.interac.ca and add only trusted forwarding addresses.
+              Only these From mailboxes are accepted, including with custom queries (not sender authenticity verification).
+            </Form.Text>
+            <Button size="sm" variant="outline-secondary" className="mt-2" onClick={handleSaveSenders} disabled={etransferDefaultsLoading || savingSenders || !clubId}>
+              {savingSenders ? <Spinner size="sm" animation="border" /> : 'Save senders'}
+            </Button>
+            {sendersMessage && <span className="text-success small ms-2">{sendersMessage}</span>}
+            {sendersError && <Alert variant="danger" className="mt-2 mb-0 py-2">{sendersError}</Alert>}
+          </Form.Group>
+          <Form.Group controlId="settings-etransfer-custom-query" className="mt-3">
+            <Form.Label className="small mb-1">Custom Gmail query (optional)</Form.Label>
+            <Form.Control
+              type="text"
+              size="sm"
+              placeholder='subject:"automatically deposited"'
+              value={customGmailQuery}
+              onChange={(e) => {
+                setCustomGmailQuery(e.target.value);
+                setCustomQueryMessage('');
+                setCustomQueryError('');
+              }}
+              disabled={etransferDefaultsLoading || savingCustomQuery || !clubId}
+            />
+            <Form.Text className="text-muted d-block">
+              Replaces default subject and search-window filters, never the allowed sender list. Leave blank to use the default.
+              {' '}For forwarded emails, add their From address to allowed senders and try <code>subject:"automatically deposited"</code>.
+              {' '}Use <code>after:YYYY/MM/DD</code> to limit dates.
+              {' '}<a href="https://support.google.com/mail/answer/7190" target="_blank" rel="noopener noreferrer">Gmail search syntax</a>.
+            </Form.Text>
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              className="mt-2"
+              onClick={handleSaveCustomGmailQuery}
+              disabled={etransferDefaultsLoading || savingCustomQuery || !clubId}
+            >
+              {savingCustomQuery ? <Spinner size="sm" animation="border" /> : 'Save query'}
+            </Button>
+            {customQueryMessage && <span className="text-success small ms-2">{customQueryMessage}</span>}
+          </Form.Group>
+          {customQueryError && <Alert variant="danger" className="mt-2 mb-0 py-2">{customQueryError}</Alert>}
         </Card.Body>
       </Card>
 

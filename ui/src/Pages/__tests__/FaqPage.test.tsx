@@ -15,6 +15,7 @@ describe('FaqPage', () => {
     renderWithProviders(<FaqPage />);
 
     expect(screen.getByRole('heading', { name: 'Help & FAQ' })).toBeInTheDocument();
+    expect(screen.getByText('How do I get access to Gmail e-Transfer imports?')).toBeInTheDocument();
     expect(screen.getByText('What does "Comp" mean?')).toBeInTheDocument();
     expect(screen.getByText('What is "Default payer"?')).toBeInTheDocument();
     expect(screen.getByText('What is a "Guest" / "non-regular player"?')).toBeInTheDocument();
@@ -33,6 +34,33 @@ describe('FaqPage', () => {
 
     const compAnswer = await screen.findByText(/club owner has settled this/);
     expect(compAnswer.closest('.accordion-collapse')).toHaveClass('show');
+  });
+
+  it('explains the e-Transfer import eligibility and approval requirements', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<FaqPage />);
+
+    await user.click(screen.getByText('How do I get access to Gmail e-Transfer imports?'));
+
+    const canadaRequirement = screen.getByText(/supported only for Canadian Interac/i);
+    expect(canadaRequirement.closest('.accordion-collapse')).toHaveClass('show');
+    expect(screen.getByText(/wait for confirmation that the account has been approved/i)).toBeInTheDocument();
+    expect(screen.getByText(/opens a prefilled message to wedclub2026@gmail.com/i)).toBeInTheDocument();
+  });
+
+  it('builds a tester-access email for the requested Google account', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<FaqPage />);
+
+    await user.click(screen.getByText('How do I get access to Gmail e-Transfer imports?'));
+    const requestLink = screen.getByText('Open access request email');
+    expect(requestLink).toHaveAttribute('aria-disabled', 'true');
+
+    await user.type(screen.getByLabelText('Google/Gmail email to approve'), 'treasurer@gmail.com');
+
+    expect(requestLink).toHaveAttribute('aria-disabled', 'false');
+    expect(requestLink.getAttribute('href')).toContain('mailto:wedclub2026@gmail.com');
+    expect(requestLink.getAttribute('href')).toContain('treasurer%40gmail.com');
   });
 
   it('submits a suggestion and saves it under the current club', async () => {

@@ -15,8 +15,13 @@ import {
 import {
   searchEtransferEmails,
   getDefaultEtransferSearchAfterDate,
+  parseEtransferMessage,
 } from '../../services/firebase/gmail';
-import { rejectEtransferImport, dismissEtransferImport } from '../../services/firebase';
+import {
+  rejectEtransferImport,
+  dismissEtransferImport,
+  resolveEtransferSearchAfterDate,
+} from '../../services/firebase';
 import type { Player } from '../../types';
 
 jest.mock('../../services/firebase/gmail', () => {
@@ -70,6 +75,72 @@ describe('EtransfersPage', () => {
     jest.mocked(dismissEtransferImport).mockImplementation(actual.dismissEtransferImport);
   });
 
+  it('uses the saved custom Gmail query without exposing search-setting editors', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc('test-club', { name: 'Test Club', etransferCustomGmailQuery: 'label:forwarded' });
+    jest.mocked(searchEtransferEmails).mockResolvedValue([]);
+    renderPage();
+
+    expect(await screen.findByText(/using custom gmail query/i)).toHaveTextContent('search window overridden');
+    expect(screen.queryByLabelText('Custom Gmail query (optional)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Allowed sender addresses')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save query' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save senders' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Edit search defaults' })).toHaveAttribute('href', '/settings');
+    expect(screen.getByRole('combobox', { name: 'Search window' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Save window' })).not.toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: 'Ignore amounts over' })).toHaveValue(20);
+    expect(screen.queryByRole('button', { name: 'Save limit' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await screen.findByText('No new autodeposit emails found.');
+    expect(searchEtransferEmails).toHaveBeenLastCalledWith(
+      ['notify@payments.interac.ca'], getDefaultEtransferSearchAfterDate(), 'label:forwarded'
+    );
+    expect(getClubMetaDocData('test-club')).toMatchObject({ etransferCustomGmailQuery: 'label:forwarded' });
+  });
+
+  it('loads and searches with saved allowed senders even when a custom query is active', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc('test-club', {
+      name: 'Test Club', etransferSenderAddresses: ['notify@payments.interac.ca', 'forwarder@example.com'],
+      etransferCustomGmailQuery: 'label:forwarded',
+    });
+    jest.mocked(searchEtransferEmails).mockResolvedValue([]);
+    renderPage();
+    expect(await screen.findByText(/using custom gmail query/i)).toHaveTextContent('Allowed senders: notify@payments.interac.ca, forwarder@example.com');
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await screen.findByText('No new autodeposit emails found.');
+    expect(searchEtransferEmails).toHaveBeenLastCalledWith(
+      ['notify@payments.interac.ca', 'forwarder@example.com'], getDefaultEtransferSearchAfterDate(), 'label:forwarded'
+    );
+  });
+
+  it('uses a saved legacy sender without exposing an editor or widening the search', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc('test-club', { name: 'Test Club', etransferSenderAddress: 'bank@example.com' });
+    jest.mocked(searchEtransferEmails).mockResolvedValue([]);
+    renderPage();
+    expect(await screen.findByText(/searching e-transfers from/i)).toHaveTextContent('bank@example.com');
+    expect(screen.queryByLabelText('Allowed sender addresses')).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Search window' })).toBeEnabled();
+    expect(getClubMetaDocData('test-club')).not.toHaveProperty('etransferSenderAddresses');
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await screen.findByText('No new autodeposit emails found.');
+    expect(searchEtransferEmails).toHaveBeenLastCalledWith(['bank@example.com'], getDefaultEtransferSearchAfterDate(), '');
+  });
+
+  it('disables searching when the saved sender list is invalid', async () => {
+    seedClubMetaDoc('test-club', {
+      name: 'Test Club', etransferSenderAddresses: [], etransferCustomGmailQuery: 'label:forwarded',
+    });
+    renderPage();
+    expect(await screen.findByText(/Enter at least one valid allowed sender/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /connect gmail & search/i })).toBeDisabled();
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: 'Edit search defaults' })).toHaveAttribute('href', '/settings');
+  });
+
   it('finds new e-Transfer emails via search, matches by name, and lists them for review', async () => {
     const user = userEvent.setup();
     seedClubDoc('players', 'p1', makePlayer());
@@ -90,18 +161,82 @@ describe('EtransfersPage', () => {
     renderPage();
     expect(await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.')).toBeInTheDocument();
     const defaultSearchDate = getDefaultEtransferSearchAfterDate();
-    // Default mode is the "1 week" rolling window, so no custom date input is shown.
     expect(screen.getByRole('combobox', { name: 'Search window' })).toHaveValue('7');
     expect(screen.queryByLabelText('Search emails after')).not.toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: 'Ignore amounts over' })).toHaveValue(20);
+    expect(screen.getByRole('checkbox', { name: 'Auto-settle exact amounts' })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Explain auto-settle exact amounts' }));
+    expect(screen.getByText(/Turn this off to send every new payment to review/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
 
-    expect(searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca', defaultSearchDate);
+    expect(searchEtransferEmails).toHaveBeenCalledWith(['notify@payments.interac.ca'], defaultSearchDate, '');
     expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
     expect(screen.getByText('cash for shoppers')).toBeInTheDocument();
     expect(await screen.findByText(/found 1 email\(s\) — 1 new/i)).toBeInTheDocument();
     // Single-candidate name lookup ("Cai" matches the seeded player "Cai Wu") pre-selects the player.
     expect(screen.getByRole('combobox', { name: '' })).toHaveValue('p1');
+  });
+
+  it('keeps forwarded name-only exact debt pending, then reuses the name confirmed in batch approval', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 15 }));
+    seedClubDoc('sessions', 'unpaid', {
+      date: ts('2026-08-01'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 15, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    const parsed = parseEtransferMessage({
+      id: 'forwarded', threadId: 'thread-forwarded',
+      payload: { headers: [
+        { name: 'Subject', value: "Fwd: Interac e-Transfer: You've received $15.00 from BANK PAYER NAME and it has been automatically deposited." },
+        { name: 'From', value: 'Treasurer <forwarder@example.com>' },
+        { name: 'Reply-To', value: 'forwarder@example.com' },
+      ] },
+    })!;
+    jest.mocked(searchEtransferEmails).mockResolvedValue([parsed]);
+    renderPage();
+    await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+
+    const row = (await screen.findByText('BANK PAYER NAME')).closest('tr') as HTMLElement;
+    expect(getClubDocData('etransferImports', 'forwarded')).toMatchObject({
+      senderEmail: null, status: 'pending', matchedPlayerId: null, matchSource: null,
+    });
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 15 });
+    expect(getClubDocData('sessions', 'unpaid')?.players).toEqual([
+      expect.objectContaining({ paid: false }),
+    ]);
+    await user.selectOptions(within(row).getByRole('combobox'), 'p1');
+    const remember = within(row).getByRole('checkbox', {
+      name: 'Remember "BANK PAYER NAME" → this player for future imports',
+    });
+    expect(remember).toBeChecked();
+    expect(getClubDocData('etransferSenderMappings', 'name:bank payer name')).toBeUndefined();
+    await user.click(screen.getByRole('button', { name: 'Review batch (1)' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Approve batch (1)' }));
+
+    await waitFor(() => expect(getClubDocData('etransferImports', 'forwarded')).toMatchObject({
+      status: 'applied', matchedPlayerId: 'p1', applicationMethod: 'manual',
+    }));
+    expect(getClubDocData('etransferSenderMappings', 'name:bank payer name')).toMatchObject({
+      senderName: 'BANK PAYER NAME', senderEmail: null, playerId: 'p1',
+    });
+    expect(getClubDocData('etransferSenderMappings', 'forwarder@example.com')).toBeUndefined();
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    jest.mocked(searchEtransferEmails).mockResolvedValue([{
+      ...parsed, gmailMessageId: 'forwarded-next', gmailThreadId: 'thread-forwarded-next',
+    }]);
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await waitFor(() => expect(getClubDocData('etransferImports', 'forwarded-next')).toMatchObject({
+      senderEmail: null, status: 'pending', matchedPlayerId: 'p1', matchSource: 'mapping',
+    }));
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
   });
 
   it('shows newly fetched exact-debt payments in a separate auto-settled list', async () => {
@@ -151,6 +286,48 @@ describe('EtransfersPage', () => {
     expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
   });
 
+  it('keeps an exact payment pending when auto-settlement is disabled by default in settings', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc('test-club', {
+      name: 'Test Club',
+      etransferAutoSettleExactAmounts: false,
+    });
+    seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 20 }));
+    seedClubDoc('sessions', 'unpaid', {
+      date: ts('2026-08-01T12:00:00'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 20, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    jest.mocked(searchEtransferEmails).mockResolvedValue([{
+      gmailMessageId: 'msg-exact-pending',
+      gmailThreadId: 'thread-exact-pending',
+      subject: 'Exact payment received',
+      senderName: 'CAI FANG WU',
+      senderEmail: 'caifang1966@gmail.com',
+      amount: 20,
+      memo: null,
+      referenceNumber: 'EXACT20PENDING',
+      emailDate: new Date('2026-08-26T14:47:00.000Z'),
+    }]);
+
+    renderPage();
+    await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
+    expect(screen.getByRole('checkbox', { name: 'Auto-settle exact amounts' })).not.toBeChecked();
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+
+    expect(await screen.findByText(/1 new, added below for review/i)).toBeInTheDocument();
+    expect(getClubDocData('etransferImports', 'msg-exact-pending')).toMatchObject({
+      status: 'pending',
+      matchedPlayerId: 'p1',
+    });
+    expect(getClubDocData('sessions', 'unpaid')?.players).toEqual([
+      expect.objectContaining({ paid: false, paidVia: null }),
+    ]);
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 20 });
+  });
+
   it('ignores an e-Transfer above the ignore-above amount entirely, instead of adding it for review or auto-settling it', async () => {
     const user = userEvent.setup();
     seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 30 }));
@@ -187,8 +364,9 @@ describe('EtransfersPage', () => {
     expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 30 });
   });
 
-  it('picks up and auto-settles an exact-debt payment above $20 once the ignore-above amount is raised', async () => {
+  it('uses an unsaved transfer-limit override for the current visit', async () => {
     const user = userEvent.setup();
+    seedClubMetaDoc('test-club', { name: 'Test Club', etransferIgnoreAboveAmount: 20 });
     seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 30 }));
     seedClubDoc('sessions', 'oldest', {
       date: ts('2026-08-01T12:00:00'),
@@ -211,65 +389,60 @@ describe('EtransfersPage', () => {
 
     renderPage();
     await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
-
-    const limitInput = screen.getByLabelText('Ignore amounts over');
+    const limitInput = screen.getByRole('spinbutton', { name: 'Ignore amounts over' });
     await user.clear(limitInput);
     await user.type(limitInput, '50');
-    await user.click(screen.getByRole('button', { name: 'Save limit' }));
-    await waitFor(() => expect(getClubMetaDocData('test-club')).toMatchObject({ etransferIgnoreAboveAmount: 50 }));
-
+    expect(screen.queryByRole('button', { name: 'Save limit' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
 
     expect(await screen.findByText(/1 exact payment automatically settled/i)).toBeInTheDocument();
     expect(getClubDocData('etransferImports', 'msg-raised-limit')).toMatchObject({ status: 'applied' });
     expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
+    expect(getClubMetaDocData('test-club')).toMatchObject({ etransferIgnoreAboveAmount: 20 });
+    expect(limitInput).toHaveValue(50);
   });
 
-  it('loads a saved rolling window and lets an admin switch presets and save', async () => {
+  it('initializes the search window from settings without saving visit overrides', async () => {
     const user = userEvent.setup();
     seedClubMetaDoc('test-club', { name: 'Test Club', etransferSearchWindowDays: 30 });
+    jest.mocked(searchEtransferEmails).mockResolvedValue([]);
 
     renderPage();
-    const windowSelect = await screen.findByRole('combobox', { name: 'Search window' });
+    await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
+    const windowSelect = screen.getByRole('combobox', { name: 'Search window' });
     expect(windowSelect).toHaveValue('30');
-
     await user.selectOptions(windowSelect, '14');
-    await user.click(screen.getByRole('button', { name: 'Save window' }));
-    await waitFor(() => expect(screen.getByText('Saved.')).toBeInTheDocument());
-    expect(getClubMetaDocData('test-club')).toMatchObject({ etransferSearchWindowDays: 14 });
+    expect(screen.queryByRole('button', { name: 'Save window' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    expect(searchEtransferEmails).toHaveBeenLastCalledWith(
+      ['notify@payments.interac.ca'],
+      resolveEtransferSearchAfterDate({ etransferSearchWindowDays: 14 }),
+      ''
+    );
+    expect(getClubMetaDocData('test-club')).toMatchObject({ etransferSearchWindowDays: 30 });
+    expect(windowSelect).toHaveValue('14');
   });
 
-  it('shows a fallback option for a saved window that is not one of the standard presets', async () => {
-    seedClubMetaDoc('test-club', { name: 'Test Club', etransferSearchWindowDays: 45 });
-
-    renderPage();
-    const windowSelect = await screen.findByRole('combobox', { name: 'Search window' });
-    expect(windowSelect).toHaveValue('45');
-    expect(within(windowSelect).getByText('45 days before today')).toBeInTheDocument();
-  });
-
-  it('loads and persists a club-specific custom search date', async () => {
+  it('allows a visit-only override of a saved legacy custom search date', async () => {
     const user = userEvent.setup();
     seedClubMetaDoc('test-club', {
       name: 'Test Club',
       etransferSearchAfterDate: '2026-09-01',
     });
+    jest.mocked(searchEtransferEmails).mockResolvedValue([]);
 
     renderPage();
-    expect(await screen.findByRole('combobox', { name: 'Search window' })).toHaveValue('custom');
+    await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
+    expect(screen.getByRole('combobox', { name: 'Search window' })).toHaveValue('custom');
     const dateInput = screen.getByLabelText('Search emails after');
     expect(dateInput).toHaveValue('2026-09-01');
-
     await user.clear(dateInput);
-    await user.type(dateInput, '2026-10-15');
-    await user.click(screen.getByRole('button', { name: 'Save window' }));
-
-    await waitFor(() => {
-      expect(screen.getByText('Saved.')).toBeInTheDocument();
-    });
-    expect(getClubMetaDocData('test-club')).toMatchObject({
-      etransferSearchAfterDate: '2026-10-15',
-    });
+    await user.type(dateInput, '2026-09-02');
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    expect(searchEtransferEmails).toHaveBeenLastCalledWith(
+      ['notify@payments.interac.ca'], '2026-09-02', ''
+    );
+    expect(getClubMetaDocData('test-club')).toMatchObject({ etransferSearchAfterDate: '2026-09-01' });
   });
 
   it('approves a pending import: credits the player balance and moves it to history', async () => {

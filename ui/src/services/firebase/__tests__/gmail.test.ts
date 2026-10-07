@@ -127,6 +127,29 @@ afterEach(() => {
 });
 
 describe('parseEtransferMessage', () => {
+  it.each(['FW:', 'RE:', 'FWD:', 'Fwd:', 'Re:', 'fw:', 'rE:', 'FW: Re: Fwd:'])(
+    'parses an autodeposit subject with the %s prefix',
+    (prefix) => {
+      const subject = `${prefix} Interac e-Transfer: You've received $10.71 from XXX and it has been automatically deposited.`;
+      const parsed = gmail.parseEtransferMessage(sampleMessage({ subject }));
+
+      expect(parsed).toMatchObject({ subject, senderName: 'XXX', senderEmail: null, amount: 10.71 });
+    }
+  );
+
+  it('still parses an autodeposit subject without the Interac introduction', () => {
+    const parsed = gmail.parseEtransferMessage(sampleMessage({
+      subject: 'Received $1,234.56 from XXX and it has been automatically deposited.',
+    }));
+    expect(parsed).toMatchObject({ senderName: 'XXX', amount: 1234.56 });
+  });
+
+  it('rejects a forwarded manual-deposit email', () => {
+    expect(gmail.parseEtransferMessage(sampleMessage({
+      subject: 'Fwd: Interac e-Transfer: XXX sent you money',
+    }))).toBeNull();
+  });
+
   it('parses sender, amount, memo, and reference number from a real autodeposit email (plain-text body)', () => {
     const parsed = gmail.parseEtransferMessage(sampleMessage());
 
@@ -176,11 +199,57 @@ describe('parseEtransferMessage', () => {
     expect(parsed).toBeNull();
   });
 
-  it('falls back to the From header display name when Reply-To is missing', () => {
+  it('keeps the subject payer name when Reply-To is missing', () => {
     const message = sampleMessage({ replyTo: null });
     const parsed = gmail.parseEtransferMessage(message);
     expect(parsed?.senderEmail).toBeNull();
     expect(parsed?.senderName).toBe('CAI FANG WU');
+  });
+
+  it('keeps the subject payer on a forwarded email without Reply-To or body email recovery', () => {
+    const parsed = gmail.parseEtransferMessage(sampleMessage({
+      subject: "Fwd: RE: Interac e-Transfer: You've received $15.00 from PAT SMITH and it has been automatically deposited.",
+      from: 'Club Treasurer <forwarder@example.com>',
+      replyTo: null,
+      bodyData: b64url('From: Another Person <arbitrary@example.com> Sent From: WRONG NAME Amount: $15.00'),
+    }));
+    expect(parsed).toMatchObject({ senderName: 'PAT SMITH', senderEmail: null, amount: 15 });
+  });
+
+  it.each([
+    ['Club Treasurer <Forwarder@Example.com>', '"Different Display" <FORWARDER@example.com>'],
+    ['FORWARDER@example.com', 'Club Treasurer <forwarder@example.com>'],
+    ['Club Treasurer <forwarder@example.com>', 'FORWARDER@example.com'],
+    ['FORWARDER@example.com', 'forwarder@example.com'],
+  ])('never uses forwarding From %s / Reply-To %s as the payer', (from, replyTo) => {
+    const message = sampleMessage({ from, replyTo });
+    message.payload.headers.forEach((h) => { h.name = h.name.toUpperCase(); });
+    expect(gmail.parseEtransferMessage(message)).toMatchObject({
+      senderName: 'CAI FANG WU', senderEmail: null,
+    });
+  });
+
+  it('discards a distinct outer Reply-To on a forward from a nonstandard mailbox', () => {
+    expect(gmail.parseEtransferMessage(sampleMessage({
+      from: 'forwarder@example.com',
+      replyTo: 'Another forwarder <another@example.com>',
+    }))).toMatchObject({ senderName: 'CAI FANG WU', senderEmail: null });
+  });
+
+  it.each([
+    ['INTERAC <NOTIFY@PAYMENTS.INTERAC.CA>', 'Payer <PAYER@example.com>'],
+    ['notify@payments.interac.ca', 'payer@example.com'],
+  ])('preserves distinct payer Reply-To on original Interac mail from %s', (from, replyTo) => {
+    expect(gmail.parseEtransferMessage(sampleMessage({ from, replyTo }))).toMatchObject({
+      senderName: 'CAI FANG WU', senderEmail: 'payer@example.com',
+    });
+  });
+
+  it('does not use Reply-To equal to the Interac From mailbox as a payer', () => {
+    expect(gmail.parseEtransferMessage(sampleMessage({
+      from: 'notify@payments.interac.ca',
+      replyTo: 'Interac <NOTIFY@PAYMENTS.INTERAC.CA>',
+    }))?.senderEmail).toBeNull();
   });
 
   it('trusts the subject line over a memo crafted to look like real "Sent From"/"Amount" fields', () => {
@@ -231,6 +300,26 @@ describe('resolveEtransferSearchAfterDate', () => {
     expect(gmail.resolveEtransferSearchAfterDate({ etransferSearchWindowDays: 30 }, reference)).toBe('2026-07-28');
   });
 
+  describe('resolveEtransferSenderAddresses', () => {
+    it('uses the Interac default for an unconfigured club', () => {
+      expect(gmail.resolveEtransferSenderAddresses(null)).toEqual(['notify@payments.interac.ca']);
+      expect(gmail.resolveEtransferSenderAddresses({})).toEqual(['notify@payments.interac.ca']);
+    });
+
+    it('keeps legacy configured senders until a list is configured', () => {
+      expect(gmail.resolveEtransferSenderAddresses({ etransferSenderAddress: ' Bank@Example.com ' })).toEqual(['bank@example.com']);
+      expect(gmail.resolveEtransferSenderAddresses({
+        etransferSenderAddress: 'bank@example.com', etransferSenderAddresses: ['forwarder@example.com'],
+      })).toEqual(['forwarder@example.com']);
+    });
+
+    it('fails closed for a saved empty list instead of falling back to a legacy/default sender', () => {
+      expect(() => gmail.resolveEtransferSenderAddresses({
+        etransferSenderAddress: 'bank@example.com', etransferSenderAddresses: [],
+      })).toThrow('Enter at least one valid allowed sender');
+    });
+  });
+
   it('falls back to a saved custom absolute date when no rolling window is set', () => {
     expect(gmail.resolveEtransferSearchAfterDate(
       { etransferSearchWindowDays: null, etransferSearchAfterDate: '2026-01-01' },
@@ -245,6 +334,90 @@ describe('resolveEtransferSearchAfterDate', () => {
 });
 
 describe('searchEtransferEmails', () => {
+  it('combines allowed senders with the trimmed custom query and parses forwarded results', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+    const customQuery = 'from:personal@example.com subject:"automatically deposited" after:2026/08/01 & label:club';
+    const message = sampleMessage({
+      subject: "FW: Interac e-Transfer: You've received $10.71 from XXX and it has been automatically deposited.",
+      from: 'Forwarder <personal@example.com>',
+    });
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ messages: [{ id: 'msg-1', threadId: 'thread-1' }] }))
+      .mockResolvedValueOnce(jsonResponse(message));
+
+    const results = await gmail.searchEtransferEmails('personal@example.com', '', `  ${customQuery}  `);
+
+    expect(new URL(fetchMock().mock.calls[0][0]).searchParams.get('q')).toBe(`(from:personal@example.com) AND (${customQuery})`);
+    expect(results).toEqual([expect.objectContaining({ senderName: 'XXX', amount: 10.71 })]);
+  });
+
+  it('normalizes and deduplicates a multiple-sender OR search', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+    fetchMock().mockResolvedValueOnce(jsonResponse({}));
+    await gmail.searchEtransferEmails(
+      [' Notify@Payments.Interac.ca ', 'Forwarder@Example.com', 'notify@payments.interac.ca'], '2026-08-27'
+    );
+    expect(new URL(fetchMock().mock.calls[0][0]).searchParams.get('q')).toBe(
+      `(from:notify@payments.interac.ca OR from:forwarder@example.com) subject:"automatically deposited" after:${Date.UTC(2026, 7, 27) / 1000}`
+    );
+  });
+
+  it('checks From independently of an OR custom query without treating a forwarder as a payer', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+    const missingFrom = sampleMessage({ id: 'missing' });
+    missingFrom.payload.headers = missingFrom.payload.headers.filter((h) => h.name !== 'From');
+    const duplicateFrom = sampleMessage({ id: 'duplicate' });
+    duplicateFrom.payload.headers.push({ name: 'From', value: 'evil@example.com' });
+    const messages = [
+      sampleMessage({ id: 'default' }),
+      sampleMessage({ id: 'forwarded', from: '"Trusted, Forwarder" <FORWARDER@EXAMPLE.COM>' }),
+      sampleMessage({ id: 'untrusted', from: 'Evil <evil@example.com>' }),
+      sampleMessage({ id: 'bare', from: 'NOTIFY@PAYMENTS.INTERAC.CA' }),
+      sampleMessage({ id: 'unrecognized', from: 'notify@payments.interac.ca via evil.example' }),
+      sampleMessage({ id: 'multiple', from: 'evil@example.com, Notify <notify@payments.interac.ca>' }),
+      sampleMessage({ id: 'display-only', from: '"notify@payments.interac.ca" <evil@example.com>' }),
+      missingFrom,
+      duplicateFrom,
+    ];
+    fetchMock().mockResolvedValueOnce(jsonResponse({ messages }));
+    messages.forEach((message) => fetchMock().mockResolvedValueOnce(jsonResponse(message)));
+    const customQuery = 'label:forwarded OR from:evil@example.com';
+    const results = await gmail.searchEtransferEmails(
+      ['notify@payments.interac.ca', 'forwarder@example.com'], '', customQuery
+    );
+    expect(new URL(fetchMock().mock.calls[0][0]).searchParams.get('q')).toBe(
+      `((from:notify@payments.interac.ca OR from:forwarder@example.com)) AND (${customQuery})`
+    );
+    expect(results.map((result) => result.gmailMessageId)).toEqual(['default', 'forwarded', 'bare']);
+    expect(results.map((result) => result.senderEmail)).toEqual([
+      'caifang1966@gmail.com', null, 'caifang1966@gmail.com',
+    ]);
+  });
+
+  it.each(['', ' ', [], ['evil@example.com) OR in:anywhere'], ['valid@example.com', 'bad']])(
+    'rejects empty/invalid senders before authorizing Gmail (%s)', async (senders) => {
+      await expect(gmail.searchEtransferEmails(senders as string | string[], '', 'in:anywhere')).rejects.toThrow(
+        'Enter at least one valid allowed sender'
+      );
+      expect(fetchMock()).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([undefined, null, '', '   '])('uses default filters for a blank/unset query (%s)', async (query) => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+    fetchMock().mockResolvedValueOnce(jsonResponse({}));
+
+    await gmail.searchEtransferEmails('notify@payments.interac.ca', '2026-08-27', query);
+
+    expect(new URL(fetchMock().mock.calls[0][0]).searchParams.get('q')).toBe(
+      `from:notify@payments.interac.ca subject:"automatically deposited" after:${Date.UTC(2026, 7, 27) / 1000}`
+    );
+  });
+
   it('re-authenticates with the read-only Gmail scope and parses full messages', async () => {
     helpers.setCurrentUser(userOne);
     const reauth = jest.fn(async (user, provider) => {

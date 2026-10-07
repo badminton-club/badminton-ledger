@@ -25,6 +25,9 @@ import {
   setClubTabEnabled,
   setClubEtransferSearchAfterDate,
   setClubEtransferSearchWindowDays,
+  setClubEtransferAutoSettleExactAmounts,
+  setClubEtransferCustomGmailQuery,
+  setClubEtransferSenderAddresses,
   resetClubEtransferSearchSetting,
   setLastVisitedClub,
   setMemberPlayer,
@@ -43,6 +46,47 @@ import { __getAllPaths, __getDocData, __seedDoc, Timestamp } from '../../../test
 
 beforeEach(() => {
   resetFirebaseTestState();
+});
+
+describe('setClubEtransferSenderAddresses', () => {
+  it('normalizes, deduplicates, and persists allowed senders without changing other settings', async () => {
+    seedClubMetaDoc('club-a', { name: 'Alpha Club', etransferCustomGmailQuery: 'label:club' });
+    await setClubEtransferSenderAddresses(
+      'club-a', ' Notify@Payments.Interac.ca, FORWARDER@Example.com\nnotify@payments.interac.ca '
+    );
+    expect(__getDocData('clubs/club-a')).toMatchObject({
+      name: 'Alpha Club', etransferCustomGmailQuery: 'label:club',
+      etransferSenderAddresses: ['notify@payments.interac.ca', 'forwarder@example.com'],
+    });
+  });
+
+  it.each(['', ' ', [], ['bad'], ['valid@example.com', ''], ['valid@example.com) OR in:anywhere']])(
+    'rejects invalid or empty lists without modifying the saved list (%s)', async (addresses) => {
+      seedClubMetaDoc('club-a', { etransferSenderAddresses: ['old@example.com'] });
+      await expect(setClubEtransferSenderAddresses('club-a', addresses as string | string[])).rejects.toThrow(
+        'Enter at least one valid allowed sender'
+      );
+      expect(__getDocData('clubs/club-a')).toMatchObject({ etransferSenderAddresses: ['old@example.com'] });
+    }
+  );
+});
+
+describe('setClubEtransferCustomGmailQuery', () => {
+  it.each([
+    ['  subject:"automatically deposited"  ', 'subject:"automatically deposited"'],
+    ['', null],
+    ['   ', null],
+    [null, null],
+  ])('saves or clears a custom query (%s)', async (query, expected) => {
+    seedClubMetaDoc('club-a', { name: 'Alpha Club', etransferCustomGmailQuery: 'old query' });
+
+    await setClubEtransferCustomGmailQuery('club-a', query);
+
+    expect(__getDocData('clubs/club-a')).toMatchObject({
+      name: 'Alpha Club',
+      etransferCustomGmailQuery: expected,
+    });
+  });
 });
 
 describe('createClub', () => {
@@ -538,6 +582,16 @@ describe('e-Transfer search cutoff settings', () => {
     expect(__getDocData('clubs/club-a')).toMatchObject({
       etransferSearchWindowDays: null,
       etransferSearchAfterDate: null,
+    });
+  });
+
+  it('setClubEtransferAutoSettleExactAmounts saves the club default', async () => {
+    seedClubMetaDoc('club-a', { name: 'Alpha Club' });
+
+    await setClubEtransferAutoSettleExactAmounts('club-a', false);
+
+    expect(__getDocData('clubs/club-a')).toMatchObject({
+      etransferAutoSettleExactAmounts: false,
     });
   });
 });

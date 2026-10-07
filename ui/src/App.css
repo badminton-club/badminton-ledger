@@ -156,6 +156,44 @@ body {
     width: 100%;
 }
 
+/* ── e-Transfer search ───────────────────────────────────────────────────── */
+
+.etransfer-search-summary {
+    flex: 1 1 22rem;
+    min-width: 0;
+    line-height: 1.4;
+}
+
+.etransfer-search-senders {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.etransfer-help-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    padding: 0;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.etransfer-help-toggle:focus-visible {
+    outline: 3px solid rgba(26, 115, 232, 0.25);
+    outline-offset: 2px;
+}
+
+.etransfer-auto-settle-help {
+    max-width: 28rem;
+}
+
 /* ── Bootstrap overrides ──────────────────────────────────────────────────── */
 
 .card {
@@ -312,5 +350,10 @@ body {
 
     .session-card {
         padding: 14px;
+    }
+
+    .etransfer-search-summary {
+        flex-basis: 100%;
+        width: 100%;
     }
 }

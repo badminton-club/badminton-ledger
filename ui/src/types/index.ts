@@ -231,6 +231,10 @@ export interface Club {
   // services/firebase/gmail.ts). Configurable since some banks/regions may use a
   // different notification address than the Canadian default.
   etransferSenderAddress?: string;
+  // Allowed notification/forwarding From mailboxes; supersedes the legacy singular field.
+  etransferSenderAddresses?: string[];
+  // Gmail subject/date override; allowed sender checks always apply.
+  etransferCustomGmailQuery?: string | null;
   // ISO calendar date used as the lower bound for Gmail e-Transfer searches —
   // a one-off custom cutoff. Ignored once etransferSearchWindowDays is set,
   // since a rolling window stays fresh automatically and doesn't need this.
@@ -246,6 +250,9 @@ export interface Club {
   // unattended. Defaults to $20 when unset (see
   // DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT).
   etransferIgnoreAboveAmount?: number | null;
+  // Whether confidently matched payments that exactly cover all reconciled
+  // unpaid sessions start enabled for automatic settlement. Defaults to true.
+  etransferAutoSettleExactAmounts?: boolean | null;
   createdAt?: Timestamp;
 }
 

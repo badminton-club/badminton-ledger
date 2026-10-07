@@ -102,11 +102,67 @@ afterEach(() => {
 });
 
 describe('SettingsPage', () => {
+  it('lets admins load and save a normalized allowed sender list', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club', etransferSenderAddresses: ['notify@payments.interac.ca', 'old@example.com'] });
+    renderPage({ role: 'admin' });
+    const input = await screen.findByLabelText('Allowed sender addresses');
+    await waitFor(() => expect(input).toHaveValue('notify@payments.interac.ca, old@example.com'));
+    await user.clear(input);
+    await user.type(input, 'Notify@Payments.Interac.ca\nFORWARDER@Example.com\nforwarder@example.com');
+    await user.click(screen.getByRole('button', { name: 'Save senders' }));
+    await waitFor(() => expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+      etransferSenderAddresses: ['notify@payments.interac.ca', 'forwarder@example.com'],
+    }));
+    expect(input).toHaveValue('notify@payments.interac.ca, forwarder@example.com');
+  });
+
+  it('loads legacy senders and displays an error for invalid sender input without persisting it', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club', etransferSenderAddress: 'bank@example.com' });
+    renderPage({ role: 'admin' });
+    const input = await screen.findByLabelText('Allowed sender addresses');
+    await waitFor(() => expect(input).toHaveValue('bank@example.com'));
+    await user.clear(input);
+    await user.type(input, 'invalid) OR in:anywhere');
+    await user.click(screen.getByRole('button', { name: 'Save senders' }));
+    expect(await screen.findByText(/Enter at least one valid allowed sender/)).toBeInTheDocument();
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).not.toHaveProperty('etransferSenderAddresses');
+  });
+
+  it('lets admins load, save, and clear a custom Gmail query', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club', etransferCustomGmailQuery: 'label:forwarded' });
+    renderPage({ role: 'admin' });
+
+    const input = await screen.findByLabelText('Custom Gmail query (optional)');
+    await waitFor(() => expect(input).toHaveValue('label:forwarded'));
+    expect(screen.getByRole('link', { name: 'Gmail search syntax' })).toHaveAttribute(
+      'href', 'https://support.google.com/mail/answer/7190'
+    );
+
+    await user.clear(input);
+    await user.type(input, '  subject:"automatically deposited"  ');
+    await user.click(screen.getByRole('button', { name: 'Save query' }));
+    await waitFor(() => expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+      etransferCustomGmailQuery: 'subject:"automatically deposited"',
+    }));
+    expect(input).toHaveValue('subject:"automatically deposited"');
+
+    await user.clear(input);
+    await user.click(screen.getByRole('button', { name: 'Save query' }));
+    await waitFor(() => expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+      etransferCustomGmailQuery: null,
+    }));
+  });
+
   it('blocks non-admin users from the page', () => {
     renderPage({ role: 'member' });
 
     expect(screen.getByText('You do not have permission to view this page.')).toBeInTheDocument();
     expect(screen.queryByText('Club settings')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Custom Gmail query (optional)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Allowed sender addresses')).not.toBeInTheDocument();
   });
 
   it('shows the page to admins but hides super-admin-only controls', async () => {
@@ -183,12 +239,13 @@ describe('SettingsPage', () => {
     });
   });
 
-  it('loads and saves e-Transfer import defaults (search window and ignore-above amount), same club fields the e-Transfers page edits', async () => {
+  it('loads and saves the e-Transfer import defaults', async () => {
     const user = userEvent.setup();
     seedClubMetaDoc(TEST_CLUB_ID, {
       name: 'Test Club',
       etransferSearchWindowDays: 14,
       etransferIgnoreAboveAmount: 30,
+      etransferAutoSettleExactAmounts: false,
     });
     renderPage({ role: 'admin' });
 
@@ -196,6 +253,8 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(windowSelect).toHaveValue('14'));
     const ignoreInput = screen.getByRole('spinbutton', { name: 'Ignore amounts over' });
     await waitFor(() => expect(ignoreInput).toHaveValue(30));
+    const autoSettle = screen.getByRole('checkbox', { name: 'Auto-settle exact amounts by default' });
+    expect(autoSettle).not.toBeChecked();
 
     await user.selectOptions(windowSelect, '30');
     await user.click(screen.getByRole('button', { name: 'Save window' }));
@@ -208,6 +267,12 @@ describe('SettingsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save limit' }));
     await waitFor(() => expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
       etransferIgnoreAboveAmount: 50,
+    }));
+
+    await user.click(autoSettle);
+    await user.click(screen.getByRole('button', { name: 'Save auto-settle default' }));
+    await waitFor(() => expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+      etransferAutoSettleExactAmounts: true,
     }));
   });
 
