@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Container, Card, Button, Table, Spinner, Alert, Form, Modal, Badge } from 'react-bootstrap';
 import { format } from 'date-fns';
+import { Link } from 'react-router-dom';
 import {
   fetchClub,
   fetchPendingEtransferImports,
@@ -17,9 +18,6 @@ import {
   setClubEtransferSearchAfterDate,
   setClubEtransferSearchWindowDays,
   setClubEtransferIgnoreAboveAmount,
-  setClubEtransferCustomGmailQuery,
-  setClubEtransferSenderAddresses,
-  normalizeEtransferSenderAddresses,
   resolveEtransferSenderAddresses,
   formatPlayerName,
   DEFAULT_ETRANSFER_SENDER_ADDRESS,
@@ -77,15 +75,7 @@ export default function EtransfersPage() {
   const [rowEdits, setRowEdits] = useState<Record<string, RowEdit>>({});
 
   const [senderAddresses, setSenderAddresses] = useState([DEFAULT_ETRANSFER_SENDER_ADDRESS]);
-  const [senderAddressesInput, setSenderAddressesInput] = useState(DEFAULT_ETRANSFER_SENDER_ADDRESS);
-  const [savingSenders, setSavingSenders] = useState(false);
-  const [sendersError, setSendersError] = useState('');
-  const [sendersMessage, setSendersMessage] = useState('');
   const [customGmailQuery, setCustomGmailQuery] = useState('');
-  const [customGmailQueryInput, setCustomGmailQueryInput] = useState('');
-  const [savingCustomQuery, setSavingCustomQuery] = useState(false);
-  const [customQueryError, setCustomQueryError] = useState('');
-  const [customQueryMessage, setCustomQueryMessage] = useState('');
   // null means "custom date" mode; otherwise a rolling window in days (recomputed fresh
   // from today on every search, so it never goes stale like a saved absolute date would).
   const [searchWindowDays, setSearchWindowDays] = useState<number | null>(DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
@@ -174,9 +164,7 @@ export default function EtransfersPage() {
       ]);
       const allowedSenders = resolveEtransferSenderAddresses(club);
       setSenderAddresses(allowedSenders);
-      setSenderAddressesInput(allowedSenders.join(', '));
       setCustomGmailQuery(club?.etransferCustomGmailQuery?.trim() || '');
-      setCustomGmailQueryInput(club?.etransferCustomGmailQuery ?? '');
       if (club?.etransferSearchWindowDays != null) {
         setSearchWindowDays(club.etransferSearchWindowDays);
         setCustomSearchDate('');
@@ -247,42 +235,6 @@ export default function EtransfersPage() {
       setSearchError(err instanceof Error ? err.message : 'Failed to search Gmail.');
     } finally {
       setSearching(false);
-    }
-  };
-
-  const handleSaveSenders = async () => {
-    if (!clubId) return;
-    setSavingSenders(true);
-    setSendersError('');
-    setSendersMessage('');
-    try {
-      const addresses = normalizeEtransferSenderAddresses(senderAddressesInput);
-      await setClubEtransferSenderAddresses(clubId, addresses);
-      setSenderAddresses(addresses);
-      setSenderAddressesInput(addresses.join(', '));
-      setSendersMessage('Saved.');
-      if (loadError) await load();
-    } catch (err) {
-      setSendersError(err instanceof Error ? err.message : 'Failed to save allowed senders.');
-    } finally {
-      setSavingSenders(false);
-    }
-  };
-
-  const handleSaveCustomGmailQuery = async () => {
-    if (!clubId) return;
-    setSavingCustomQuery(true);
-    setCustomQueryError('');
-    setCustomQueryMessage('');
-    try {
-      await setClubEtransferCustomGmailQuery(clubId, customGmailQueryInput);
-      setCustomGmailQuery(customGmailQueryInput.trim());
-      setCustomGmailQueryInput(customGmailQueryInput.trim());
-      setCustomQueryMessage('Saved.');
-    } catch (err) {
-      setCustomQueryError(err instanceof Error ? err.message : 'Failed to save the custom Gmail query.');
-    } finally {
-      setSavingCustomQuery(false);
     }
   };
 
@@ -588,7 +540,8 @@ export default function EtransfersPage() {
         match and amount, then apply to credit their balance. Forwarding addresses only allow
         messages through the search; they do not identify the payer. Forwarded messages use the
         payer name in the subject, not the outer Reply-To. Name-only suggestions stay pending
-        until an admin confirms the player; use Remember to save that name mapping for future imports.
+        until an admin confirms the player. Approve with Remember checked to reuse that payer name
+        on future imports, even without a payer Reply-To email.
         A transfer matched by payer email or a remembered mapping is
         applied automatically when its amount exactly equals all of that player's unpaid sessions;
         everything else waits for review below. Any found email above the ignore-above amount is
@@ -597,11 +550,12 @@ export default function EtransfersPage() {
 
       <Card className="mb-3">
         <Card.Body className="d-flex flex-wrap align-items-end gap-3">
-          <Button onClick={handleSearch} disabled={!!loadError || searching || savingSenders || savingCustomQuery || (!customGmailQuery && !searchAfterDate)}>
+          <Button onClick={handleSearch} disabled={!!loadError || searching || (!customGmailQuery && !searchAfterDate)}>
             {searching ? <><Spinner size="sm" animation="border" className="me-2" />Connecting to Gmail…</> : 'Connect Gmail & Search'}
           </Button>
           <span className="text-muted small">
-            {customGmailQuery ? <>Using custom Gmail query: <code>{customGmailQuery}</code>. Allowed senders: {senderAddresses.join(', ')}</> : <>Searching e-Transfers from: {senderAddresses.join(', ')}</>}
+            {customGmailQuery ? <>Using custom Gmail query (search window overridden). Allowed senders: {senderAddresses.join(', ')}</> : <>Searching e-Transfers from: {senderAddresses.join(', ')}</>}
+            {' '}<Link to="/settings">Edit search settings</Link>
           </span>
           <Form.Group controlId="etransfer-search-window">
             <Form.Label className="small mb-1">Search window</Form.Label>
@@ -681,62 +635,6 @@ export default function EtransfersPage() {
           </Button>
           {ignoreAboveMessage && <span className="text-success small">{ignoreAboveMessage}</span>}
           {ignoreAboveError && <span className="text-danger small">{ignoreAboveError}</span>}
-          <Form.Group controlId="etransfer-allowed-senders" className="w-100">
-            <Form.Label className="small mb-1">Allowed sender addresses</Form.Label>
-            <Form.Control
-              as="textarea"
-              rows={2}
-              size="sm"
-              value={senderAddressesInput}
-              onChange={(e) => {
-                setSenderAddressesInput(e.target.value);
-                setSendersMessage('');
-                setSendersError('');
-              }}
-              disabled={savingSenders || searching || !clubId}
-            />
-            <Form.Text className="text-muted d-block">
-              Separate addresses with commas or newlines. Keep notify@payments.interac.ca and add only trusted forwarding addresses.
-              Only these From mailboxes are accepted, including with custom queries (not sender authenticity verification).
-            </Form.Text>
-            <Button size="sm" variant="outline-secondary" className="mt-2" onClick={handleSaveSenders} disabled={savingSenders || searching || !clubId}>
-              {savingSenders ? <Spinner size="sm" animation="border" /> : 'Save senders'}
-            </Button>
-            {sendersMessage && <span className="text-success small ms-2">{sendersMessage}</span>}
-            {sendersError && <span className="text-danger small ms-2">{sendersError}</span>}
-          </Form.Group>
-          <Form.Group controlId="etransfer-custom-query" className="w-100">
-            <Form.Label className="small mb-1">Custom Gmail query (optional)</Form.Label>
-            <Form.Control
-              type="text"
-              size="sm"
-              placeholder='subject:"automatically deposited"'
-              value={customGmailQueryInput}
-              onChange={(e) => {
-                setCustomGmailQueryInput(e.target.value);
-                setCustomQueryMessage('');
-                setCustomQueryError('');
-              }}
-              disabled={savingCustomQuery || searching || !clubId}
-            />
-            <Form.Text className="text-muted d-block">
-              Save to replace default subject and search-window filters, never the allowed sender list. Leave blank and save to restore the default.
-              {' '}For forwarded emails, add their From address to allowed senders and try <code>subject:"automatically deposited"</code>.
-              {' '}Use <code>after:YYYY/MM/DD</code> to limit dates.
-              {' '}<a href="https://support.google.com/mail/answer/7190" target="_blank" rel="noopener noreferrer">Gmail search syntax</a>.
-            </Form.Text>
-            <Button
-              size="sm"
-              variant="outline-secondary"
-              className="mt-2"
-              onClick={handleSaveCustomGmailQuery}
-              disabled={savingCustomQuery || searching || !clubId}
-            >
-              {savingCustomQuery ? <Spinner size="sm" animation="border" /> : 'Save query'}
-            </Button>
-            {customQueryMessage && <span className="text-success small ms-2">{customQueryMessage}</span>}
-            {customQueryError && <span className="text-danger small ms-2">{customQueryError}</span>}
-          </Form.Group>
         </Card.Body>
         {(searchMessage || searchError) && (
           <Card.Body className="pt-0">

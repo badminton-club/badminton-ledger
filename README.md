@@ -28,7 +28,7 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   player's balance. Every import is recorded and undoable, and processed emails are labelled
   in Gmail so they aren't found again.
   Forward/reply subject prefixes (`FW:`, `RE:`, `FWD:`, case-insensitive) are supported.
-  Admins manage allowed sender addresses in Settings or e-Transfers (default:
+  Admins manage allowed sender addresses in Settings (default:
   `notify@payments.interac.ca`), adding trusted forwarding addresses as needed.
   Forwarding addresses are only used for the From allowlist, never as payer identities.
   Forwarded/replied messages (or messages from a nonstandard From address) ignore outer
@@ -37,7 +37,9 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   Select the player and use Remember to save a name mapping; future transfers with that
   confirmed mapping can auto-settle exact unpaid debt when session records reconcile.
   Original Interac messages retain distinct payer Reply-To matching and existing email mappings.
-  A custom Gmail query such as `subject:"automatically deposited"` replaces only
+  The e-Transfer page shows a lightweight read-only search summary with a link to Settings;
+  search-window and ignore-amount controls remain available on the page.
+  A custom Gmail query configured in Settings such as `subject:"automatically deposited"` replaces only
   default subject and date filters; include `after:YYYY/MM/DD` to limit dates,
   or clear the query to restore the default search. Allowed From mailboxes are
   always checked, even with custom queries; this is not cryptographic sender verification. See
