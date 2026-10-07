@@ -127,6 +127,29 @@ afterEach(() => {
 });
 
 describe('parseEtransferMessage', () => {
+  it.each(['FW:', 'RE:', 'FWD:', 'Fwd:', 'Re:', 'fw:', 'rE:', 'FW: Re: Fwd:'])(
+    'parses an autodeposit subject with the %s prefix',
+    (prefix) => {
+      const subject = `${prefix} Interac e-Transfer: You've received $10.71 from XXX and it has been automatically deposited.`;
+      const parsed = gmail.parseEtransferMessage(sampleMessage({ subject }));
+
+      expect(parsed).toMatchObject({ subject, senderName: 'XXX', amount: 10.71 });
+    }
+  );
+
+  it('still parses an autodeposit subject without the Interac introduction', () => {
+    const parsed = gmail.parseEtransferMessage(sampleMessage({
+      subject: 'Received $1,234.56 from XXX and it has been automatically deposited.',
+    }));
+    expect(parsed).toMatchObject({ senderName: 'XXX', amount: 1234.56 });
+  });
+
+  it('rejects a forwarded manual-deposit email', () => {
+    expect(gmail.parseEtransferMessage(sampleMessage({
+      subject: 'Fwd: Interac e-Transfer: XXX sent you money',
+    }))).toBeNull();
+  });
+
   it('parses sender, amount, memo, and reference number from a real autodeposit email (plain-text body)', () => {
     const parsed = gmail.parseEtransferMessage(sampleMessage());
 
@@ -245,6 +268,36 @@ describe('resolveEtransferSearchAfterDate', () => {
 });
 
 describe('searchEtransferEmails', () => {
+  it('uses only the trimmed custom query and parses forwarded results', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+    const customQuery = 'from:personal@example.com subject:"automatically deposited" after:2026/08/01 & label:club';
+    const message = sampleMessage({
+      subject: "FW: Interac e-Transfer: You've received $10.71 from XXX and it has been automatically deposited.",
+      from: 'Forwarder <personal@example.com>',
+    });
+    fetchMock()
+      .mockResolvedValueOnce(jsonResponse({ messages: [{ id: 'msg-1', threadId: 'thread-1' }] }))
+      .mockResolvedValueOnce(jsonResponse(message));
+
+    const results = await gmail.searchEtransferEmails('notify@payments.interac.ca', '', `  ${customQuery}  `);
+
+    expect(new URL(fetchMock().mock.calls[0][0]).searchParams.get('q')).toBe(customQuery);
+    expect(results).toEqual([expect.objectContaining({ senderName: 'XXX', amount: 10.71 })]);
+  });
+
+  it.each([undefined, null, '', '   '])('uses default filters for a blank/unset query (%s)', async (query) => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
+    fetchMock().mockResolvedValueOnce(jsonResponse({}));
+
+    await gmail.searchEtransferEmails('notify@payments.interac.ca', '2026-08-27', query);
+
+    expect(new URL(fetchMock().mock.calls[0][0]).searchParams.get('q')).toBe(
+      `from:notify@payments.interac.ca subject:"automatically deposited" after:${Date.UTC(2026, 7, 27) / 1000}`
+    );
+  });
+
   it('re-authenticates with the read-only Gmail scope and parses full messages', async () => {
     helpers.setCurrentUser(userOne);
     const reauth = jest.fn(async (user, provider) => {

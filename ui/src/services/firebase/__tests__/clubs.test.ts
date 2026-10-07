@@ -25,6 +25,7 @@ import {
   setClubTabEnabled,
   setClubEtransferSearchAfterDate,
   setClubEtransferSearchWindowDays,
+  setClubEtransferCustomGmailQuery,
   resetClubEtransferSearchSetting,
   setLastVisitedClub,
   setMemberPlayer,
@@ -43,6 +44,24 @@ import { __getAllPaths, __getDocData, __seedDoc, Timestamp } from '../../../test
 
 beforeEach(() => {
   resetFirebaseTestState();
+});
+
+describe('setClubEtransferCustomGmailQuery', () => {
+  it.each([
+    ['  subject:"automatically deposited"  ', 'subject:"automatically deposited"'],
+    ['', null],
+    ['   ', null],
+    [null, null],
+  ])('saves or clears a custom query (%s)', async (query, expected) => {
+    seedClubMetaDoc('club-a', { name: 'Alpha Club', etransferCustomGmailQuery: 'old query' });
+
+    await setClubEtransferCustomGmailQuery('club-a', query);
+
+    expect(__getDocData('clubs/club-a')).toMatchObject({
+      name: 'Alpha Club',
+      etransferCustomGmailQuery: expected,
+    });
+  });
 });
 
 describe('createClub', () => {

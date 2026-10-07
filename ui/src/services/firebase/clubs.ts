@@ -212,6 +212,17 @@ export async function setClubEtransferIgnoreAboveAmount(clubId: string, amount: 
   });
 }
 
+/** Persists a full Gmail query override; blank/null restores the default search. */
+export async function setClubEtransferCustomGmailQuery(clubId: string, query: string | null): Promise<void> {
+  return serviceCall('setClubEtransferCustomGmailQuery', async () => {
+    await setDoc(
+      clubDoc(clubId),
+      { etransferCustomGmailQuery: query?.trim() || null },
+      { merge: true }
+    );
+  });
+}
+
 /** Reads the caller's linked player id in a club (null if unlinked or not a member). */
 export async function fetchMemberPlayerId(clubId: string, uid: string): Promise<string | null> {
   return serviceCall('fetchMemberPlayerId', async () => {

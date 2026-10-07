@@ -27,6 +27,12 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   notifications, review the suggested player match and amount, then apply to credit a
   player's balance. Every import is recorded and undoable, and processed emails are labelled
   in Gmail so they aren't found again.
+  Forward/reply subject prefixes (`FW:`, `RE:`, `FWD:`, case-insensitive) are supported.
+  For mail forwarded from a personal address, admins can save a custom Gmail query in
+  Settings or e-Transfers, such as `subject:"automatically deposited"`. This replaces
+  all default sender, subject, and date filters; include `after:YYYY/MM/DD` to limit
+  dates, or clear the query to restore the default search. See
+  [Gmail search syntax](https://support.google.com/mail/answer/7190).
 
 ## Tech stack
 

@@ -89,7 +89,7 @@ describe('importEtransferEmails', () => {
 
     const result = await etransfer.importEtransferEmails();
 
-    expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca', '2026-08-27');
+    expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca', '2026-08-27', undefined);
     expect(result).toEqual({ found: 3, created: 3, autoSettled: 0, ignored: 0 });
 
     const mapped = helpers.getClubDocData('etransferImports', 'msg-2');
@@ -125,7 +125,7 @@ describe('importEtransferEmails', () => {
   it('passes a custom sender address through to the Gmail search', async () => {
     jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([]);
     await etransfer.importEtransferEmails('custom@bank.example');
-    expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith('custom@bank.example', '2026-08-27');
+    expect(gmailMock.searchEtransferEmails).toHaveBeenCalledWith('custom@bank.example', '2026-08-27', undefined);
   });
 
   it('auto-matches the uniquely strongest player despite middle or reordered sender names', async () => {

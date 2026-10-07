@@ -283,10 +283,11 @@ export async function deleteEtransferSenderMapping(id: string): Promise<void> {
 export async function importEtransferEmails(
   senderAddress: string = DEFAULT_ETRANSFER_SENDER_ADDRESS,
   searchAfterDate: string = getDefaultEtransferSearchAfterDate(),
-  ignoreAboveAmount: number = DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT
+  ignoreAboveAmount: number = DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT,
+  customGmailQuery?: string | null
 ): Promise<EtransferImportResult> {
   return serviceCall('importEtransferEmails', async () => {
-    const allFound = await searchEtransferEmails(senderAddress, searchAfterDate);
+    const allFound = await searchEtransferEmails(senderAddress, searchAfterDate, customGmailQuery);
     if (allFound.length === 0) return { found: 0, created: 0, autoSettled: 0, ignored: 0 };
 
     const ignoreAboveCents = toCents(ignoreAboveAmount);

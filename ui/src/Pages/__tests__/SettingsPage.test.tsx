@@ -102,11 +102,38 @@ afterEach(() => {
 });
 
 describe('SettingsPage', () => {
+  it('lets admins load, save, and clear a custom Gmail query', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc(TEST_CLUB_ID, { name: 'Test Club', etransferCustomGmailQuery: 'label:forwarded' });
+    renderPage({ role: 'admin' });
+
+    const input = await screen.findByLabelText('Custom Gmail query (optional)');
+    await waitFor(() => expect(input).toHaveValue('label:forwarded'));
+    expect(screen.getByRole('link', { name: 'Gmail search syntax' })).toHaveAttribute(
+      'href', 'https://support.google.com/mail/answer/7190'
+    );
+
+    await user.clear(input);
+    await user.type(input, '  subject:"automatically deposited"  ');
+    await user.click(screen.getByRole('button', { name: 'Save query' }));
+    await waitFor(() => expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+      etransferCustomGmailQuery: 'subject:"automatically deposited"',
+    }));
+    expect(input).toHaveValue('subject:"automatically deposited"');
+
+    await user.clear(input);
+    await user.click(screen.getByRole('button', { name: 'Save query' }));
+    await waitFor(() => expect(__getDocData(`clubs/${TEST_CLUB_ID}`)).toMatchObject({
+      etransferCustomGmailQuery: null,
+    }));
+  });
+
   it('blocks non-admin users from the page', () => {
     renderPage({ role: 'member' });
 
     expect(screen.getByText('You do not have permission to view this page.')).toBeInTheDocument();
     expect(screen.queryByText('Club settings')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Custom Gmail query (optional)')).not.toBeInTheDocument();
   });
 
   it('shows the page to admins but hides super-admin-only controls', async () => {

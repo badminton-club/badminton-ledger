@@ -231,6 +231,8 @@ export interface Club {
   // services/firebase/gmail.ts). Configurable since some banks/regions may use a
   // different notification address than the Canadian default.
   etransferSenderAddress?: string;
+  // Full Gmail query override; blank/unset uses the default sender, subject, and date filters.
+  etransferCustomGmailQuery?: string | null;
   // ISO calendar date used as the lower bound for Gmail e-Transfer searches —
   // a one-off custom cutoff. Ignored once etransferSearchWindowDays is set,
   // since a rolling window stays fresh automatically and doesn't need this.

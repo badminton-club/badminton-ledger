@@ -12,7 +12,7 @@ import {
   type DriveBackupFile,
 } from '../services/firebase/drive';
 import { encryptBackupPayload, decryptBackupPayload, isEncryptedBackupPayload } from '../services/backupCrypto';
-import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, createClubInvitation, fetchClubInvitations, deleteClubInvitation, setClubTabEnabled, setClubDefaultCourtCount, setClubEtransferSearchWindowDays, setClubEtransferIgnoreAboveAmount, DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS, DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT, ETRANSFER_SEARCH_WINDOW_PRESETS, deleteClub, fetchUserClubs, fetchClub, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, fetchSuggestions, deleteSuggestion, updatePlayerProfile } from '../services/firebase';
+import { addClubMember, setMemberPlayer, removeClubMember, fetchClubMembers, createClubInvitation, fetchClubInvitations, deleteClubInvitation, setClubTabEnabled, setClubDefaultCourtCount, setClubEtransferSearchWindowDays, setClubEtransferIgnoreAboveAmount, setClubEtransferCustomGmailQuery, DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS, DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT, ETRANSFER_SEARCH_WINDOW_PRESETS, deleteClub, fetchUserClubs, fetchClub, fetchLinkRequests, deleteLinkRequest, addPlayer, fetchProfileEditRequests, deleteProfileEditRequest, fetchSuggestions, deleteSuggestion, updatePlayerProfile } from '../services/firebase';
 import { auth } from '../services/firebase/client';
 import { useAppDispatch, useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
@@ -98,6 +98,10 @@ export default function SettingsPage() {
   const [savingIgnoreAbove, setSavingIgnoreAbove] = useState(false);
   const [ignoreAboveError, setIgnoreAboveError] = useState('');
   const [ignoreAboveMessage, setIgnoreAboveMessage] = useState('');
+  const [customGmailQuery, setCustomGmailQuery] = useState('');
+  const [savingCustomQuery, setSavingCustomQuery] = useState(false);
+  const [customQueryError, setCustomQueryError] = useState('');
+  const [customQueryMessage, setCustomQueryMessage] = useState('');
 
   const [requests, setRequests] = useState<LinkRequest[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
@@ -158,6 +162,8 @@ export default function SettingsPage() {
     setSearchWindowMessage('');
     setIgnoreAboveError('');
     setIgnoreAboveMessage('');
+    setCustomQueryError('');
+    setCustomQueryMessage('');
     fetchClub(clubId)
       .then((club) => {
         if (cancelled) return;
@@ -165,6 +171,7 @@ export default function SettingsPage() {
         setEtransferSearchWindowDays(club?.etransferSearchWindowDays ?? DEFAULT_ETRANSFER_SEARCH_WINDOW_DAYS);
         const resolvedIgnoreAbove = club?.etransferIgnoreAboveAmount ?? DEFAULT_ETRANSFER_IGNORE_ABOVE_AMOUNT;
         setIgnoreAboveAmountInput(String(resolvedIgnoreAbove));
+        setCustomGmailQuery(club?.etransferCustomGmailQuery ?? '');
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -232,6 +239,22 @@ export default function SettingsPage() {
       setIgnoreAboveError(err instanceof Error ? err.message : 'Failed to save the ignore-above amount.');
     } finally {
       setSavingIgnoreAbove(false);
+    }
+  };
+
+  const handleSaveCustomGmailQuery = async () => {
+    if (!clubId) return;
+    setSavingCustomQuery(true);
+    setCustomQueryError('');
+    setCustomQueryMessage('');
+    try {
+      await setClubEtransferCustomGmailQuery(clubId, customGmailQuery);
+      setCustomGmailQuery(customGmailQuery.trim());
+      setCustomQueryMessage('Saved.');
+    } catch (err) {
+      setCustomQueryError(err instanceof Error ? err.message : 'Failed to save the custom Gmail query.');
+    } finally {
+      setSavingCustomQuery(false);
     }
   };
 
@@ -834,6 +857,38 @@ export default function SettingsPage() {
           </div>
           {searchWindowError && <Alert variant="danger" className="mt-2 mb-0 py-2">{searchWindowError}</Alert>}
           {ignoreAboveError && <Alert variant="danger" className="mt-2 mb-0 py-2">{ignoreAboveError}</Alert>}
+          <Form.Group controlId="settings-etransfer-custom-query" className="mt-3">
+            <Form.Label className="small mb-1">Custom Gmail query (optional)</Form.Label>
+            <Form.Control
+              type="text"
+              size="sm"
+              placeholder='subject:"automatically deposited"'
+              value={customGmailQuery}
+              onChange={(e) => {
+                setCustomGmailQuery(e.target.value);
+                setCustomQueryMessage('');
+                setCustomQueryError('');
+              }}
+              disabled={etransferDefaultsLoading || savingCustomQuery || !clubId}
+            />
+            <Form.Text className="text-muted d-block">
+              Replaces all default sender, subject, and search-window filters. Leave blank to use the default.
+              {' '}For forwarded emails, try <code>subject:"automatically deposited"</code> or add
+              {' '}<code>from:your-address@example.com</code>. Use <code>after:YYYY/MM/DD</code> to limit dates.
+              {' '}<a href="https://support.google.com/mail/answer/7190" target="_blank" rel="noopener noreferrer">Gmail search syntax</a>.
+            </Form.Text>
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              className="mt-2"
+              onClick={handleSaveCustomGmailQuery}
+              disabled={etransferDefaultsLoading || savingCustomQuery || !clubId}
+            >
+              {savingCustomQuery ? <Spinner size="sm" animation="border" /> : 'Save query'}
+            </Button>
+            {customQueryMessage && <span className="text-success small ms-2">{customQueryMessage}</span>}
+          </Form.Group>
+          {customQueryError && <Alert variant="danger" className="mt-2 mb-0 py-2">{customQueryError}</Alert>}
         </Card.Body>
       </Card>
 

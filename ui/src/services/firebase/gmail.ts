@@ -260,7 +260,7 @@ export function parseEtransferMessage(message: {
 
   const subject = header('Subject') ?? '';
   const subjectMatch = subject.match(
-    /received\s+\$([\d,]+\.\d{2})\s+from\s+(.+?)\s+and it has been automatically deposited/i
+    /(?:(?:fw|re|fwd):\s*)*(?:Interac e-Transfer:\s*You've\s+)?received\s+\$([\d,]+\.\d{2})\s+from\s+(.+?)\s+and it has been automatically deposited/i
   );
   if (!subjectMatch) return null; // not an autodeposit notification — skip it
 
@@ -312,7 +312,8 @@ export function parseEtransferMessage(message: {
 
 /**
  * Searches Gmail for Interac e-Transfer autodeposit notifications from the given
- * sender address on or after `searchAfterDate`. This is purely a read — nothing
+ * sender address on or after `searchAfterDate`, unless a nonblank custom query
+ * replaces all default filters. This is purely a read — nothing
  * is ever written back to Gmail. Deduplication of already-reviewed emails is
  * handled entirely in Firestore (the Gmail message id is the doc id — see
  * `importEtransferEmails` in etransferImports.ts), so a message already
@@ -344,14 +345,15 @@ const GMAIL_LIST_MAX_PAGES = 20;
 
 export async function searchEtransferEmails(
   senderAddress: string,
-  searchAfterDate: string = getDefaultEtransferSearchAfterDate()
+  searchAfterDate: string = getDefaultEtransferSearchAfterDate(),
+  customGmailQuery?: string | null
 ): Promise<ParsedEtransferEmail[]> {
   return serviceCall('searchEtransferEmails', async () => {
     // Gmail accepts Unix seconds, which avoids its documented PST-based
     // interpretation of calendar dates and makes the lower bound unambiguous.
-    const after = gmailAfterEpochSeconds(searchAfterDate);
+    const q = customGmailQuery?.trim()
+      || `from:${senderAddress} subject:"automatically deposited" after:${gmailAfterEpochSeconds(searchAfterDate)}`;
     const accessToken = await getGmailAccessToken();
-    const q = `from:${senderAddress} subject:"automatically deposited" after:${after}`;
 
     const messages: { id: string; threadId: string }[] = [];
     let pageToken: string | undefined;

@@ -70,6 +70,46 @@ describe('EtransfersPage', () => {
     jest.mocked(dismissEtransferImport).mockImplementation(actual.dismissEtransferImport);
   });
 
+  it('loads, edits, uses, and clears the saved custom Gmail query', async () => {
+    const user = userEvent.setup();
+    seedClubMetaDoc('test-club', { name: 'Test Club', etransferCustomGmailQuery: 'label:forwarded' });
+    jest.mocked(searchEtransferEmails).mockResolvedValue([]);
+    renderPage();
+
+    const input = await screen.findByLabelText('Custom Gmail query (optional)');
+    expect(input).toHaveValue('label:forwarded');
+    expect(screen.getByText(/using custom gmail query/i)).toHaveTextContent('label:forwarded');
+    expect(screen.getByRole('combobox', { name: 'Search window' })).toBeDisabled();
+
+    await user.clear(input);
+    await user.type(input, '  subject:"automatically deposited"  ');
+    await user.click(screen.getByRole('button', { name: 'Save query' }));
+    await waitFor(() => expect(getClubMetaDocData('test-club')).toMatchObject({
+      etransferCustomGmailQuery: 'subject:"automatically deposited"',
+    }));
+    expect(screen.getByRole('link', { name: 'Gmail search syntax' })).toHaveAttribute(
+      'href', 'https://support.google.com/mail/answer/7190'
+    );
+
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await screen.findByText('No new autodeposit emails found.');
+    expect(searchEtransferEmails).toHaveBeenLastCalledWith(
+      'notify@payments.interac.ca', getDefaultEtransferSearchAfterDate(), 'subject:"automatically deposited"'
+    );
+
+    await user.clear(input);
+    await user.click(screen.getByRole('button', { name: 'Save query' }));
+    await waitFor(() => expect(getClubMetaDocData('test-club')).toMatchObject({ etransferCustomGmailQuery: null }));
+    expect(screen.getByRole('combobox', { name: 'Search window' })).toBeEnabled();
+    expect(screen.getByText(/searching e-transfers from/i)).toHaveTextContent('notify@payments.interac.ca');
+
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await screen.findByText('No new autodeposit emails found.');
+    expect(searchEtransferEmails).toHaveBeenLastCalledWith(
+      'notify@payments.interac.ca', getDefaultEtransferSearchAfterDate(), ''
+    );
+  });
+
   it('finds new e-Transfer emails via search, matches by name, and lists them for review', async () => {
     const user = userEvent.setup();
     seedClubDoc('players', 'p1', makePlayer());
@@ -96,7 +136,7 @@ describe('EtransfersPage', () => {
 
     await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
 
-    expect(searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca', defaultSearchDate);
+    expect(searchEtransferEmails).toHaveBeenCalledWith('notify@payments.interac.ca', defaultSearchDate, '');
     expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
     expect(screen.getByText('cash for shoppers')).toBeInTheDocument();
     expect(await screen.findByText(/found 1 email\(s\) — 1 new/i)).toBeInTheDocument();
