@@ -246,11 +246,12 @@ function extractBodyText(payload: GmailMessagePart | undefined): string {
   return '';
 }
 
-/** Extracts the display name and (if present) email address from a `Name <email>` header value. */
+/** Extracts an address from a bare email or `Name <email>` header value. */
 function parseAddressHeader(value: string | undefined): { name: string; email: string | null } {
   if (!value) return { name: '', email: null };
   const match = value.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
   if (match) return { name: match[1].trim(), email: match[2].trim().toLowerCase() };
+  if (SENDER_EMAIL_PATTERN.test(value.trim())) return { name: '', email: value.trim().toLowerCase() };
   return { name: value.trim(), email: null };
 }
 
@@ -297,6 +298,13 @@ export function parseEtransferMessage(message: {
 
   const fromHeader = parseAddressHeader(header('From'));
   const replyTo = parseAddressHeader(header('Reply-To'));
+  const isForwarded = /^\s*(?:fw|fwd|re):/i.test(subject)
+    || fromHeader.email !== DEFAULT_ETRANSFER_SENDER_ADDRESS;
+  // Outer headers on a forwarded message identify the forwarder, not the payer.
+  // Even a distinct Reply-To could belong to another forwarder in the chain.
+  const senderEmail = !isForwarded && replyTo.email !== fromHeader.email
+    ? replyTo.email
+    : null;
 
   // Subject wins over the body's "Sent From"/"Amount" fields — the body is
   // scanned for those labels anywhere in the decoded text, and the sender's own
@@ -318,10 +326,7 @@ export function parseEtransferMessage(message: {
     gmailThreadId: message.threadId,
     subject,
     senderName,
-    // Reply-To carries the e-Transfer sender's own email (distinct from the
-    // notify@payments.interac.ca address every autodeposit email is *sent* from),
-    // which is the stable identifier used for remembered sender→player mappings.
-    senderEmail: replyTo.email,
+    senderEmail,
     amount,
     memo,
     referenceNumber,

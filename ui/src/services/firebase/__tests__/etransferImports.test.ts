@@ -206,6 +206,100 @@ describe('importEtransferEmails', () => {
     expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
   });
 
+  it.each([false, true])('keeps an unconfirmed name-only exact-debt transfer pending (ambiguous: %s)', async (ambiguous) => {
+    seedPlayer('p1', { balance: 5, owed: 15 });
+    if (ambiguous) seedPlayer('p2', { balance: 5, owed: 15 });
+    helpers.seedClubDoc('sessions', 'unpaid', {
+      date: helpers.ts('2026-08-01'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 15, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([
+      makeParsedEmail({ senderEmail: null }),
+    ]);
+
+    expect(await etransfer.importEtransferEmails()).toEqual({
+      found: 1, created: 1, autoSettled: 0, ignored: 0,
+    });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
+      status: 'pending', senderEmail: null,
+      matchedPlayerId: ambiguous ? null : 'p1',
+      matchSource: ambiguous ? null : 'name-lookup',
+    });
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 5, owed: 15 });
+    expect(helpers.getClubDocData('sessions', 'unpaid')?.players).toEqual([
+      expect.objectContaining({ paid: false, paidVia: null }),
+    ]);
+    const firestore = require('firebase/firestore');
+    const { refs } = require('../client');
+    expect((await firestore.getDocs(refs.balanceLedger)).docs).toHaveLength(0);
+  });
+
+  it('reuses an admin-confirmed name mapping to settle reconciled exact debt', async () => {
+    seedPlayer('p1', { balance: 0, owed: 15 });
+    // Confirming this earlier payment saves a name-keyed mapping, not an email identity.
+    helpers.seedClubDoc('etransferImports', 'confirmed', {
+      senderName: 'UNRELATED BANK NAME', senderEmail: null, amount: 5, status: 'pending',
+    });
+    await etransfer.applyEtransferImport('confirmed', {
+      playerId: 'p1', amount: 5, rememberMapping: true,
+    });
+    expect(helpers.getClubDocData('etransferSenderMappings', 'name:unrelated bank name')).toMatchObject({
+      playerId: 'p1', senderName: 'UNRELATED BANK NAME', senderEmail: null,
+    });
+    helpers.seedClubDoc('sessions', 'unpaid', {
+      date: helpers.ts('2026-08-01'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 15, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([
+      makeParsedEmail({ senderName: 'UNRELATED BANK NAME', senderEmail: null }),
+    ]);
+
+    expect(await etransfer.importEtransferEmails()).toMatchObject({ autoSettled: 1 });
+    expect(helpers.getClubDocData('etransferImports', 'msg-1')).toMatchObject({
+      status: 'applied', matchSource: 'mapping', matchedPlayerId: 'p1',
+      applicationMethod: 'auto-exact-owed', autoSettledSessionIds: ['unpaid'],
+    });
+    expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 5, owed: 0 });
+    expect(helpers.getClubDocData('sessions', 'unpaid')?.players).toEqual([
+      expect.objectContaining({ paid: true, paidVia: 'balance' }),
+    ]);
+  });
+
+  it('does not reuse a forwarding mailbox email mapping for two different forwarded payers', async () => {
+    seedPlayer('p1');
+    seedPlayer('p2', { firstName: 'Pat', lastName: 'Smith' });
+    helpers.seedClubDoc('etransferSenderMappings', 'forwarder@example.com', {
+      playerId: 'p1', senderEmail: 'forwarder@example.com', senderName: 'Treasurer',
+    });
+    const { parseEtransferMessage } = jest.requireActual('../gmail') as GmailModule;
+    const emails = ['CAI FANG WU', 'PAT SMITH'].map((name, index) => parseEtransferMessage({
+      id: `forwarded-${index}`, threadId: `thread-${index}`,
+      payload: { headers: [
+        { name: 'Subject', value: `Fwd: Interac e-Transfer: You've received $15.00 from ${name} and it has been automatically deposited.` },
+        { name: 'From', value: 'Treasurer <forwarder@example.com>' },
+        { name: 'Reply-To', value: 'FORWARDER@example.com' },
+      ] },
+    })!);
+    jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue(emails);
+
+    await etransfer.importEtransferEmails('forwarder@example.com');
+
+    ['p1', 'p2'].forEach((playerId, index) => {
+      expect(helpers.getClubDocData('etransferImports', `forwarded-${index}`)).toMatchObject({
+        senderEmail: null, matchedPlayerId: playerId, matchSource: 'name-lookup', status: 'pending',
+      });
+    });
+    expect(helpers.getClubDocData('etransferSenderMappings', 'forwarder@example.com')).toMatchObject({
+      playerId: 'p1',
+    });
+  });
+
   it('ignores a newly found transfer above the ignore-above cutoff entirely, even if it exactly matches owed', async () => {
     seedPlayer('p1', { balance: 0, owed: 30 });
     helpers.seedClubDoc('sessions', 'oldest', {
@@ -268,8 +362,11 @@ describe('importEtransferEmails', () => {
     expect(helpers.getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 30 });
   });
 
-  it('does not auto-settle when the player debt and unpaid session records do not reconcile', async () => {
+  it.each(['payer@example.com', null])('does not auto-settle unreconciled debt with payer email %s', async (senderEmail) => {
     seedPlayer('p1', { balance: 0, owed: 30 });
+    if (!senderEmail) {
+      await etransfer.saveEtransferSenderMapping(null, 'CAI FANG WU', 'p1');
+    }
     helpers.seedClubDoc('sessions', 'only-session', {
       date: helpers.ts('2026-08-01'),
       players: [{
@@ -278,7 +375,7 @@ describe('importEtransferEmails', () => {
       }],
     });
     jest.mocked(gmailMock.searchEtransferEmails).mockResolvedValue([
-      makeParsedEmail({ amount: 30 }),
+      makeParsedEmail({ amount: 30, senderEmail }),
     ]);
 
     const result = await etransfer.importEtransferEmails(undefined, undefined, 50);

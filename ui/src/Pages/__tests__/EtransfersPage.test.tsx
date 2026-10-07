@@ -15,6 +15,7 @@ import {
 import {
   searchEtransferEmails,
   getDefaultEtransferSearchAfterDate,
+  parseEtransferMessage,
 } from '../../services/firebase/gmail';
 import { rejectEtransferImport, dismissEtransferImport } from '../../services/firebase';
 import type { Player } from '../../types';
@@ -190,6 +191,57 @@ describe('EtransfersPage', () => {
     expect(await screen.findByText(/found 1 email\(s\) — 1 new/i)).toBeInTheDocument();
     // Single-candidate name lookup ("Cai" matches the seeded player "Cai Wu") pre-selects the player.
     expect(screen.getByRole('combobox', { name: '' })).toHaveValue('p1');
+  });
+
+  it('keeps forwarded name-only exact debt pending and remembers an admin-selected player by name', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('players', 'p1', makePlayer({ balance: 0, owed: 15 }));
+    seedClubDoc('sessions', 'unpaid', {
+      date: ts('2026-08-01'),
+      players: [{
+        id: 'p1', percentage: 100, cost: 15, paid: false, paidVia: null,
+        comped: false, highlighted: false,
+      }],
+    });
+    const parsed = parseEtransferMessage({
+      id: 'forwarded', threadId: 'thread-forwarded',
+      payload: { headers: [
+        { name: 'Subject', value: "Fwd: Interac e-Transfer: You've received $15.00 from BANK PAYER NAME and it has been automatically deposited." },
+        { name: 'From', value: 'Treasurer <forwarder@example.com>' },
+        { name: 'Reply-To', value: 'forwarder@example.com' },
+      ] },
+    })!;
+    jest.mocked(searchEtransferEmails).mockResolvedValue([parsed]);
+    renderPage();
+    await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
+    expect(screen.getByText(/Name-only suggestions stay pending/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+
+    const row = (await screen.findByText('BANK PAYER NAME')).closest('tr') as HTMLElement;
+    expect(getClubDocData('etransferImports', 'forwarded')).toMatchObject({
+      senderEmail: null, status: 'pending', matchedPlayerId: null, matchSource: null,
+    });
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 15 });
+    expect(getClubDocData('sessions', 'unpaid')?.players).toEqual([
+      expect.objectContaining({ paid: false }),
+    ]);
+    await user.selectOptions(within(row).getByRole('combobox'), 'p1');
+    const remember = within(row).getByRole('checkbox', {
+      name: 'Remember "BANK PAYER NAME" → this player for future imports',
+    });
+    if (!(remember as HTMLInputElement).checked) await user.click(remember);
+    await user.click(screen.getByRole('button', { name: 'Review batch (1)' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Approve batch (1)' }));
+
+    await waitFor(() => expect(getClubDocData('etransferImports', 'forwarded')).toMatchObject({
+      status: 'applied', matchedPlayerId: 'p1', applicationMethod: 'manual',
+    }));
+    expect(getClubDocData('etransferSenderMappings', 'name:bank payer name')).toMatchObject({
+      senderName: 'BANK PAYER NAME', senderEmail: null, playerId: 'p1',
+    });
+    expect(getClubDocData('etransferSenderMappings', 'forwarder@example.com')).toBeUndefined();
+    expect(getClubDocData('players', 'p1')).toMatchObject({ balance: 0, owed: 0 });
   });
 
   it('shows newly fetched exact-debt payments in a separate auto-settled list', async () => {

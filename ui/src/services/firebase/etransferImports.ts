@@ -275,7 +275,8 @@ export async function deleteEtransferSenderMapping(id: string): Promise<void> {
  * re-run. Each new import is pre-matched to a player, preferring a remembered
  * sender mapping over a plain name lookup. A newly found, matched transfer is
  * automatically applied only when its amount exactly equals the player's full
- * unpaid-session debt and the session records reconcile with that debt.
+ * unpaid-session debt and the session records reconcile with that debt. Without
+ * a payer email, a name-only suggestion needs an admin-confirmed mapping first.
  * Any newly found email above ignoreAboveAmount is skipped entirely — never
  * recorded as a pending import at all — so an unusually large/unexpected
  * transfer isn't picked up unattended.
@@ -320,6 +321,7 @@ export async function importEtransferEmails(
         : null;
       if (
         !matchedPlayer
+        || (!etransferImport.senderEmail && etransferImport.matchSource !== 'mapping')
         || toCents(etransferImport.amount) <= 0
         || toCents(etransferImport.amount) !== toCents(matchedPlayer.owed ?? 0)
       ) {

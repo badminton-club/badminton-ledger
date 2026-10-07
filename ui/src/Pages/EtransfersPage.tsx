@@ -585,7 +585,11 @@ export default function EtransfersPage() {
       <h2>e-Transfer Import</h2>
       <p className="text-muted">
         Search Gmail for Interac e-Transfer autodeposit notifications, review the suggested player
-        match and amount, then apply to credit their balance. A confidently matched transfer is
+        match and amount, then apply to credit their balance. Forwarding addresses only allow
+        messages through the search; they do not identify the payer. Forwarded messages use the
+        payer name in the subject, not the outer Reply-To. Name-only suggestions stay pending
+        until an admin confirms the player; use Remember to save that name mapping for future imports.
+        A transfer matched by payer email or a remembered mapping is
         applied automatically when its amount exactly equals all of that player's unpaid sessions;
         everything else waits for review below. Any found email above the ignore-above amount is
         skipped entirely — not picked up at all.

@@ -30,6 +30,13 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   Forward/reply subject prefixes (`FW:`, `RE:`, `FWD:`, case-insensitive) are supported.
   Admins manage allowed sender addresses in Settings or e-Transfers (default:
   `notify@payments.interac.ca`), adding trusted forwarding addresses as needed.
+  Forwarding addresses are only used for the From allowlist, never as payer identities.
+  Forwarded/replied messages (or messages from a nonstandard From address) ignore outer
+  Reply-To headers and use the payer name from the subject. Name-only suggestions and
+  ambiguous matches wait for admin review, even when the amount equals the player's debt.
+  Select the player and use Remember to save a name mapping; future transfers with that
+  confirmed mapping can auto-settle exact unpaid debt when session records reconcile.
+  Original Interac messages retain distinct payer Reply-To matching and existing email mappings.
   A custom Gmail query such as `subject:"automatically deposited"` replaces only
   default subject and date filters; include `after:YYYY/MM/DD` to limit dates,
   or clear the query to restore the default search. Allowed From mailboxes are

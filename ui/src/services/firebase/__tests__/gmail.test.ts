@@ -133,7 +133,7 @@ describe('parseEtransferMessage', () => {
       const subject = `${prefix} Interac e-Transfer: You've received $10.71 from XXX and it has been automatically deposited.`;
       const parsed = gmail.parseEtransferMessage(sampleMessage({ subject }));
 
-      expect(parsed).toMatchObject({ subject, senderName: 'XXX', amount: 10.71 });
+      expect(parsed).toMatchObject({ subject, senderName: 'XXX', senderEmail: null, amount: 10.71 });
     }
   );
 
@@ -199,11 +199,57 @@ describe('parseEtransferMessage', () => {
     expect(parsed).toBeNull();
   });
 
-  it('falls back to the From header display name when Reply-To is missing', () => {
+  it('keeps the subject payer name when Reply-To is missing', () => {
     const message = sampleMessage({ replyTo: null });
     const parsed = gmail.parseEtransferMessage(message);
     expect(parsed?.senderEmail).toBeNull();
     expect(parsed?.senderName).toBe('CAI FANG WU');
+  });
+
+  it('keeps the subject payer on a forwarded email without Reply-To or body email recovery', () => {
+    const parsed = gmail.parseEtransferMessage(sampleMessage({
+      subject: "Fwd: RE: Interac e-Transfer: You've received $15.00 from PAT SMITH and it has been automatically deposited.",
+      from: 'Club Treasurer <forwarder@example.com>',
+      replyTo: null,
+      bodyData: b64url('From: Another Person <arbitrary@example.com> Sent From: WRONG NAME Amount: $15.00'),
+    }));
+    expect(parsed).toMatchObject({ senderName: 'PAT SMITH', senderEmail: null, amount: 15 });
+  });
+
+  it.each([
+    ['Club Treasurer <Forwarder@Example.com>', '"Different Display" <FORWARDER@example.com>'],
+    ['FORWARDER@example.com', 'Club Treasurer <forwarder@example.com>'],
+    ['Club Treasurer <forwarder@example.com>', 'FORWARDER@example.com'],
+    ['FORWARDER@example.com', 'forwarder@example.com'],
+  ])('never uses forwarding From %s / Reply-To %s as the payer', (from, replyTo) => {
+    const message = sampleMessage({ from, replyTo });
+    message.payload.headers.forEach((h) => { h.name = h.name.toUpperCase(); });
+    expect(gmail.parseEtransferMessage(message)).toMatchObject({
+      senderName: 'CAI FANG WU', senderEmail: null,
+    });
+  });
+
+  it('discards a distinct outer Reply-To on a forward from a nonstandard mailbox', () => {
+    expect(gmail.parseEtransferMessage(sampleMessage({
+      from: 'forwarder@example.com',
+      replyTo: 'Another forwarder <another@example.com>',
+    }))).toMatchObject({ senderName: 'CAI FANG WU', senderEmail: null });
+  });
+
+  it.each([
+    ['INTERAC <NOTIFY@PAYMENTS.INTERAC.CA>', 'Payer <PAYER@example.com>'],
+    ['notify@payments.interac.ca', 'payer@example.com'],
+  ])('preserves distinct payer Reply-To on original Interac mail from %s', (from, replyTo) => {
+    expect(gmail.parseEtransferMessage(sampleMessage({ from, replyTo }))).toMatchObject({
+      senderName: 'CAI FANG WU', senderEmail: 'payer@example.com',
+    });
+  });
+
+  it('does not use Reply-To equal to the Interac From mailbox as a payer', () => {
+    expect(gmail.parseEtransferMessage(sampleMessage({
+      from: 'notify@payments.interac.ca',
+      replyTo: 'Interac <NOTIFY@PAYMENTS.INTERAC.CA>',
+    }))?.senderEmail).toBeNull();
   });
 
   it('trusts the subject line over a memo crafted to look like real "Sent From"/"Amount" fields', () => {
@@ -318,7 +364,7 @@ describe('searchEtransferEmails', () => {
     );
   });
 
-  it('checks From independently of an OR custom query, preserving unrelated Reply-To payer identities', async () => {
+  it('checks From independently of an OR custom query without treating a forwarder as a payer', async () => {
     helpers.setCurrentUser(userOne);
     fakeAuth.__setReauthImplementation(async (user) => ({ user, __credential: { accessToken: 'gmail-token' } }));
     const missingFrom = sampleMessage({ id: 'missing' });
@@ -346,7 +392,9 @@ describe('searchEtransferEmails', () => {
       `((from:notify@payments.interac.ca OR from:forwarder@example.com)) AND (${customQuery})`
     );
     expect(results.map((result) => result.gmailMessageId)).toEqual(['default', 'forwarded', 'bare']);
-    expect(results.every((result) => result.senderEmail === 'caifang1966@gmail.com')).toBe(true);
+    expect(results.map((result) => result.senderEmail)).toEqual([
+      'caifang1966@gmail.com', null, 'caifang1966@gmail.com',
+    ]);
   });
 
   it.each(['', ' ', [], ['evil@example.com) OR in:anywhere'], ['valid@example.com', 'bad']])(
