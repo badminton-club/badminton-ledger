@@ -586,7 +586,9 @@ describe('PlayersPage', () => {
       ],
     });
     await user.click(screen.getByText('Ada Lovelace'));
-    await user.click(await screen.findByRole('button', { name: 'Paid by' }));
+    const paidBy = await screen.findByRole('button', { name: 'Paid by' });
+    const grid = paidBy.closest('.settlement-button-grid') as HTMLElement;
+    await user.click(paidBy);
     await user.click(screen.getByRole('button', { name: `${payerName} $100.00` }));
 
     await waitFor(() => {
@@ -595,7 +597,7 @@ describe('PlayersPage', () => {
       ]);
     });
     expect(getClubDocData('players', 'p2')).toMatchObject({ balance: 80 });
-    const payerButton = await screen.findByRole('button', { name: payerName });
+    const payerButton = await within(grid).findByRole('button', { name: payerName });
     expect(payerButton).toHaveClass('w-100', 'text-truncate', 'btn-primary');
     expect(payerButton.closest('.settlement-button-grid')).toBeInTheDocument();
     expect(payerButton.style.maxWidth).toBe('');
