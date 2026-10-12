@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Badge, Button, ButtonGroup, Col, Dropdown, Form, ListGroup, Row } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -37,7 +37,13 @@ export default function ExistingSessionView({ session, onSessionUpdate, onEdit, 
   // Compact trims each player row down to just cost/status (drops the balance
   // line and "Updated at" timestamp, and tightens row padding) for sessions
   // with a lot of players; Comfy (the default) keeps the fuller detail.
-  const [density, setDensity] = useState<'comfy' | 'compact'>('comfy');
+  const [density, setDensity] = useState<'comfy' | 'compact'>(() =>
+    localStorage.getItem('sessionViewDensity') === 'compact' ? 'compact' : 'comfy'
+  );
+
+  useEffect(() => {
+    localStorage.setItem('sessionViewDensity', density);
+  }, [density]);
 
   const handleDelete = async () => {
     setDeleteError('');
