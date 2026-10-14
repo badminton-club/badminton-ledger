@@ -9,6 +9,7 @@ import type { Player, Session, SessionPlayer } from 'types';
 
 beforeEach(() => {
   resetFirebaseTestState();
+  localStorage.clear();
 });
 
 function makePlayer(overrides: Partial<Player> = {}): Player {
@@ -205,6 +206,7 @@ describe('ExistingSessionView', () => {
     // Comfy by default: both the balance callout and the settled-at
     // timestamp show, and the row uses its normal (non-tightened) padding.
     expect(screen.getByRole('button', { name: 'Comfy' })).toHaveClass('active');
+    expect(localStorage.getItem('sessionViewDensity')).toBe('comfy');
     expect(screen.getByText('Balance: $100.00')).toBeInTheDocument();
     expect(screen.getByText(/^Updated /)).toBeInTheDocument();
     const adaRow = screen.getByText('Ada Lovelace').closest('.list-group-item') as HTMLElement;
@@ -213,6 +215,7 @@ describe('ExistingSessionView', () => {
     await user.click(screen.getByRole('button', { name: 'Compact' }));
 
     expect(screen.getByRole('button', { name: 'Compact' })).toHaveClass('active');
+    expect(localStorage.getItem('sessionViewDensity')).toBe('compact');
     // The balance callout is important enough to keep even in Compact —
     // only the "Updated" timestamp and the row's own padding shrink.
     expect(screen.getByText('Balance: $100.00')).toBeInTheDocument();
@@ -220,6 +223,52 @@ describe('ExistingSessionView', () => {
     expect(adaRow).toHaveClass('py-1');
     // The cost/settlement controls themselves still show in Compact.
     expect(within(adaRow).getByText('$20.00')).toBeInTheDocument();
+  });
+
+  it('restores Compact when a session is reopened', async () => {
+    const user = userEvent.setup();
+    const players = [makePlayer()];
+    const sessionPlayers = [makeSessionPlayer()];
+    const { unmount } = renderView(players, sessionPlayers);
+    await user.click(screen.getByRole('button', { name: 'Compact' }));
+    unmount();
+
+    renderView(players, sessionPlayers);
+    expect(screen.getByRole('button', { name: 'Compact' })).toHaveClass('active');
+    expect(screen.getByText('Ada Lovelace').closest('.list-group-item')).toHaveClass('py-1');
+  });
+
+  it('restores a saved Compact preference and persists switching back to Comfy', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem('sessionViewDensity', 'compact');
+    const players = [makePlayer()];
+    const sessionPlayers = [makeSessionPlayer({
+      paid: true,
+      paidVia: 'etransfer',
+      settledAt: { toDate: () => new Date('2026-02-16T10:00:00Z') } as never,
+    })];
+    const { unmount } = renderView(players, sessionPlayers);
+    expect(screen.getByRole('button', { name: 'Compact' })).toHaveClass('active');
+    expect(screen.queryByText(/^Updated /)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Comfy' }));
+    expect(screen.getByRole('button', { name: 'Comfy' })).toHaveClass('active');
+    expect(localStorage.getItem('sessionViewDensity')).toBe('comfy');
+    expect(screen.getByText(/^Updated /)).toBeInTheDocument();
+    expect(screen.getByText('Ada Lovelace').closest('.list-group-item')).not.toHaveClass('py-1');
+    unmount();
+
+    renderView(players, sessionPlayers);
+    expect(screen.getByRole('button', { name: 'Comfy' })).toHaveClass('active');
+    expect(screen.getByText(/^Updated /)).toBeInTheDocument();
+  });
+
+  it.each(['comfy', 'invalid', 'Compact', ''])('defaults to Comfy for saved preference %j', saved => {
+    localStorage.setItem('sessionViewDensity', saved);
+    renderView([makePlayer()], [makeSessionPlayer()]);
+    expect(screen.getByRole('button', { name: 'Comfy' })).toHaveClass('active');
+    expect(screen.getByText('Ada Lovelace').closest('.list-group-item')).not.toHaveClass('py-1');
+    expect(localStorage.getItem('sessionViewDensity')).toBe('comfy');
   });
 
   it('shows all the same settlement buttons in Compact, just sized down to fit one (scrollable) line instead of wrapping', async () => {

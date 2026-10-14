@@ -841,14 +841,14 @@ export default function PlayersPage() {
                     <p className="text-muted small mb-0">No balance history yet.</p>
                   )}
                   {!isLoadingLedger && walletLedger.length > 0 && (
-                    <Table size="sm" borderless className="mb-0">
+                    <Table responsive size="sm" borderless className="mb-0">
                       <thead>
                         <tr className="small text-muted">
                           <th title="When this entry was recorded (not necessarily the session date)" style={{ whiteSpace: 'nowrap' }}>
                             Recorded
                           </th>
                           <th style={{ whiteSpace: 'nowrap' }}>Type</th>
-                          <th>Note</th>
+                          <th className="player-balance-history-note">Note</th>
                           <th style={{ whiteSpace: 'nowrap' }}>Session</th>
                           <th className="text-end">Change</th>
                           <th className="text-end">Balance</th>
@@ -884,7 +884,7 @@ export default function PlayersPage() {
                                 </Badge>
                               )}
                             </td>
-                            <td className="text-muted" style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                            <td className="text-muted player-balance-history-note" style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
                               {entry.note}
                             </td>
                             <td className="text-nowrap">
@@ -955,7 +955,7 @@ export default function PlayersPage() {
                             : (s.date as any)?.toDate?.() ?? (s.date ? new Date(s.date as any) : null);
                         return (
                           <ListGroup.Item key={s.id}>
-                            <div className="d-flex justify-content-between align-items-center">
+                            <div className="d-flex justify-content-between align-items-center gap-2">
                               <div>
                                 {sessionDate ? (
                                   <Link to={`/?date=${format(sessionDate, 'yyyy-MM-dd')}`} className="fw-bold">
@@ -966,8 +966,8 @@ export default function PlayersPage() {
                                 )}
                                 {s.location && <span className="text-muted small ms-2">at {s.location}</span>}
                               </div>
-                              <div className="text-end">
-                                <div>${playerInSession?.cost?.toFixed(2) ?? 'N/A'}</div>
+                              <div className="text-end text-nowrap">${playerInSession?.cost?.toFixed(2) ?? 'N/A'}</div>
+                            </div>
                                 {playerInSession && (() => {
                                   const via: PaidVia =
                                     playerInSession.paidVia ??
@@ -1022,7 +1022,7 @@ export default function PlayersPage() {
                                   };
                                   return (
                                     <>
-                                      <ButtonGroup size="sm" className="mt-1">
+                                      <div className="settlement-button-grid player-settlement-button-grid mt-1">
                                         {settleOptions.map(o => {
                                           const isActive = via === o.method;
                                           const displayLabel = o.method === 'balance' && isActive && settledViaEtransferBalance
@@ -1031,6 +1031,8 @@ export default function PlayersPage() {
                                           return (
                                           <React.Fragment key={o.label}>
                                             <Button
+                                              size="sm"
+                                              className="text-truncate w-100"
                                               variant={isActive ? o.activeVariant : 'outline-secondary'}
                                               style={{ fontSize: 11, padding: '1px 8px' }}
                                               onClick={() => pick(o.method)}
@@ -1043,11 +1045,12 @@ export default function PlayersPage() {
                                               {displayLabel}
                                             </Button>
                                             {o.method === null && otherPlayers.length > 0 && (
-                                              <Dropdown as={ButtonGroup} align="end">
+                                              <Dropdown as={ButtonGroup} align="end" className="w-100">
                                                 <Dropdown.Toggle
+                                                  size="sm"
                                                   variant={via === 'transfer' ? 'primary' : 'outline-secondary'}
-                                                  style={{ fontSize: 11, padding: '1px 8px', maxWidth: 130 }}
-                                                  className="text-truncate"
+                                                  style={{ fontSize: 11, padding: '1px 8px' }}
+                                                  className="text-truncate w-100"
                                                   title="Pay these dues from another player's balance"
                                                 >
                                                   {via === 'transfer' && payerName ? payerName : 'Paid by'}
@@ -1074,7 +1077,7 @@ export default function PlayersPage() {
                                           </React.Fragment>
                                           );
                                         })}
-                                      </ButtonGroup>
+                                      </div>
                                       {playerInSession.settledAt && (via === 'comp' || playerInSession.paid) && (
                                         <div className="text-muted" style={{ fontSize: 11 }}>
                                           Updated {format(playerInSession.settledAt.toDate(), 'MMM d, yyyy h:mm a')}
@@ -1083,8 +1086,6 @@ export default function PlayersPage() {
                                     </>
                                   );
                                 })()}
-                              </div>
-                            </div>
                           </ListGroup.Item>
                         );
                       })}

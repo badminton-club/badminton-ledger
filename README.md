@@ -9,6 +9,8 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
 
 - **Sessions & attendance** — a calendar for scheduling sessions, marking who attended, and
   splitting costs across players (including waitlist/paste-from-text roster entry).
+  The session detail view remembers your Compact/Comfy choice in the same browser across
+  session reopenings and future visits.
 - **Player ledger & payouts** — per-player balances, a prepaid wallet, e-Transfer vs.
   balance-only views, custom transactions, and a sortable/filterable/paginated payout ledger
   with running totals and full timestamps.

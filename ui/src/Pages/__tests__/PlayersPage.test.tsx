@@ -477,8 +477,11 @@ describe('PlayersPage', () => {
     expect(screen.queryByText('Owner-only record')).not.toBeInTheDocument();
 
     const table = screen.getByRole('table');
+    expect(table.parentElement).toHaveClass('table-responsive');
+    expect(within(table).getByRole('columnheader', { name: 'Note' })).toHaveClass('player-balance-history-note');
     const rows = within(table).getAllByRole('row').slice(1);
     expect(within(rows[0]).getByText('Fix scoring import')).toBeInTheDocument();
+    expect(within(rows[0]).getByText('Fix scoring import')).toHaveClass('player-balance-history-note');
     expect(within(rows[1]).getByText('Cash top-up')).toBeInTheDocument();
     expect(within(rows[2]).getByText('Settled from prepaid balance — session on current month date')).toBeInTheDocument();
     expect(within(rows[2]).getByText('Session')).toBeInTheDocument();
@@ -539,7 +542,72 @@ describe('PlayersPage', () => {
     expect(screen.getByText('(Prepaid credit)')).toBeInTheDocument();
   });
 
-  it('labels a session auto-settled from a Gmail e-Transfer as "Gmail e-Transfer" instead of plain "Balance"', async () => {
+  it('puts the session date, location, and cost above a two-column payment grid after selecting a player', async () => {
+    const user = userEvent.setup();
+    const sessionDate = new Date();
+    seedSession('s1', {
+      date: ts(sessionDate),
+      location: 'Community Centre',
+      players: [makeSessionPlayer()],
+    });
+    renderPage({
+      players: [
+        makePlayer(),
+        makePlayer({ id: 'p2', firstName: 'Bea', lastName: null, balance: 100 }),
+      ],
+    });
+
+    expect(screen.queryByRole('button', { name: 'Unpaid' })).not.toBeInTheDocument();
+    await user.click(screen.getByText('Ada Lovelace'));
+
+    const unpaid = await screen.findByRole('button', { name: 'Unpaid' });
+    const grid = unpaid.closest('.settlement-button-grid') as HTMLElement;
+    expect(grid).toBeInTheDocument();
+    expect(grid).toHaveClass('player-settlement-button-grid');
+    expect(grid).not.toHaveClass('btn-group');
+    const header = grid.previousElementSibling as HTMLElement;
+    expect(header).toHaveClass('d-flex', 'justify-content-between');
+    expect(within(header).getByRole('link', { name: format(sessionDate, 'MMM d, yyyy') })).toBeInTheDocument();
+    expect(within(header).getByText('at Community Centre')).toBeInTheDocument();
+    expect(within(header).getByText('$20.00')).toBeInTheDocument();
+    expect(within(header).queryByRole('button')).not.toBeInTheDocument();
+    ['Unpaid', 'Paid by', 'Comp', 'Balance', 'e-Trans'].forEach(name => {
+      expect(within(grid).getByRole('button', { name })).toHaveClass('w-100');
+    });
+    const paidBy = within(grid).getByRole('button', { name: 'Paid by' });
+    expect(paidBy.closest('.btn-group')).toHaveClass('w-100');
+    expect(paidBy.style.maxWidth).toBe('');
+  });
+
+  it('settles selected-player dues from another player via the payment grid', async () => {
+    const user = userEvent.setup();
+    const payerName = 'Beatrice With a Very Long Family Name';
+    seedSession('s1', { players: [makeSessionPlayer({ paidVia: null })] });
+    renderPage({
+      players: [
+        makePlayer({ owed: 20 }),
+        makePlayer({ id: 'p2', firstName: 'Beatrice', lastName: 'With a Very Long Family Name', balance: 100 }),
+      ],
+    });
+    await user.click(screen.getByText('Ada Lovelace'));
+    const paidBy = await screen.findByRole('button', { name: 'Paid by' });
+    const grid = paidBy.closest('.settlement-button-grid') as HTMLElement;
+    await user.click(paidBy);
+    await user.click(screen.getByRole('button', { name: `${payerName} $100.00` }));
+
+    await waitFor(() => {
+      expect(getClubDocData('sessions', 's1')?.players).toEqual([
+        expect.objectContaining({ paid: true, paidVia: 'transfer', paidBy: 'p2' }),
+      ]);
+    });
+    expect(getClubDocData('players', 'p2')).toMatchObject({ balance: 80 });
+    const payerButton = await within(grid).findByRole('button', { name: payerName });
+    expect(payerButton).toHaveClass('w-100', 'text-truncate', 'btn-primary');
+    expect(payerButton.closest('.settlement-button-grid')).toBeInTheDocument();
+    expect(payerButton.style.maxWidth).toBe('');
+  });
+
+  it('keeps the longer Gmail e-Transfer label full-width in the payment grid instead of plain Balance', async () => {
     const now = new Date();
     const currentMonthSession = new Date(now.getFullYear(), now.getMonth(), 14, 19, 30);
     const players = [makePlayer({ id: 'p1', balance: 30 })];
@@ -553,7 +621,10 @@ describe('PlayersPage', () => {
 
     renderPage({ players, route: '/?playerId=p1' });
 
-    expect(await screen.findByRole('button', { name: 'Gmail e-Transfer' })).toBeInTheDocument();
+    const gmailButton = await screen.findByRole('button', { name: 'Gmail e-Transfer' });
+    expect(gmailButton).toHaveClass('w-100', 'btn-primary');
+    expect(gmailButton.closest('.settlement-button-grid')).toBeInTheDocument();
+    expect(gmailButton).toHaveAttribute('title', 'Automatically settled from balance funded by a Gmail e-Transfer');
     expect(screen.queryByRole('button', { name: 'Balance' })).not.toBeInTheDocument();
   });
 
