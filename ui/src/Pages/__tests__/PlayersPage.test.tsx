@@ -477,8 +477,11 @@ describe('PlayersPage', () => {
     expect(screen.queryByText('Owner-only record')).not.toBeInTheDocument();
 
     const table = screen.getByRole('table');
+    expect(table.parentElement).toHaveClass('table-responsive');
+    expect(within(table).getByRole('columnheader', { name: 'Note' })).toHaveClass('player-balance-history-note');
     const rows = within(table).getAllByRole('row').slice(1);
     expect(within(rows[0]).getByText('Fix scoring import')).toBeInTheDocument();
+    expect(within(rows[0]).getByText('Fix scoring import')).toHaveClass('player-balance-history-note');
     expect(within(rows[1]).getByText('Cash top-up')).toBeInTheDocument();
     expect(within(rows[2]).getByText('Settled from prepaid balance — session on current month date')).toBeInTheDocument();
     expect(within(rows[2]).getByText('Session')).toBeInTheDocument();
@@ -539,7 +542,7 @@ describe('PlayersPage', () => {
     expect(screen.getByText('(Prepaid credit)')).toBeInTheDocument();
   });
 
-  it('puts the session date, location, and cost above a full-width payment grid after selecting a player', async () => {
+  it('puts the session date, location, and cost above a two-column payment grid after selecting a player', async () => {
     const user = userEvent.setup();
     const sessionDate = new Date();
     seedSession('s1', {
@@ -560,6 +563,7 @@ describe('PlayersPage', () => {
     const unpaid = await screen.findByRole('button', { name: 'Unpaid' });
     const grid = unpaid.closest('.settlement-button-grid') as HTMLElement;
     expect(grid).toBeInTheDocument();
+    expect(grid).toHaveClass('player-settlement-button-grid');
     expect(grid).not.toHaveClass('btn-group');
     const header = grid.previousElementSibling as HTMLElement;
     expect(header).toHaveClass('d-flex', 'justify-content-between');

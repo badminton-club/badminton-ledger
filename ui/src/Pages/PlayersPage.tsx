@@ -841,14 +841,14 @@ export default function PlayersPage() {
                     <p className="text-muted small mb-0">No balance history yet.</p>
                   )}
                   {!isLoadingLedger && walletLedger.length > 0 && (
-                    <Table size="sm" borderless className="mb-0">
+                    <Table responsive size="sm" borderless className="mb-0">
                       <thead>
                         <tr className="small text-muted">
                           <th title="When this entry was recorded (not necessarily the session date)" style={{ whiteSpace: 'nowrap' }}>
                             Recorded
                           </th>
                           <th style={{ whiteSpace: 'nowrap' }}>Type</th>
-                          <th>Note</th>
+                          <th className="player-balance-history-note">Note</th>
                           <th style={{ whiteSpace: 'nowrap' }}>Session</th>
                           <th className="text-end">Change</th>
                           <th className="text-end">Balance</th>
@@ -884,7 +884,7 @@ export default function PlayersPage() {
                                 </Badge>
                               )}
                             </td>
-                            <td className="text-muted" style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                            <td className="text-muted player-balance-history-note" style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
                               {entry.note}
                             </td>
                             <td className="text-nowrap">
@@ -1022,7 +1022,7 @@ export default function PlayersPage() {
                                   };
                                   return (
                                     <>
-                                      <div className="settlement-button-grid mt-1">
+                                      <div className="settlement-button-grid player-settlement-button-grid mt-1">
                                         {settleOptions.map(o => {
                                           const isActive = via === o.method;
                                           const displayLabel = o.method === 'balance' && isActive && settledViaEtransferBalance
