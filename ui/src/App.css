@@ -156,6 +156,15 @@ body {
     width: 100%;
 }
 
+.player-settlement-button-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.player-balance-history-note {
+    min-width: 16rem;
+    width: 100%;
+}
+
 /* ── e-Transfer search ───────────────────────────────────────────────────── */
 
 .etransfer-search-summary {
