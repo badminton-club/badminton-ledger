@@ -118,6 +118,7 @@ beforeEach(() => {
   fakeAuth = require('../../../test-utils/fakeAuth');
   firebaseApp = require('firebase/app');
   helpers.resetFirebaseTestState();
+  sessionStorage.clear();
   global.fetch = jest.fn() as unknown as typeof fetch;
 });
 
@@ -549,5 +550,122 @@ describe('Gmail authorization reuse', () => {
 
     await expect(Promise.all([first, second])).resolves.toEqual([[], []]);
     expect(reauth).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Home Screen Gmail authorization', () => {
+  const redirectKey = 'gmail-oauth-redirect-uid';
+
+  function standalone() {
+    jest.spyOn(window.navigator, 'standalone', 'get').mockReturnValue(true);
+  }
+
+  beforeAll(() => {
+    Object.defineProperty(window.navigator, 'standalone', { configurable: true, get: () => false });
+  });
+
+  afterAll(() => {
+    delete (window.navigator as Navigator & { standalone?: boolean }).standalone;
+  });
+
+  it('detects both iOS standalone and the standard standalone display mode', () => {
+    expect(gmail.isStandaloneGmailAuthorization()).toBe(false);
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: jest.fn().mockReturnValue({ matches: true }),
+    });
+    expect(gmail.isStandaloneGmailAuthorization()).toBe(true);
+    delete (window as Partial<Window>).matchMedia;
+    standalone();
+    expect(gmail.isStandaloneGmailAuthorization()).toBe(true);
+  });
+
+  it('redirects with read-only scope and session persistence, without a popup or Gmail request', async () => {
+    helpers.setCurrentUser(userOne);
+    standalone();
+    const popup = jest.spyOn(fakeAuth, 'signInWithPopup');
+    const persistence = jest.spyOn(fakeAuth, 'setPersistence');
+    const redirect = jest.spyOn(fakeAuth, 'signInWithRedirect').mockImplementation(() => new Promise<never>(() => {}));
+
+    void gmail.searchEtransferEmails('notify@payments.interac.ca');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(redirect).toHaveBeenCalledTimes(1);
+    const [secondaryAuth, provider] = redirect.mock.calls[0];
+    expect(secondaryAuth).not.toBe(fakeAuth.getAuth());
+    expect(provider.getScopes()).toEqual(['https://www.googleapis.com/auth/gmail.readonly']);
+    expect(persistence).toHaveBeenCalledWith(secondaryAuth, fakeAuth.browserSessionPersistence);
+    expect(sessionStorage.getItem(redirectKey)).toBe(userOne.uid);
+    expect(popup).not.toHaveBeenCalled();
+    expect(fetchMock()).not.toHaveBeenCalled();
+    expect(fakeAuth.getAuth().currentUser).toEqual(userOne);
+  });
+
+  it('consumes a returned credential on explicit search and caches it only in memory', async () => {
+    helpers.setCurrentUser(userOne);
+    sessionStorage.setItem(redirectKey, userOne.uid);
+    const secondaryAuth = fakeAuth.getAuth({ name: 'gmail-oauth' });
+    const inboxUser = { ...userOne, uid: 'club-inbox' };
+    secondaryAuth.__setCurrentUser(inboxUser);
+    const redirectResult = jest.spyOn(fakeAuth, 'getRedirectResult').mockResolvedValue({
+      user: inboxUser, __credential: { accessToken: 'redirect-token' },
+    });
+    const popup = jest.spyOn(fakeAuth, 'signInWithPopup');
+    fetchMock().mockResolvedValue(jsonResponse({}));
+
+    await expect(gmail.searchEtransferEmails('notify@payments.interac.ca')).resolves.toEqual([]);
+    await expect(gmail.searchEtransferEmails('notify@payments.interac.ca')).resolves.toEqual([]);
+
+    expect(redirectResult).toHaveBeenCalledTimes(1);
+    expect(redirectResult).toHaveBeenCalledWith(secondaryAuth);
+    expectBearerToken(0, 'redirect-token');
+    expectBearerToken(1, 'redirect-token');
+    expect(popup).not.toHaveBeenCalled();
+    expect(sessionStorage.length).toBe(0);
+    expect(secondaryAuth.currentUser).toBeNull();
+    expect(fakeAuth.getAuth().currentUser).toEqual(userOne);
+  });
+
+  it('clears a failed redirect so the user can retry', async () => {
+    helpers.setCurrentUser(userOne);
+    standalone();
+    jest.spyOn(fakeAuth, 'signInWithRedirect').mockRejectedValue(new Error('redirect failed'));
+
+    await expect(gmail.searchEtransferEmails('notify@payments.interac.ca')).rejects.toThrow('redirect failed');
+    expect(sessionStorage.getItem(redirectKey)).toBeNull();
+    expect(fetchMock()).not.toHaveBeenCalled();
+  });
+
+  it.each(['missing', 'failed', 'no-token', 'different-user'])(
+    'rejects %s redirect results without using Gmail and cleans up the secondary identity',
+    async (scenario) => {
+      helpers.setCurrentUser(userOne);
+      sessionStorage.setItem(redirectKey, scenario === 'different-user' ? 'other-admin' : userOne.uid);
+      const secondaryAuth = fakeAuth.getAuth({ name: 'gmail-oauth' });
+      secondaryAuth.__setCurrentUser({ ...userOne, uid: 'club-inbox' });
+      const redirectResult = jest.spyOn(fakeAuth, 'getRedirectResult');
+      if (scenario === 'failed') redirectResult.mockRejectedValue(new Error('redirect failed'));
+      else redirectResult.mockResolvedValue(scenario === 'missing' ? null : {
+        user: userOne,
+        ...(scenario === 'no-token' ? {} : { __credential: { accessToken: 'unused-token' } }),
+      });
+
+      await expect(gmail.searchEtransferEmails('notify@payments.interac.ca')).rejects.toThrow();
+      expect(fetchMock()).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem(redirectKey)).toBeNull();
+      expect(secondaryAuth.currentUser).toBeNull();
+      expect(fakeAuth.getAuth().currentUser).toEqual(userOne);
+    }
+  );
+
+  it('does not cache a popup token if the club user changes during authorization', async () => {
+    helpers.setCurrentUser(userOne);
+    fakeAuth.__setReauthImplementation(async (user) => {
+      helpers.setCurrentUser({ ...userOne, uid: 'other-admin' });
+      return { user, __credential: { accessToken: 'unused-token' } };
+    });
+    await expect(gmail.searchEtransferEmails('notify@payments.interac.ca')).rejects.toThrow('account changed');
+    expect(fetchMock()).not.toHaveBeenCalled();
   });
 });

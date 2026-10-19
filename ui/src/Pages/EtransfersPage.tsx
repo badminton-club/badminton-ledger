@@ -26,6 +26,7 @@ import {
   type EtransferBatchPreview,
 } from '../services/firebase';
 import { toJSDate } from '../services/firebase/utils';
+import { isStandaloneGmailAuthorization } from '../services/firebase/gmail';
 import { useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
 import { selectIsClubAdmin, selectCurrentClubId } from '../features/club/clubSlice';
@@ -505,6 +506,13 @@ export default function EtransfersPage() {
         Search Gmail for Interac e-Transfer notifications, review suggested player matches, and
         apply confirmed payments. Exact unpaid-session matches may be applied automatically.
       </p>
+      {isStandaloneGmailAuthorization() && (
+        <Alert variant="info">
+          Gmail authorization opens in this window when using the Home Screen app.
+          After returning, review your search options and select Connect Gmail &amp; Search again.
+          Search options reset to your club defaults when the page reloads.
+        </Alert>
+      )}
 
       <Card className="mb-3">
         <Card.Body className="d-flex flex-wrap align-items-end gap-3">

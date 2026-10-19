@@ -55,6 +55,16 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   or clear the query to restore the default search. Allowed From mailboxes are
   always checked, even with custom queries; this is not cryptographic sender verification. See
   [Gmail search syntax](https://support.google.com/mail/answer/7190).
+  Home Screen apps use same-window Gmail authorization instead of a popup. After returning,
+  review the search options (reset to club defaults on reload) and select **Connect Gmail & Search**
+  again; authorization alone never imports or applies payments.
+  For iOS redirect authorization, serve the app through Firebase Hosting and set
+  `REACT_APP_FIREBASE_AUTH_DOMAIN` to the app's own hostname (without `https://`).
+  Add that hostname to Firebase Authentication's authorized domains and register
+  `https://<app-hostname>/__/auth/handler` as an authorized redirect URI on the project's
+  Google OAuth web client. Rebuild/redeploy after changing the environment variable.
+  This same-origin setup avoids Safari's third-party storage restrictions; merely adding
+  an authorized domain does not fix cross-origin redirect storage.
 
 ## Tech stack
 

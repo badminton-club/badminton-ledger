@@ -1,5 +1,8 @@
 import { FirebaseError, initializeApp, getApps } from 'firebase/app';
-import { GoogleAuthProvider, getAuth, signInWithPopup, signOut, type Auth } from 'firebase/auth';
+import {
+  GoogleAuthProvider, getAuth, signInWithPopup, signInWithRedirect, getRedirectResult,
+  setPersistence, browserSessionPersistence, signOut, type Auth,
+} from 'firebase/auth';
 import { auth, app } from './client';
 import { serviceCall } from './utils';
 
@@ -22,6 +25,7 @@ import { serviceCall } from './utils';
 // etransferImports.ts), not by mutating labels, so no write scope is required.
 const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const GMAIL_AUTH_APP_NAME = 'gmail-oauth';
+const GMAIL_REDIRECT_UID_KEY = 'gmail-oauth-redirect-uid';
 const TOKEN_TTL_MS = 55 * 60 * 1000;
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
@@ -31,8 +35,13 @@ const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 let cachedToken: { value: string; expiresAt: number; uid: string } | null = null;
 let pendingTokenRequest: { value: Promise<string>; uid: string } | null = null;
 
+export function isStandaloneGmailAuthorization(): boolean {
+  return (navigator as Navigator & { standalone?: boolean }).standalone === true
+    || window.matchMedia?.('(display-mode: standalone)').matches === true;
+}
+
 /** Lazily creates (or reuses) the secondary Firebase app + Auth instance used
- *  purely to run a standalone Google sign-in popup for Gmail authorization. */
+ *  purely to run Google authorization without changing the club login. */
 function getGmailAuthInstance(): Auth {
   const existing = getApps().find((a) => a.name === GMAIL_AUTH_APP_NAME);
   const gmailApp = existing ?? initializeApp(app.options, GMAIL_AUTH_APP_NAME);
@@ -127,10 +136,11 @@ export interface ParsedEtransferEmail {
 }
 
 /**
- * Runs a standalone Google sign-in popup (any Google account — not
+ * Runs Google authorization (any Google account — not
  * necessarily the one signed into the club app) and returns a fresh Gmail
  * OAuth access token, cached for the session so repeated searches don't
- * re-prompt for every single request.
+ * re-prompt for every single request. Home Screen apps redirect instead of
+ * opening a popup; the next explicit search consumes the redirect result.
  */
 async function getGmailAccessToken(): Promise<string> {
   const user = auth.currentUser;
@@ -150,9 +160,49 @@ async function getGmailAccessToken(): Promise<string> {
     const provider = new GoogleAuthProvider();
     provider.addScope(GMAIL_SCOPE);
 
+    let redirectUid: string | null;
+    try {
+      redirectUid = sessionStorage.getItem(GMAIL_REDIRECT_UID_KEY);
+    } catch {
+      throw new Error('Allow browser session storage to connect Gmail.');
+    }
+
     let result;
     try {
-      result = await signInWithPopup(gmailAuth, provider);
+      if (redirectUid) {
+        try {
+          result = await getRedirectResult(gmailAuth);
+        } finally {
+          sessionStorage.removeItem(GMAIL_REDIRECT_UID_KEY);
+        }
+        if (redirectUid !== user.uid) {
+          throw new Error('Your signed-in account changed. Connect Gmail again.');
+        }
+        if (!result) {
+          throw new Error('Gmail authorization did not complete. Connect Gmail again.');
+        }
+      } else if (isStandaloneGmailAuthorization()) {
+        // iOS Home Screen apps cannot reliably return OAuth results through a popup.
+        await setPersistence(gmailAuth, browserSessionPersistence);
+        sessionStorage.setItem(GMAIL_REDIRECT_UID_KEY, user.uid);
+        try {
+          return await signInWithRedirect(gmailAuth, provider);
+        } catch (err) {
+          sessionStorage.removeItem(GMAIL_REDIRECT_UID_KEY);
+          throw err;
+        }
+      } else {
+        result = await signInWithPopup(gmailAuth, provider);
+      }
+      if (auth.currentUser?.uid !== user.uid) {
+        throw new Error('Your signed-in account changed. Connect Gmail again.');
+      }
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (!credential?.accessToken) {
+        throw new Error('Failed to get Gmail access — please try again.');
+      }
+      cachedToken = { value: credential.accessToken, expiresAt: Date.now() + TOKEN_TTL_MS, uid: user.uid };
+      return credential.accessToken;
     } catch (err) {
       if (err instanceof FirebaseError) {
         if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
@@ -160,17 +210,9 @@ async function getGmailAccessToken(): Promise<string> {
         }
       }
       throw err;
+    } finally {
+      await signOut(gmailAuth).catch(() => { /* best-effort cleanup */ });
     }
-
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Failed to get Gmail access — please try again.');
-    }
-    // Discard the throwaway secondary identity immediately — only the
-    // access token above is used going forward.
-    await signOut(gmailAuth).catch(() => { /* best-effort cleanup */ });
-    cachedToken = { value: credential.accessToken, expiresAt: Date.now() + TOKEN_TTL_MS, uid: user.uid };
-    return credential.accessToken;
   })();
   pendingTokenRequest = { value: request, uid: user.uid };
 

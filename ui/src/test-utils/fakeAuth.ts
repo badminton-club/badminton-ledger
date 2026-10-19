@@ -125,6 +125,18 @@ export async function signOut(auth: FakeAuth): Promise<void> {
   auth.__setCurrentUser(null);
 }
 
+export const browserSessionPersistence = { type: 'SESSION' };
+
+export async function setPersistence(_auth: FakeAuth, _persistence: unknown): Promise<void> {}
+
+export async function signInWithRedirect(_auth: FakeAuth, _provider: GoogleAuthProvider): Promise<never> {
+  throw new Error('[fakeAuth] Mock signInWithRedirect to simulate navigation.');
+}
+
+export async function getRedirectResult(_auth: FakeAuth): Promise<ReauthResult | null> {
+  return null;
+}
+
 export function onAuthStateChanged(
   auth: FakeAuth,
   callback: (user: FakeUser | null) => void

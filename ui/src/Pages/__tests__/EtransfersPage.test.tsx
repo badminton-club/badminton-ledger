@@ -75,6 +75,22 @@ describe('EtransfersPage', () => {
     jest.mocked(dismissEtransferImport).mockImplementation(actual.dismissEtransferImport);
   });
 
+  it('explains explicit search and reset options after Home Screen authorization', async () => {
+    Object.defineProperty(navigator, 'standalone', { configurable: true, value: true });
+    try {
+      renderPage();
+      expect(await screen.findByText(/Gmail authorization opens in this window/)).toHaveTextContent(
+        'After returning, review your search options and select Connect Gmail & Search again.'
+      );
+      expect(screen.getByText(/Gmail authorization opens in this window/)).toHaveTextContent(
+        'Search options reset to your club defaults'
+      );
+      expect(searchEtransferEmails).not.toHaveBeenCalled();
+    } finally {
+      delete (navigator as Navigator & { standalone?: boolean }).standalone;
+    }
+  });
+
   it('uses the saved custom Gmail query without exposing search-setting editors', async () => {
     const user = userEvent.setup();
     seedClubMetaDoc('test-club', { name: 'Test Club', etransferCustomGmailQuery: 'label:forwarded' });
