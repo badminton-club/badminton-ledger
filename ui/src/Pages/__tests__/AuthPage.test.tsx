@@ -259,21 +259,23 @@ describe('AuthPage', () => {
     await user.click(screen.getByRole('button', { name: 'Create new club' }));
 
     expect(await screen.findByText(`Created "Wed Badminton Club". It's empty and ready to use.`)).toBeInTheDocument();
-    expect(__getDocData('clubs/wed-badminton-club')).toMatchObject({
+    const clubId = store.getState().club.currentClubId;
+    expect(clubId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(__getDocData(`clubs/${clubId}`)).toMatchObject({
       name: 'Wed Badminton Club',
       ownerUid: currentUser.uid,
     });
-    expect(__getDocData(`clubs/wed-badminton-club/members/${currentUser.uid}`)).toMatchObject({
+    expect(__getDocData(`clubs/${clubId}/members/${currentUser.uid}`)).toMatchObject({
       role: 'superAdmin',
     });
     expect(__getDocData(`users/${currentUser.uid}`)).toMatchObject({
-      clubs: ['wed-badminton-club'],
-      lastVisitedClub: 'wed-badminton-club',
+      clubs: [clubId],
+      lastVisitedClub: clubId,
     });
-    expect(store.getState().club.currentClubId).toBe('wed-badminton-club');
+    expect(screen.queryByText('Club id: wed-badminton-club')).not.toBeInTheDocument();
   });
 
-  it('shows a validation error when the entered club name cannot produce a usable id', async () => {
+  it('keeps creation disabled for a whitespace-only name', async () => {
     const user = userEvent.setup();
     setCurrentUser(currentUser);
     renderPage({ signedIn: true });
@@ -282,10 +284,9 @@ describe('AuthPage', () => {
     const textboxes = screen.getAllByRole('textbox');
     const clubNameInput = textboxes[textboxes.length - 1];
     await user.clear(clubNameInput);
-    await user.type(clubNameInput, '!!!');
-    await user.click(screen.getByRole('button', { name: 'Create new club' }));
+    await user.type(clubNameInput, '   ');
 
-    expect(await screen.findByText('Enter a club name.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create new club' })).toBeDisabled();
     expect(__getDocData('clubs/')).toBeUndefined();
   });
 

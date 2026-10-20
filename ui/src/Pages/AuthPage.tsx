@@ -69,11 +69,6 @@ function parseClubId(input: string): string | null {
   return t;
 }
 
-// club id derived from a display name: "Wed Badminton Club" -> "wed-badminton-club"
-function slugify(name: string): string {
-  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-}
-
 export default function AuthPage() {
   const dispatch = useAppDispatch();
   const clubs = useAppSelector(selectUserClubs);
@@ -381,12 +376,11 @@ export default function AuthPage() {
     setSetupError('');
     setSetupDone('');
     const name = setupName.trim();
-    const clubId = slugify(name);
-    if (!clubId) { setSetupError('Enter a club name.'); return; }
+    if (!name) { setSetupError('Enter a club name.'); return; }
 
     setSetupBusy(true);
     try {
-      await createClub(clubId, name, user.uid);
+      const clubId = await createClub(name, user.uid);
       dispatch(setClubs(await fetchUserClubs(user.uid)));
       dispatch(setCurrentClub(clubId));
       setSetupDone(`Created "${name}". It's empty and ready to use.`);
@@ -679,9 +673,9 @@ export default function AuthPage() {
                 disabled={setupBusy}
               />
             </Form.Group>
-            {setupName.trim() && (
-              <Form.Text className="text-muted">Club id: {slugify(setupName) || '—'}</Form.Text>
-            )}
+            <Form.Text className="text-muted">
+              A unique club ID is generated automatically. Clubs can share the same name.
+            </Form.Text>
             <div className="d-flex gap-2 mt-2">
               <Button variant="success" onClick={handleCreateEmptyClub} disabled={setupBusy || !setupName.trim()}>
                 {setupBusy ? <Spinner size="sm" animation="border" /> : 'Create new club'}

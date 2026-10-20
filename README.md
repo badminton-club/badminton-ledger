@@ -18,6 +18,9 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   batches and consumed per session, with usage history and charts.
 - **Multi-club support** — a user can belong to multiple clubs and switch between them; new
   clubs can be created or joined via a shareable link/id.
+  New club IDs are generated UUIDs, not user-entered values or name-derived slugs.
+  Clubs may share a display name. Existing club IDs and invitation links remain valid;
+  no existing clubs or memberships are migrated.
 - **Roles** — admins manage players, inventory, payouts, and settings; members get a
   self-serve attendance/balance view and can request profile changes or to be linked to a
   player for an admin to approve (no direct write access to sensitive data).
