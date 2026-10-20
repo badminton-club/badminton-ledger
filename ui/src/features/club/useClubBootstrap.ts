@@ -15,6 +15,7 @@ import {
   getAuthAccountName,
 } from '../../services/firebase';
 import { auth, setCurrentClubId } from '../../services/firebase/client';
+import { autoLinkPlayerByEmail } from '../../services/firebase/playerLinking';
 import {
   setClubs,
   setCurrentClub,
@@ -43,7 +44,11 @@ export function useClubBootstrap(): string | null {
   const currentClubId = useAppSelector(selectCurrentClubId);
   const [scope, setScope] = useState<{ uid: string } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [linkingError, setLinkingError] = useState<string | null>(null);
   const authGeneration = useRef(0);
+  const currentClubIdRef = useRef(currentClubId);
+  currentClubIdRef.current = currentClubId;
+  const scopedUid = scope?.uid;
 
   // Auth → club list → current club
   useEffect(() => {
@@ -57,6 +62,7 @@ export function useClubBootstrap(): string | null {
       const isCurrent = () => authGeneration.current === generation && auth.currentUser?.uid === uid;
       setScope(null);
       setLoadError(null);
+      setLinkingError(null);
 
       if (!user) {
         setCurrentClubId(null);
@@ -149,6 +155,35 @@ export function useClubBootstrap(): string | null {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch]);
 
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user?.emailVerified || user.uid !== scopedUid) return;
+    const generation = authGeneration.current;
+    let cancelled = false;
+    const isCurrent = () => !cancelled && authGeneration.current === generation
+      && auth.currentUser?.uid === user.uid;
+    void autoLinkPlayerByEmail().then(async ({ linked, conflicts }) => {
+      if (!isCurrent()) return;
+      if (linked > 0) {
+        const clubs = await fetchUserClubs(user.uid);
+        if (!isCurrent()) return;
+        dispatch(setClubs(clubs.filter((club) => club.role !== null)));
+        if (!currentClubIdRef.current) {
+          dispatch(setCurrentClub(clubs.find((club) => club.role !== null)?.id ?? null));
+        }
+        setScope({ uid: user.uid });
+      }
+      if (conflicts > 0) {
+        setLinkingError('Some email matches could not be linked safely. Ask your club admin to review your player link.');
+      }
+    }).catch((err) => {
+      if (!isCurrent()) return;
+      console.error('[useClubBootstrap] Automatic player linking failed', err);
+      setLinkingError('Automatic player linking failed. Reload to try again, or ask your club admin to link your account.');
+    });
+    return () => { cancelled = true; };
+  }, [scopedUid, dispatch]);
+
   // Current club → client scope + persistence + role
   useEffect(() => {
     setCurrentClubId(currentClubId);
@@ -192,5 +227,5 @@ export function useClubBootstrap(): string | null {
     });
     return () => { cancelled = true; };
   }, [currentClubId, dispatch, scope]);
-  return loadError;
+  return loadError ?? linkingError;
 }

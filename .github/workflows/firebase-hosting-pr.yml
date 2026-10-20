@@ -64,7 +64,7 @@ jobs:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
       - name: Deploy Firestore rules
-        run: npx --yes firebase-tools@15.28.1 deploy --only firestore:rules --project badminton-ledger --non-interactive
+        run: npx --yes firebase-tools@15.28.1 deploy --only firestore:rules,firestore:indexes --project badminton-ledger --non-interactive
 
       - name: Deploy preview channel
         id: preview

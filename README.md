@@ -36,6 +36,18 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   they do not delay navigation once the selected club's permissions are loaded.
 - **Auth** — Google sign-in, or email + password sign-up (with a non-blocking email
   verification reminder).
+  On verified sign-in (including existing accounts), an admin-saved e-Transfer email
+  mapping automatically grants member access to that club and links the matching player.
+  Email matching is case-insensitive; name-only matches and player profile emails do not
+  grant access. Existing player links and roles are preserved, and players linked to another
+  account require admin review. Email/password users must verify their address and sign in
+  again first. Matching runs independently of existing navigation loading; errors are shown
+  with a reload action. Removing a mapping does not revoke previously granted access:
+  admins must remove both the email mapping and membership to revoke access and prevent rejoining.
+  Deploy the `linkPlayerByEmail` callable in the existing Functions codebase and the
+  collection-group index in `firestore.indexes.json` before using this flow; allow the
+  index to finish building. The existing development and production deployment workflows
+  deploy both. No Gmail connection or Gmail OAuth secrets are required by this callable.
 - **Google Drive backup/restore** — admins can export/import all club data to their own
   Google Drive, reusing the same Google sign-in (no separate credentials to set up).
 - **Gmail e-Transfer import** — admins can search Gmail for Interac e-Transfer autodeposit

@@ -445,6 +445,8 @@ export default function AuthPage() {
               {user.providerData?.some((p) => p.providerId === 'password') && !user.emailVerified && (
                 <Alert variant="warning" className="mt-3 mb-0 text-start py-2">
                   Please verify your email address ({user.email}) — check your inbox for the link we sent.
+                  {' '}After verifying, sign out and sign in again to automatically join any clubs
+                  where an admin has saved your email as an e-Transfer player match.
                   <div className="mt-2">
                     <Button
                       variant="outline-secondary"

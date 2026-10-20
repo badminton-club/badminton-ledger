@@ -1057,6 +1057,13 @@ describe('e-Transfer approval batches', () => {
 });
 
 describe('sender mappings', () => {
+  it('stores a normalized email in both the mapping key and queryable email field', async () => {
+    await etransfer.saveEtransferSenderMapping('  PLAYER@Example.com  ', 'Player', 'p1');
+    expect(await etransfer.fetchEtransferSenderMappings()).toEqual([
+      expect.objectContaining({ id: 'player@example.com', senderEmail: 'player@example.com', playerId: 'p1' }),
+    ]);
+  });
+
   it('saves and fetches a mapping keyed by sender email', async () => {
     await etransfer.saveEtransferSenderMapping('caifang1966@gmail.com', 'CAI FANG WU', 'p1');
     const mappings = await etransfer.fetchEtransferSenderMappings();
