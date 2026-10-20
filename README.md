@@ -345,6 +345,11 @@ checks and disconnect are under **Manage Gmail connection**; connecting or
 confirming access never starts a scan automatically.
 Manual connection checks show progress and an explicit connected/disconnected
 result even when the connection status has not changed; they do not scan Gmail.
+Connected status displays the Gmail inbox address, which may differ from the app
+sign-in account. The backend resolves it with Gmail's read-only `users/me/profile`
+endpoint and caches it encrypted alongside the credentials. Existing connections
+resolve their address on the next status check without reconnecting. Disconnect
+removes the cached identity; status never exposes tokens or other profile fields.
 Closing/reopening it should retain the server connection when signed into the same
 account and club, without repeating Google consent on each login. This does not
 make iOS share the app's own login session with Safari. **Disconnect Gmail** removes

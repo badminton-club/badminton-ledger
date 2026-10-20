@@ -195,6 +195,20 @@ describe('search defaults', () => {
 });
 
 describe('backend Gmail handoff', () => {
+  it('returns the verified connected inbox without substituting the app account', async () => {
+    fetchMock().mockResolvedValue(jsonResponse({ connected: true, emailAddress: 'club-inbox@example.com' }));
+    expect(await gmail.getGmailConnectionStatus()).toEqual({
+      connected: true, emailAddress: 'club-inbox@example.com',
+    });
+    fetchMock().mockResolvedValue(jsonResponse({ connected: false, emailAddress: 'old-inbox@example.com' }));
+    expect(await gmail.getGmailConnectionStatus()).toEqual({ connected: false });
+  });
+
+  it.each([null, 42, '', 'not-an-email'])('rejects invalid connected mailbox identity %j', async (emailAddress) => {
+    fetchMock().mockResolvedValue(jsonResponse({ connected: true, emailAddress }));
+    await expect(gmail.getGmailConnectionStatus()).rejects.toThrow('service is unavailable');
+  });
+
   it('sends a current Firebase ID token and club with explicit private POST settings', async () => {
     fetchMock().mockResolvedValue(jsonResponse({ connected: true }));
     expect(await gmail.getGmailConnectionStatus()).toEqual({ connected: true });

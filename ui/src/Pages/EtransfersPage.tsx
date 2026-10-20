@@ -88,6 +88,7 @@ export default function EtransfersPage() {
   const [searchMessage, setSearchMessage] = useState('');
   const [uid, setUid] = useState(auth.currentUser?.uid);
   const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
+  const [gmailEmailAddress, setGmailEmailAddress] = useState('');
   const [connectionError, setConnectionError] = useState('');
   const [authorizationUrl, setAuthorizationUrl] = useState('');
   const [waitingForConnection, setWaitingForConnection] = useState(false);
@@ -122,6 +123,7 @@ export default function EtransfersPage() {
       const status = await getGmailConnectionStatus();
       if (!isCurrentConnection(generation) || request !== statusRequest.current) return;
       setGmailConnected(status.connected);
+      setGmailEmailAddress(status.connected ? status.emailAddress || '' : '');
       setConnectionError('');
       if (showFeedback) {
         setConnectionCheckMessage(status.connected
@@ -137,6 +139,7 @@ export default function EtransfersPage() {
     } catch (err) {
       if (!isCurrentConnection(generation) || request !== statusRequest.current) return;
       setGmailConnected(err instanceof GmailConnectionRequiredError ? false : null);
+      setGmailEmailAddress('');
       setConnectionError(err instanceof Error ? err.message : 'Unable to check Gmail connection.');
       setConnectionCheckMessage('');
       setWaitingForConnection(false);
@@ -154,6 +157,7 @@ export default function EtransfersPage() {
     pendingStatus.current = null;
     connectionAction.current = false;
     setGmailConnected(null);
+    setGmailEmailAddress('');
     setConnectionError('');
     setAuthorizationUrl('');
     setWaitingForConnection(false);
@@ -240,7 +244,10 @@ export default function EtransfersPage() {
     setConnectionError('');
     try {
       await disconnectGmail();
-      if (isCurrentConnection(generation)) setGmailConnected(false);
+      if (isCurrentConnection(generation)) {
+        setGmailConnected(false);
+        setGmailEmailAddress('');
+      }
     } catch (err) {
       if (isCurrentConnection(generation)) {
         setConnectionError(err instanceof Error ? err.message : 'Unable to disconnect Gmail.');
@@ -411,6 +418,7 @@ export default function EtransfersPage() {
       if (!isCurrentConnection(generation)) return;
       if (err instanceof GmailConnectionRequiredError) {
         setGmailConnected(false);
+        setGmailEmailAddress('');
         setSearchMessage('Gmail needs authorization or its access was revoked. Authorize in your browser, then explicitly search again.');
         await handleConnect();
       } else {
@@ -706,6 +714,9 @@ export default function EtransfersPage() {
             </div>
           </details>
           </div>
+          {gmailConnected === true && gmailEmailAddress && (
+            <p className="small mb-2">Connected inbox: <strong>{gmailEmailAddress}</strong></p>
+          )}
           {gmailConnected !== true && !authorizationUrl && (
             <Button variant="primary" onClick={handleConnect} disabled={connectionBusy || searching}>
               Connect Gmail

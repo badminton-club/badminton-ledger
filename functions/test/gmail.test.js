@@ -59,7 +59,9 @@ function harness(options = {}) {
       if (token === 'bad') throw new Error('private auth failure');
       return { uid: token };
     } },
-    fetchImpl: (...args) => upstream(...args),
+    fetchImpl: (...args) => args[0].endsWith('/profile')
+      ? (options.profileFetch || (() => reply({ emailAddress: 'club-inbox@example.com' })))(...args)
+      : upstream(...args),
   });
   async function request(action, body = {}, extra = {}) {
     const headers = extra.headers || { Origin: origin, Authorization: ['Bearer', 'admin'].join(' ') };
@@ -140,7 +142,7 @@ test('PKCE, hashed state, stable callback and single-use public OAuth completion
   const record = await h.store.get('admin', 'club');
   assert.notEqual(record.refreshToken, 'refresh-secret');
   assert.equal(record.expiresAtMillis, baseTime + 3600000);
-  assert.deepEqual((await h.request('status')).body, { connected: true });
+  assert.deepEqual((await h.request('status')).body, { connected: true, emailAddress: 'club-inbox@example.com' });
 });
 
 test('callback configuration failures report a safe reference without logging authorization data', async () => {
@@ -156,6 +158,82 @@ test('callback configuration failures report a safe reference without logging au
   assert.match(details.reference, /^[a-f0-9]{16}$/);
   assert.ok(response.body.includes(details.reference));
   assert.doesNotMatch(JSON.stringify(h.logs), new RegExp(`${state}|authorization-code|admin|club`));
+});
+
+test('status resolves the Gmail inbox for existing connections and caches it encrypted', async () => {
+  let profiles = 0;
+  const h = harness({ profileFetch: async (url, options) => {
+    profiles++;
+    assert.equal(url, 'https://gmail.googleapis.com/gmail/v1/users/me/profile');
+    assert.equal(options.headers.Authorization, 'Bearer access-secret');
+    return reply({ emailAddress: 'different-inbox@example.com', messagesTotal: 500 });
+  } });
+  await h.connect();
+  const status = await h.request('status');
+  assert.deepEqual(status.body, { connected: true, emailAddress: 'different-inbox@example.com' });
+  const stored = await h.store.get('admin', 'club');
+  assert.notEqual(stored.mailboxEmail, 'different-inbox@example.com');
+  assert.equal(cipher(config.encryptionKey).decrypt(stored.mailboxEmail, connectionId('admin', 'club')),
+    'different-inbox@example.com');
+  assert.doesNotMatch(JSON.stringify(status.body), /access-secret|refresh-secret|messagesTotal/);
+  assert.deepEqual((await h.request('status')).body, status.body);
+  assert.equal(profiles, 1);
+  await h.request('disconnect');
+  assert.deepEqual((await h.request('status')).body, { connected: false });
+  assert.equal((await h.store.get('admin', 'club')).mailboxEmail, undefined);
+});
+
+test('refresh preserves the cached encrypted Gmail inbox identity', async () => {
+  const h = harness();
+  await h.connect();
+  await h.request('status');
+  const email = (await h.store.get('admin', 'club')).mailboxEmail;
+  h.tick(3600000);
+  assert.equal((await h.request('search', { searchAfterDate: '2026-01-01' })).statusCode, 200);
+  assert.equal((await h.store.get('admin', 'club')).mailboxEmail, email);
+});
+
+test('reconnecting replaces the previous mailbox identity', async () => {
+  let emailAddress = 'first-inbox@example.com';
+  const h = harness({ profileFetch: async () => reply({ emailAddress }) });
+  await h.connect();
+  assert.equal((await h.request('status')).body.emailAddress, emailAddress);
+  await h.request('disconnect');
+  emailAddress = 'second-inbox@example.com';
+  await h.connect();
+  assert.equal((await h.request('status')).body.emailAddress, emailAddress);
+});
+
+test('profile failures do not fabricate or cache an inbox identity', async () => {
+  for (const [data, status] of [
+    [{}, 200], [{ emailAddress: 'not-an-email' }, 200], [{ error: 'private' }, 500],
+  ]) {
+    const h = harness({ profileFetch: async () => reply(data, status) });
+    await h.connect();
+    const response = await h.request('status');
+    assert.equal(response.statusCode, 502);
+    assert.equal(response.body.error.code, 'gmail/upstream');
+    assert.equal((await h.store.get('admin', 'club')).mailboxEmail, undefined);
+  }
+});
+
+test('a revoked profile disconnects only the matching credentials', async () => {
+  const h = harness({ profileFetch: async () => reply({ error: 'revoked' }, 401) });
+  await h.connect();
+  assert.equal((await h.request('status')).statusCode, 409);
+  assert.deepEqual((await h.request('status')).body, { connected: false });
+});
+
+test('disconnect during mailbox lookup cannot return or restore the old inbox', async () => {
+  let resolve;
+  const h = harness({ profileFetch: () => new Promise((done) => { resolve = done; }) });
+  await h.connect();
+  const pending = h.request('status');
+  while (!resolve) await new Promise((done) => setImmediate(done));
+  await h.request('disconnect');
+  resolve(reply({ emailAddress: 'old-inbox@example.com' }));
+  assert.equal((await pending).statusCode, 409);
+  assert.deepEqual((await h.request('status')).body, { connected: false });
 });
 
 test('expired callback failures explain retry and log only fixed diagnostic fields', async () => {

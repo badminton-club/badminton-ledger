@@ -264,6 +264,7 @@ function createHandler({
         throw notConnected();
       }
       const tokens = encryptedTokens(result.data, uid, clubId, result.data.refresh_token || refreshToken);
+      if (record.mailboxEmail) tokens.mailboxEmail = record.mailboxEmail;
       if (!await store.save(uid, clubId, record.generation, tokens, record.refreshToken)) {
         record = await store.get(uid, clubId);
         if (!record.refreshToken || record.expiresAtMillis <= now() + 60000) throw notConnected();
@@ -451,7 +452,39 @@ function createHandler({
       if (!await store.isAdmin(uid, clubId)) throw fail(403, 'gmail/permission-denied');
       let result;
       if (path.endsWith('/status')) {
-        result = { connected: Boolean((await store.get(uid, clubId)).refreshToken) };
+        let record = await store.get(uid, clubId);
+        result = { connected: false };
+        if (record.refreshToken) {
+          const encryption = cipher(config.encryptionKey);
+          const owner = connectionId(uid, clubId);
+          if (!record.mailboxEmail) {
+            const session = await access(uid, clubId);
+            const profile = await upstream(`${API_URL}/profile`, {
+              headers: { Authorization: ['Bearer', session.token].join(' ') },
+            });
+            if (profile.status === 401 || profile.status === 403) {
+              await store.disconnect(uid, clubId, session.refreshToken);
+              throw notConnected();
+            }
+            if (!profile.ok || typeof profile.data.emailAddress !== 'string' ||
+              !SENDER_EMAIL_PATTERN.test(profile.data.emailAddress)) throw fail(502, 'gmail/upstream');
+            record = await store.get(uid, clubId);
+            if (record.generation !== session.generation || record.refreshToken !== session.refreshToken) {
+              throw notConnected();
+            }
+            const tokens = {
+              accessToken: record.accessToken, refreshToken: record.refreshToken,
+              expiresAtMillis: record.expiresAtMillis,
+              mailboxEmail: encryption.encrypt(profile.data.emailAddress, owner),
+            };
+            if (!await store.save(uid, clubId, session.generation, tokens, session.refreshToken)) {
+              throw notConnected();
+            }
+            record = { ...record, ...tokens };
+          }
+          if (!await store.isAdmin(uid, clubId)) throw fail(403, 'gmail/permission-denied');
+          result = { connected: true, emailAddress: encryption.decrypt(record.mailboxEmail, owner) };
+        }
       } else if (path.endsWith('/connect')) {
         const redirect = new URL(config.redirectUri);
         if (redirect.protocol !== 'https:' || redirect.search || redirect.hash ||

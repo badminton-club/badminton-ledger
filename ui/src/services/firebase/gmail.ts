@@ -149,10 +149,13 @@ async function gmailRequest(
   return body;
 }
 
-export async function getGmailConnectionStatus(): Promise<{ connected: boolean }> {
+export async function getGmailConnectionStatus(): Promise<{ connected: boolean; emailAddress?: string }> {
   const body = await gmailRequest('status');
   if (typeof body.connected !== 'boolean') throw new Error(API_UNAVAILABLE);
-  return { connected: body.connected };
+  if (body.emailAddress !== undefined && (typeof body.emailAddress !== 'string' ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.emailAddress))) throw new Error(API_UNAVAILABLE);
+  return { connected: body.connected,
+    ...(body.connected && typeof body.emailAddress === 'string' ? { emailAddress: body.emailAddress } : {}) };
 }
 
 export async function startGmailConnection(): Promise<{ authorizationUrl: string }> {

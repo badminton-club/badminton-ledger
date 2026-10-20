@@ -88,6 +88,29 @@ describe('EtransfersPage', () => {
     jest.mocked(dismissEtransferImport).mockImplementation(actual.dismissEtransferImport);
   });
 
+  it('shows the connected Gmail inbox separately from the app account and clears it on disconnect', async () => {
+    const user = userEvent.setup();
+    jest.mocked(getGmailConnectionStatus).mockResolvedValue({
+      connected: true, emailAddress: 'club-inbox@example.com',
+    });
+    renderPage();
+    expect(await screen.findByText('club-inbox@example.com')).toBeInTheDocument();
+    expect(screen.getByText(/Connected inbox:/)).toBeInTheDocument();
+    await user.click(screen.getByText('Manage Gmail connection'));
+    await user.click(screen.getByRole('button', { name: 'Disconnect Gmail' }));
+    await waitFor(() => expect(screen.queryByText('club-inbox@example.com')).not.toBeInTheDocument());
+  });
+
+  it('clears the old inbox when switching clubs', async () => {
+    jest.mocked(getGmailConnectionStatus).mockResolvedValueOnce({
+      connected: true, emailAddress: 'old-inbox@example.com',
+    }).mockResolvedValue({ connected: false });
+    const { store } = renderPage();
+    await screen.findByText('old-inbox@example.com');
+    act(() => { store.dispatch(setCurrentClub('other-club')); });
+    await waitFor(() => expect(screen.queryByText('old-inbox@example.com')).not.toBeInTheDocument());
+  });
+
   it('checks connection on mount and explains the browser handoff without importing', async () => {
     jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected: true });
     renderPage();
