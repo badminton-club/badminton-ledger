@@ -12,7 +12,7 @@ import EtransfersPage from './Pages/EtransfersPage';
 import AttendancePage from './Pages/AttendancePage';
 import FaqPage from './Pages/FaqPage';
 import AuthPage from './Pages/AuthPage';
-import { Container, Spinner } from 'react-bootstrap';
+import { Alert, Button, Container, Spinner } from 'react-bootstrap';
 import { subscribeToPlayers } from './features/players/playersSlice';
 import { useAppDispatch, useAppSelector } from './hooks';
 import { setCurrentClubId } from './services/firebase/client';
@@ -51,7 +51,7 @@ export default function App() {
   const dispatch = useAppDispatch();
   const currentClubId = useAppSelector(selectCurrentClubId);
 
-  useClubBootstrap();
+  const clubLoadError = useClubBootstrap();
 
   // Subscribe to the current club's players; re-subscribe when the club changes.
   useEffect(() => {
@@ -65,6 +65,14 @@ export default function App() {
     <div>
       <AppNavbar />
       <Container style={{ maxWidth: '85%' }}>
+        {clubLoadError && (
+          <Alert variant="danger">
+            {clubLoadError}{' '}
+            <Button size="sm" variant="outline-danger" onClick={() => window.location.reload()}>
+              Reload
+            </Button>
+          </Alert>
+        )}
         <Routes>
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/" element={<RequireClub><HomePage /></RequireClub>} />

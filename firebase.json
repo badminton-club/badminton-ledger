@@ -2,6 +2,20 @@
   "firestore": {
     "rules": "firestore.rules"
   },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "gmail",
+      "runtime": "nodejs22",
+      "ignore": [
+        "node_modules",
+        ".env*",
+        ".secret*",
+        "*.log",
+        "test"
+      ]
+    }
+  ],
   "hosting": {
     "public": "ui/build",
     "ignore": [
@@ -10,6 +24,13 @@
       "**/node_modules/**"
     ],
     "rewrites": [
+      {
+        "source": "/api/gmail/**",
+        "function": {
+          "functionId": "gmailApi",
+          "region": "us-central1"
+        }
+      },
       {
         "source": "**",
         "destination": "/index.html"

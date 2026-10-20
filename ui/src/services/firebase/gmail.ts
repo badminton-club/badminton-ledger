@@ -1,43 +1,5 @@
-import { FirebaseError, initializeApp, getApps } from 'firebase/app';
-import { GoogleAuthProvider, getAuth, signInWithPopup, signOut, type Auth } from 'firebase/auth';
-import { auth, app } from './client';
+import { auth, getCurrentClubId } from './client';
 import { serviceCall } from './utils';
-
-// Gmail authorization runs through a separate, throwaway Firebase Auth
-// instance — its own secondary "app" registered under the same Firebase
-// project (same OAuth client, so still no separate Google Cloud project or
-// credentials need to be configured for this feature) — rather than
-// re-authenticating the signed-in club member directly. This deliberately
-// lets an admin authorize Gmail access from a DIFFERENT Google account than
-// the one they're signed into the club app with: e.g. many clubs receive
-// Interac e-Transfer notifications in a separate, shared club Gmail account
-// rather than an individual admin's own personal one. Nothing about this
-// secondary identity is ever stored anywhere — only the resulting OAuth
-// access token is used, and the secondary session is signed out of
-// immediately after the token is captured (see getGmailAccessToken below).
-//
-// Read-only is all this feature needs: it only searches/reads messages, never
-// writes to Gmail. Already-reviewed emails are excluded from future searches by
-// checking Firestore (the Gmail message id is the doc id — see
-// etransferImports.ts), not by mutating labels, so no write scope is required.
-const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
-const GMAIL_AUTH_APP_NAME = 'gmail-oauth';
-const TOKEN_TTL_MS = 55 * 60 * 1000;
-const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
-
-// Scoped to the signed-in uid it was issued for — see the identical comment in
-// drive.ts for why this matters in an SPA where the signed-in user can change
-// without a page reload.
-let cachedToken: { value: string; expiresAt: number; uid: string } | null = null;
-let pendingTokenRequest: { value: Promise<string>; uid: string } | null = null;
-
-/** Lazily creates (or reuses) the secondary Firebase app + Auth instance used
- *  purely to run a standalone Google sign-in popup for Gmail authorization. */
-function getGmailAuthInstance(): Auth {
-  const existing = getApps().find((a) => a.name === GMAIL_AUTH_APP_NAME);
-  const gmailApp = existing ?? initializeApp(app.options, GMAIL_AUTH_APP_NAME);
-  return getAuth(gmailApp);
-}
 
 /** The default sender address for Interac e-Transfer autodeposit notifications. */
 export const DEFAULT_ETRANSFER_SENDER_ADDRESS = 'notify@payments.interac.ca';
@@ -126,71 +88,98 @@ export interface ParsedEtransferEmail {
   emailDate: Date;
 }
 
-/**
- * Runs a standalone Google sign-in popup (any Google account — not
- * necessarily the one signed into the club app) and returns a fresh Gmail
- * OAuth access token, cached for the session so repeated searches don't
- * re-prompt for every single request.
- */
-async function getGmailAccessToken(): Promise<string> {
-  const user = auth.currentUser;
-  if (!user) throw new Error('You must be signed in to connect Gmail.');
+export class GmailConnectionRequiredError extends Error {
+  readonly code = 'gmail/not-connected';
 
-  if (cachedToken && cachedToken.uid === user.uid && cachedToken.expiresAt > Date.now()) {
-    return cachedToken.value;
-  }
-  if (pendingTokenRequest?.uid === user.uid) return pendingTokenRequest.value;
-  if (pendingTokenRequest) {
-    await pendingTokenRequest.value.catch(() => undefined);
-    return getGmailAccessToken();
-  }
-
-  const request = (async () => {
-    const gmailAuth = getGmailAuthInstance();
-    const provider = new GoogleAuthProvider();
-    provider.addScope(GMAIL_SCOPE);
-
-    let result;
-    try {
-      result = await signInWithPopup(gmailAuth, provider);
-    } catch (err) {
-      if (err instanceof FirebaseError) {
-        if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
-          throw new Error('Gmail authorization was cancelled.');
-        }
-      }
-      throw err;
-    }
-
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Failed to get Gmail access — please try again.');
-    }
-    // Discard the throwaway secondary identity immediately — only the
-    // access token above is used going forward.
-    await signOut(gmailAuth).catch(() => { /* best-effort cleanup */ });
-    cachedToken = { value: credential.accessToken, expiresAt: Date.now() + TOKEN_TTL_MS, uid: user.uid };
-    return credential.accessToken;
-  })();
-  pendingTokenRequest = { value: request, uid: user.uid };
-
-  try {
-    return await request;
-  } finally {
-    if (pendingTokenRequest?.value === request) pendingTokenRequest = null;
+  constructor() {
+    super('Gmail is not connected or its authorization has expired. Connect Gmail again.');
+    this.name = 'GmailConnectionRequiredError';
   }
 }
 
-async function gmailFetch<T>(accessToken: string, url: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: { ...(init.headers ?? {}), Authorization: `Bearer ${accessToken}` },
+const API_UNAVAILABLE = 'Gmail service is unavailable. Check that the Gmail backend is deployed, then try again.';
+
+async function gmailRequest(
+  action: 'status' | 'connect' | 'disconnect' | 'search' | 'confirm',
+  fields: Record<string, unknown> = {},
+  destinationClubId?: string
+): Promise<Record<string, unknown>> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('You must be signed in to connect Gmail.');
+  const uid = user.uid;
+  const clubId = destinationClubId ?? getCurrentClubId();
+  if (!clubId) throw new Error('Select a club before connecting Gmail.');
+  const assertScope = () => {
+    if (auth.currentUser?.uid !== uid || (destinationClubId === undefined && getCurrentClubId() !== clubId)) {
+      throw new Error('Your signed-in account or club changed. Try again for the current club.');
+    }
+  };
+  const idToken = await user.getIdToken();
+  assertScope();
+  if (!idToken) throw new Error('Your app sign-in has expired. Sign in again, then check Gmail connection.');
+  const response = await fetch(`/api/gmail/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: ['Bearer', idToken].join(' ') },
+    body: JSON.stringify({ clubId, ...fields }),
+    cache: 'no-store',
+    credentials: 'omit',
   });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Gmail request failed (${res.status}): ${body || res.statusText}`);
+  const body = await response.json().catch(() => null);
+  assertScope();
+  if (!response.ok) {
+    if (body?.error?.code === 'gmail/not-connected') throw new GmailConnectionRequiredError();
+    if (response.status === 403 && body?.error?.code === 'gmail/origin-denied') {
+      throw new Error('Gmail is not configured for this website. Ask an administrator to update the backend allowed origins.');
+    }
+    if (action === 'search' && response.status === 502
+      && ['gmail/search-too-large', 'gmail/response-too-large', 'gmail/search-timeout'].includes(body?.error?.code)) {
+      throw new Error('Gmail search could not finish. Narrow the search window or custom query and try again.');
+    }
+    if (response.status === 401) throw new Error('Your app sign-in has expired. Sign in again, then check Gmail connection.');
+    if (action === 'confirm' && response.status === 403) {
+      throw new Error('Sign in with the same app account that started this Gmail connection. You must still be an administrator of the destination club.');
+    }
+    if (action === 'confirm' && (response.status === 400 || response.status === 409 || response.status === 410)) {
+      throw new Error('This Gmail confirmation link is invalid, expired, or already used. Start a new connection from the app.');
+    }
+    if (response.status === 403) throw new Error('Only a club administrator can manage this Gmail connection.');
+    throw new Error(API_UNAVAILABLE);
   }
-  return res.json();
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error(API_UNAVAILABLE);
+  return body;
+}
+
+export async function getGmailConnectionStatus(): Promise<{ connected: boolean; emailAddress?: string }> {
+  const body = await gmailRequest('status');
+  if (typeof body.connected !== 'boolean') throw new Error(API_UNAVAILABLE);
+  if (body.emailAddress !== undefined && (typeof body.emailAddress !== 'string' ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.emailAddress))) throw new Error(API_UNAVAILABLE);
+  return { connected: body.connected,
+    ...(body.connected && typeof body.emailAddress === 'string' ? { emailAddress: body.emailAddress } : {}) };
+}
+
+export async function startGmailConnection(): Promise<{ authorizationUrl: string }> {
+  const body = await gmailRequest('connect');
+  let url: URL;
+  try {
+    if (typeof body.authorizationUrl !== 'string') throw new Error();
+    url = new URL(body.authorizationUrl);
+    if (url.protocol !== 'https:' || url.hostname !== 'accounts.google.com' || url.port
+      || url.username || url.password || url.pathname !== '/o/oauth2/v2/auth') throw new Error();
+  } catch {
+    throw new Error('Gmail service returned an invalid authorization link. Please try connecting again.');
+  }
+  return { authorizationUrl: url.href };
+}
+
+export async function disconnectGmail(): Promise<void> {
+  await gmailRequest('disconnect');
+}
+
+export async function confirmGmailConnection(ticket: string, clubId: string): Promise<void> {
+  if (!ticket || !clubId) throw new Error('This Gmail confirmation link is incomplete. Start a new connection from the app.');
+  const body = await gmailRequest('confirm', { ticket }, clubId);
+  if (body.connected !== true) throw new Error(API_UNAVAILABLE);
 }
 
 /** Base64url-decodes a Gmail message body part into a UTF-8 string. */
@@ -334,15 +323,6 @@ export function parseEtransferMessage(message: {
   };
 }
 
-/**
- * Searches Gmail for Interac e-Transfer autodeposit notifications from the given
- * allowed sender addresses on or after `searchAfterDate`. A nonblank custom query
- * replaces default subject/date filters, never the allowed senders. This is purely a read — nothing
- * is ever written back to Gmail. Deduplication of already-reviewed emails is
- * handled entirely in Firestore (the Gmail message id is the doc id — see
- * `importEtransferEmails` in etransferImports.ts), so a message already
- * recorded there is simply skipped rather than excluded from Gmail's results.
- */
 function gmailAfterEpochSeconds(date: string): number {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
   if (!match) throw new Error('Enter a valid e-Transfer search date.');
@@ -359,53 +339,18 @@ function gmailAfterEpochSeconds(date: string): number {
   return Math.floor(timestamp / 1000);
 }
 
-// Gmail caps a single list call at 500 results even when a larger maxResults is
-// requested, and the API can return more messages than fit on one page — so a
-// club with a long custom search window or a backlog could silently miss older
-// e-Transfers if only the first page were read. This bounds the total number of
-// *pages* fetched (not messages) so a runaway search-window setting can't spin
-// forever, while still covering realistic backlogs.
-const GMAIL_LIST_MAX_PAGES = 20;
-
+/** The backend applies the saved club sender allowlist; recheck From here as defense in depth. */
 export async function searchEtransferEmails(
   senderAddress: string | string[],
   searchAfterDate: string = getDefaultEtransferSearchAfterDate(),
   customGmailQuery?: string | null
 ): Promise<ParsedEtransferEmail[]> {
   return serviceCall('searchEtransferEmails', async () => {
-    // Gmail accepts Unix seconds, which avoids its documented PST-based
-    // interpretation of calendar dates and makes the lower bound unambiguous.
     const addresses = normalizeEtransferSenderAddresses(senderAddress);
-    const senderClause = addresses.length === 1
-      ? `from:${addresses[0]}`
-      : `(${addresses.map((address) => `from:${address}`).join(' OR ')})`;
-    const customQuery = customGmailQuery?.trim();
-    const q = customQuery
-      ? `(${senderClause}) AND (${customQuery})`
-      : `${senderClause} subject:"automatically deposited" after:${gmailAfterEpochSeconds(searchAfterDate)}`;
-    const accessToken = await getGmailAccessToken();
-
-    const messages: { id: string; threadId: string }[] = [];
-    let pageToken: string | undefined;
-    for (let page = 0; page < GMAIL_LIST_MAX_PAGES; page++) {
-      const listUrl = `${GMAIL_API}/messages?q=${encodeURIComponent(q)}&maxResults=100`
-        + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
-      const { messages: pageMessages, nextPageToken } = await gmailFetch<{
-        messages?: { id: string; threadId: string }[];
-        nextPageToken?: string;
-      }>(accessToken, listUrl);
-      if (pageMessages?.length) messages.push(...pageMessages);
-      if (!nextPageToken) break;
-      pageToken = nextPageToken;
-    }
-    if (!messages.length) return [];
-
-    const fullMessages = await Promise.all(
-      messages.map((m) => gmailFetch<Parameters<typeof parseEtransferMessage>[0]>(
-        accessToken,
-        `${GMAIL_API}/messages/${m.id}?format=full`
-      ))
-    );
+    if (!customGmailQuery?.trim()) gmailAfterEpochSeconds(searchAfterDate);
+    const body = await gmailRequest('search', { searchAfterDate, customGmailQuery: customGmailQuery?.trim() || '' });
+    if (!Array.isArray(body.messages)) throw new Error(API_UNAVAILABLE);
+    const fullMessages = body.messages as Parameters<typeof parseEtransferMessage>[0][];
 
     return fullMessages
       .filter((message) => {

@@ -43,9 +43,30 @@ import {
   TEST_CLUB_ID,
 } from '../../../test-utils/firebaseTestHelpers';
 import { __getAllPaths, __getDocData, __seedDoc, Timestamp } from '../../../test-utils/fakeFirestore';
+import * as firestore from 'firebase/firestore';
 
 beforeEach(() => {
+  jest.restoreAllMocks();
   resetFirebaseTestState();
+});
+
+describe('club navigation read failures', () => {
+  it.each(['club', 'membership'])('propagates transient %s errors instead of treating them as missing access', async (kind) => {
+    const error = Object.assign(new Error('Temporary network failure'), { code: 'unavailable' });
+    jest.spyOn(firestore, 'getDoc').mockRejectedValueOnce(error);
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(kind === 'club' ? fetchClub('club-a') : fetchMemberRole('club-a', 'user-1'))
+      .rejects.toBe(error);
+    expect(log).toHaveBeenCalled();
+  });
+
+  it.each(['club', 'membership'])('still treats permission-denied %s reads as inaccessible', async (kind) => {
+    jest.spyOn(firestore, 'getDoc').mockRejectedValueOnce(
+      Object.assign(new Error('Access denied'), { code: 'permission-denied' })
+    );
+    await expect(kind === 'club' ? fetchClub('club-a') : fetchMemberRole('club-a', 'user-1'))
+      .resolves.toBeNull();
+  });
 });
 
 describe('setClubEtransferSenderAddresses', () => {

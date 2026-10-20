@@ -10,6 +10,7 @@ export interface FakeUser {
   email: string | null;
   emailVerified?: boolean;
   providerData?: Array<{ providerId: string }>;
+  getIdToken?: () => Promise<string>;
 }
 
 export class GoogleAuthProvider {
@@ -46,6 +47,7 @@ export class FakeAuth {
   private listeners: Array<(user: FakeUser | null) => void> = [];
 
   __setCurrentUser(user: FakeUser | null): void {
+    if (user && !user.getIdToken) user.getIdToken = async () => `fake-id-token-${user.uid}`;
     this.currentUser = user;
     this.listeners.forEach(cb => cb(user));
   }
@@ -59,7 +61,7 @@ export class FakeAuth {
 }
 
 const AUTH_INSTANCE = new FakeAuth();
-// Secondary auth instances (e.g. gmail.ts's throwaway Gmail-OAuth app),
+// Secondary auth instances (e.g. drive.ts's throwaway OAuth app),
 // keyed by app name — isolated from AUTH_INSTANCE so signing in/out there
 // never touches the main club-app signed-in user. See `getAuth` below.
 const secondaryAuthInstances = new Map<string, FakeAuth>();
@@ -80,8 +82,8 @@ export async function signInWithPopup(auth: FakeAuth, provider: GoogleAuthProvid
     return { user: auth.currentUser };
   }
   // A secondary (throwaway) auth instance — used to grab a scoped OAuth
-  // access token for an arbitrary Google account (e.g. Gmail e-Transfer
-  // search) without requiring it to match the main signed-in user. Shares
+  // access token for an arbitrary Google account without requiring it to
+  // match the main signed-in user. Shares
   // the same queued-implementation control as `reauthenticateWithPopup`
   // (see `__setReauthImplementation`) since both exist purely to resolve to
   // a credential with an `accessToken`.
@@ -108,7 +110,7 @@ let reauthImpl: ReauthImplementation | null = null;
 
 /**
  * Test-only control for `reauthenticateWithPopup` and for `signInWithPopup` on
- * a secondary auth instance (used by drive.ts and gmail.ts). Queue either a
+ * a secondary auth instance (used by drive.ts). Queue either a
  * resolved result — include
  * `__credential: { accessToken }` so `GoogleAuthProvider.credentialFromResult`
  * can read it back — or a rejection to simulate a cancelled/failed popup.

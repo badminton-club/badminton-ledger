@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
 import { Container, Card, Button, Table, Spinner, Alert, Form, Modal, Badge, OverlayTrigger, Popover } from 'react-bootstrap';
 import { format } from 'date-fns';
 import { Link } from 'react-router-dom';
@@ -26,6 +27,10 @@ import {
   type EtransferBatchPreview,
 } from '../services/firebase';
 import { toJSDate } from '../services/firebase/utils';
+import {
+  getGmailConnectionStatus, startGmailConnection, disconnectGmail, GmailConnectionRequiredError,
+} from '../services/firebase/gmail';
+import { auth } from '../services/firebase/client';
 import { useAppSelector } from '../hooks';
 import { selectAllPlayers } from '../features/players/playersSlice';
 import { selectIsClubAdmin, selectCurrentClubId } from '../features/club/clubSlice';
@@ -81,6 +86,179 @@ export default function EtransfersPage() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [searchMessage, setSearchMessage] = useState('');
+  const [uid, setUid] = useState(auth.currentUser?.uid);
+  const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
+  const [gmailEmailAddress, setGmailEmailAddress] = useState('');
+  const [connectionError, setConnectionError] = useState('');
+  const [authorizationUrl, setAuthorizationUrl] = useState('');
+  const [waitingForConnection, setWaitingForConnection] = useState(false);
+  const [connectionBusy, setConnectionBusy] = useState(false);
+  const [checkingConnection, setCheckingConnection] = useState(false);
+  const [connectionCheckMessage, setConnectionCheckMessage] = useState('');
+  const connectionGeneration = useRef(0);
+  const statusRequest = useRef(0);
+  const pendingStatus = useRef<number | null>(null);
+  const connectionAction = useRef(false);
+  const currentScope = useRef({ clubId, uid, isAdmin });
+  currentScope.current = { clubId, uid, isAdmin };
+
+  useEffect(() => onAuthStateChanged(auth, (user) => setUid(user?.uid)), []);
+
+  const isCurrentConnection = useCallback((generation: number) => (
+    connectionGeneration.current === generation
+    && currentScope.current.clubId === clubId
+    && currentScope.current.uid === uid
+    && currentScope.current.isAdmin
+    && auth.currentUser?.uid === uid
+  ), [clubId, uid]);
+
+  const checkConnection = useCallback(async (showFeedback = false) => {
+    if (!isAdmin || !clubId || !uid || connectionAction.current || pendingStatus.current !== null) return;
+    const generation = connectionGeneration.current;
+    const request = ++statusRequest.current;
+    pendingStatus.current = request;
+    setCheckingConnection(true);
+    if (showFeedback) setConnectionCheckMessage('');
+    try {
+      const status = await getGmailConnectionStatus();
+      if (!isCurrentConnection(generation) || request !== statusRequest.current) return;
+      setGmailConnected(status.connected);
+      setGmailEmailAddress(status.connected ? status.emailAddress || '' : '');
+      setConnectionError('');
+      if (showFeedback) {
+        setConnectionCheckMessage(status.connected
+          ? 'Connection checked: Gmail is connected. You can scan when ready.'
+          : 'Connection checked: Gmail is not connected. Finish browser authorization and confirm the club, or start a new connection.');
+      } else {
+        setConnectionCheckMessage('');
+      }
+      if (status.connected) {
+        setWaitingForConnection(false);
+        setAuthorizationUrl('');
+      }
+    } catch (err) {
+      if (!isCurrentConnection(generation) || request !== statusRequest.current) return;
+      setGmailConnected(err instanceof GmailConnectionRequiredError ? false : null);
+      setGmailEmailAddress('');
+      setConnectionError(err instanceof Error ? err.message : 'Unable to check Gmail connection.');
+      setConnectionCheckMessage('');
+      setWaitingForConnection(false);
+    } finally {
+      if (pendingStatus.current === request) {
+        pendingStatus.current = null;
+        setCheckingConnection(false);
+      }
+    }
+  }, [isAdmin, clubId, uid, isCurrentConnection]);
+
+  useEffect(() => {
+    connectionGeneration.current += 1;
+    statusRequest.current += 1;
+    pendingStatus.current = null;
+    connectionAction.current = false;
+    setGmailConnected(null);
+    setGmailEmailAddress('');
+    setConnectionError('');
+    setAuthorizationUrl('');
+    setWaitingForConnection(false);
+    setConnectionBusy(false);
+    setCheckingConnection(false);
+    setConnectionCheckMessage('');
+    setSearching(false);
+    setSearchError('');
+    setSearchMessage('');
+    void checkConnection();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void checkConnection();
+    };
+    const onFocus = () => { void checkConnection(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      connectionGeneration.current += 1;
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [checkConnection]);
+
+  useEffect(() => {
+    if (!waitingForConnection) return;
+    const generation = connectionGeneration.current;
+    const interval = window.setInterval(() => { void checkConnection(); }, 3000);
+    const expiry = window.setTimeout(() => {
+      if (!isCurrentConnection(generation)) return;
+      statusRequest.current += 1;
+      pendingStatus.current = null;
+      setCheckingConnection(false);
+      setConnectionCheckMessage('');
+      setWaitingForConnection(false);
+      setAuthorizationUrl('');
+      setConnectionError('Gmail authorization link expired. Connect Gmail again to get a new link.');
+    }, 10 * 60 * 1000);
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(expiry);
+    };
+  }, [waitingForConnection, checkConnection, isCurrentConnection]);
+
+  const handleConnect = async () => {
+    if (!isAdmin || !clubId || !uid || connectionAction.current) return;
+    const generation = connectionGeneration.current;
+    connectionAction.current = true;
+    statusRequest.current += 1;
+    pendingStatus.current = null;
+    setConnectionBusy(true);
+    setCheckingConnection(false);
+    setConnectionCheckMessage('');
+    setConnectionError('');
+    setAuthorizationUrl('');
+    setWaitingForConnection(false);
+    try {
+      const result = await startGmailConnection();
+      if (!isCurrentConnection(generation)) return;
+      setAuthorizationUrl(result.authorizationUrl);
+      setWaitingForConnection(true);
+    } catch (err) {
+      if (isCurrentConnection(generation)) {
+        setConnectionError(err instanceof Error ? err.message : 'Unable to start Gmail connection.');
+      }
+    } finally {
+      if (isCurrentConnection(generation)) {
+        connectionAction.current = false;
+        setConnectionBusy(false);
+      }
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!isAdmin || !clubId || !uid || connectionAction.current) return;
+    const generation = connectionGeneration.current;
+    connectionAction.current = true;
+    statusRequest.current += 1;
+    pendingStatus.current = null;
+    setConnectionBusy(true);
+    setCheckingConnection(false);
+    setConnectionCheckMessage('');
+    setWaitingForConnection(false);
+    setAuthorizationUrl('');
+    setConnectionError('');
+    try {
+      await disconnectGmail();
+      if (isCurrentConnection(generation)) {
+        setGmailConnected(false);
+        setGmailEmailAddress('');
+      }
+    } catch (err) {
+      if (isCurrentConnection(generation)) {
+        setConnectionError(err instanceof Error ? err.message : 'Unable to disconnect Gmail.');
+      }
+    } finally {
+      if (isCurrentConnection(generation)) {
+        connectionAction.current = false;
+        setConnectionBusy(false);
+      }
+    }
+  };
   const [autoSettleExactAmounts, setAutoSettleExactAmounts] = useState(
     DEFAULT_ETRANSFER_AUTO_SETTLE_EXACT_AMOUNTS
   );
@@ -203,6 +381,7 @@ export default function EtransfersPage() {
       setSearchError('Enter a valid transfer limit of $0 or more.');
       return;
     }
+    const generation = connectionGeneration.current;
     setSearching(true);
     setSearchError('');
     setSearchMessage('');
@@ -214,6 +393,7 @@ export default function EtransfersPage() {
         customGmailQuery,
         autoSettleExactAmounts
       );
+      if (!isCurrentConnection(generation)) return;
       const pendingCreated = created - autoSettled;
       const alreadyReviewed = found - ignored - created;
       const ignoredNote = ignored > 0
@@ -235,9 +415,17 @@ export default function EtransfersPage() {
       );
       await load();
     } catch (err) {
-      setSearchError(err instanceof Error ? err.message : 'Failed to search Gmail.');
+      if (!isCurrentConnection(generation)) return;
+      if (err instanceof GmailConnectionRequiredError) {
+        setGmailConnected(false);
+        setGmailEmailAddress('');
+        setSearchMessage('Gmail needs authorization or its access was revoked. Authorize in your browser, then explicitly search again.');
+        await handleConnect();
+      } else {
+        setSearchError(err instanceof Error ? err.message : 'Failed to search Gmail.');
+      }
     } finally {
-      setSearching(false);
+      if (isCurrentConnection(generation)) setSearching(false);
     }
   };
 
@@ -505,15 +693,67 @@ export default function EtransfersPage() {
         Search Gmail for Interac e-Transfer notifications, review suggested player matches, and
         apply confirmed payments. Exact unpaid-session matches may be applied automatically.
       </p>
+      <Card className="mb-3">
+        <Card.Body>
+          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+          <p role="status" className="mb-0">
+            {gmailConnected === true ? 'Gmail connected.' : gmailConnected === false
+              ? 'Gmail not connected. Connect or reconnect to authorize access.'
+              : 'Gmail connection status not confirmed.'}
+            {waitingForConnection && ' Finish authorization and confirm the connection in your browser.'}
+          </p>
+          <details>
+            <summary className="text-muted small">Manage Gmail connection</summary>
+            <div className="d-flex flex-wrap gap-2 mt-2">
+              <Button size="sm" variant="outline-secondary" onClick={() => { void checkConnection(true); }} disabled={connectionBusy || checkingConnection} aria-busy={checkingConnection}>
+                {checkingConnection ? <><Spinner size="sm" animation="border" className="me-2" />Checking connection…</> : 'Check connection'}
+              </Button>
+              <Button size="sm" variant="outline-danger" onClick={handleDisconnect} disabled={connectionBusy || searching}>
+                Disconnect Gmail
+              </Button>
+            </div>
+          </details>
+          </div>
+          {gmailConnected === true && gmailEmailAddress && (
+            <p className="small mb-2">Connected inbox: <strong>{gmailEmailAddress}</strong></p>
+          )}
+          {gmailConnected !== true && !authorizationUrl && (
+            <Button variant="primary" onClick={handleConnect} disabled={connectionBusy || searching}>
+              Connect Gmail
+            </Button>
+          )}
+          {authorizationUrl && (
+            <>
+              <a className="btn btn-primary" href={authorizationUrl} target="_blank" rel="noopener noreferrer">Authorize Gmail in browser</a>
+              <ol className="small mt-3 mb-0">
+                <li>Authorize the Gmail inbox you want to scan.</li>
+                <li>Sign into Badminton Ledger with this app account and confirm the destination club.</li>
+                <li>Close the browser tab or sheet and return here. Your connection status updates automatically.</li>
+              </ol>
+            </>
+          )}
+          <p className="text-muted small mt-2 mb-0">
+            {gmailConnected === true
+              ? 'Ready to scan for e-Transfers. Review your scan options below before continuing.'
+              : 'Connect once to authorize read-only Gmail access. Connecting does not scan or import payments.'}
+          </p>
+          {connectionError && <Alert variant="danger" className="mt-2 mb-0">{connectionError}</Alert>}
+          {connectionCheckMessage && (
+            <Alert variant={gmailConnected ? 'success' : 'info'} role="status" className="mt-2 mb-0">
+              {connectionCheckMessage}
+            </Alert>
+          )}
+        </Card.Body>
+      </Card>
 
       <Card className="mb-3">
         <Card.Body className="d-flex flex-wrap align-items-end gap-3">
           <div className="d-flex flex-column align-items-start gap-2">
             <Button
               onClick={handleSearch}
-              disabled={!!loadError || searching || ignoreAboveAmount == null || (!customGmailQuery && !searchAfterDate)}
+              disabled={!!loadError || searching || connectionBusy || ignoreAboveAmount == null || (!customGmailQuery && !searchAfterDate)}
             >
-              {searching ? <><Spinner size="sm" animation="border" className="me-2" />Connecting to Gmail…</> : 'Connect Gmail & Search'}
+              {searching ? <><Spinner size="sm" animation="border" className="me-2" />Scanning Gmail…</> : 'Scan connected Gmail'}
             </Button>
             <div className="d-flex align-items-center gap-1">
               <Form.Check

@@ -12,6 +12,9 @@ jobs:
     # Skip PRs from forks — they can't access the service-account secret.
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: firebase-development-gmail-deploy
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
@@ -41,7 +44,16 @@ jobs:
           REACT_APP_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.REACT_APP_FIREBASE_MESSAGING_SENDER_ID }}
           REACT_APP_FIREBASE_APP_ID: ${{ secrets.REACT_APP_FIREBASE_APP_ID }}
           REACT_APP_FIREBASE_MEASUREMENT_ID: ${{ secrets.REACT_APP_FIREBASE_MEASUREMENT_ID }}
-        run: npm run build
+        run: |
+          node -e '
+            if (process.env.REACT_APP_FIREBASE_PROJECT_ID !== "badminton-ledger") {
+              throw new Error("Development builds must use the badminton-ledger Firebase project");
+            }
+            if (process.env.REACT_APP_FIREBASE_AUTH_DOMAIN !== "badminton-ledger.firebaseapp.com") {
+              throw new Error("Set REACT_APP_FIREBASE_AUTH_DOMAIN to badminton-ledger.firebaseapp.com");
+            }
+          '
+          npm run build
 
       - name: Validate Firestore rules
         run: npx --yes firebase-tools@15.28.1 emulators:exec --only firestore --project demo-badminton-ledger "true"
@@ -55,8 +67,43 @@ jobs:
         run: npx --yes firebase-tools@15.28.1 deploy --only firestore:rules --project badminton-ledger --non-interactive
 
       - name: Deploy preview channel
+        id: preview
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           projectId: badminton-ledger
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: functions
+        run: npm ci
+
+      - name: Test Gmail backend
+        working-directory: functions
+        run: npm test
+
+      - name: Authenticate Firebase deployment
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Register exact preview origin
+        env:
+          GMAIL_OAUTH_REDIRECT_URI: ${{ vars.GMAIL_OAUTH_REDIRECT_URI }}
+          GMAIL_ALLOWED_ORIGINS: ${{ vars.GMAIL_ALLOWED_ORIGINS }}
+          PREVIEW_ORIGIN: ${{ steps.preview.outputs.details_url }}
+        run: |
+          test -n "$PREVIEW_ORIGIN" || { echo "::error::Hosting did not return a preview URL"; exit 1; }
+          node .github/scripts/configure-gmail-development.cjs
+
+      - name: Deploy Gmail backend
+        run: npx --yes firebase-tools@15.28.1 deploy --only functions:gmail --project badminton-ledger --non-interactive
+
+      - name: Deploy stable development callback website
+        run: npx --yes firebase-tools@15.28.1 deploy --only hosting --project badminton-ledger --non-interactive

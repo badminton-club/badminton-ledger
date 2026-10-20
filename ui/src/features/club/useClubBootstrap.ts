@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../hooks';
 import {
@@ -37,10 +37,13 @@ const LS_KEY = 'currentClubId';
  *    (?club → last visited → localStorage → first)
  *  - keeps the client's scoped `refs` and the user's role/last-visited in sync
  */
-export function useClubBootstrap(): void {
+export function useClubBootstrap(): string | null {
   const dispatch = useAppDispatch();
   const [searchParams, setSearchParams] = useSearchParams();
   const currentClubId = useAppSelector(selectCurrentClubId);
+  const [scope, setScope] = useState<{ uid: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const authGeneration = useRef(0);
 
   // Auth → club list → current club
   useEffect(() => {
@@ -48,10 +51,12 @@ export function useClubBootstrap(): void {
     // previous user (e.g. right after a fast sign-out/account-switch) can't
     // overwrite state with stale data once a newer auth event has already
     // been processed.
-    let latestUid: string | null = null;
     const unsubscribe = onAuthStateChangedListener(async (user) => {
       const uid = user?.uid ?? null;
-      latestUid = uid;
+      const generation = ++authGeneration.current;
+      const isCurrent = () => authGeneration.current === generation && auth.currentUser?.uid === uid;
+      setScope(null);
+      setLoadError(null);
 
       if (!user) {
         setCurrentClubId(null);
@@ -59,10 +64,14 @@ export function useClubBootstrap(): void {
         return;
       }
 
+      dispatch(setReady(false));
+      dispatch(setRole(null));
+      dispatch(setDisabledTabs([]));
       dispatch(setSignedIn(true));
       dispatch(setAccountName(getAuthAccountName(user)));
       dispatch(setInvitationError(null));
 
+      try {
       const clubParam = searchParams.get('club');
       const invitationParam = searchParams.get('invite');
       let invitedClubId: string | null = null;
@@ -70,22 +79,22 @@ export function useClubBootstrap(): void {
         try {
           invitedClubId = await acceptClubInvitation(invitationParam, user.uid, user.email, user.emailVerified);
         } catch (err) {
-          if (latestUid === uid) {
+          if (isCurrent()) {
             dispatch(setInvitationError(err instanceof Error ? err.message : 'Failed to accept invitation.'));
           }
         }
       }
-      if (latestUid !== uid) return;
+      if (!isCurrent()) return;
       if (clubParam) {
         try { await addClubToUser(user.uid, clubParam); } catch { /* ignore */ }
       }
-      if (latestUid !== uid) return;
+      if (!isCurrent()) return;
 
       const [clubs, profile] = await Promise.all([
         fetchUserClubs(user.uid),
         fetchUserProfile(user.uid),
       ]);
-      if (latestUid !== uid) return;
+      if (!isCurrent()) return;
 
       // Self-heal: a club becomes inaccessible if this user was removed as a
       // member (or the club itself was deleted), but nothing else can scrub
@@ -96,8 +105,11 @@ export function useClubBootstrap(): void {
       const deadClubIds = clubs.filter((c) => c.role === null).map((c) => c.id);
       const liveClubs = deadClubIds.length > 0 ? clubs.filter((c) => c.role !== null) : clubs;
       if (deadClubIds.length > 0) {
-        await Promise.all(deadClubIds.map((id) => removeClubFromUser(user.uid, id).catch(() => { /* best effort */ })));
+        void Promise.all(deadClubIds.map((id) => removeClubFromUser(user.uid, id).catch((err) => {
+          console.error('[useClubBootstrap] Failed to remove inaccessible saved club', err);
+        })));
       }
+      if (!isCurrent()) return;
       dispatch(setClubs(liveClubs));
 
       const stored = localStorage.getItem(LS_KEY);
@@ -112,6 +124,7 @@ export function useClubBootstrap(): void {
         null;
 
       dispatch(setCurrentClub(pick));
+      setScope({ uid: user.uid });
       // When a club is picked, the club-scope effect below loads its role/settings
       // and flips `ready`. Only mark ready here when there's nothing to load.
       if (!pick) dispatch(setReady(true));
@@ -122,9 +135,17 @@ export function useClubBootstrap(): void {
         if (invitedClubId) next.delete('invite');
         setSearchParams(next, { replace: true });
       }
+      } catch (err) {
+        if (!isCurrent()) return;
+        console.error('[useClubBootstrap] Failed to load user clubs', err);
+        setLoadError('Unable to load your clubs. Reload to try again.');
+      }
     });
 
-    return () => unsubscribe();
+    return () => {
+      authGeneration.current += 1;
+      unsubscribe();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch]);
 
@@ -138,27 +159,38 @@ export function useClubBootstrap(): void {
     }
     localStorage.setItem(LS_KEY, currentClubId);
     const user = auth.currentUser;
-    if (!user) return;
+    if (!user || scope?.uid !== user.uid) return;
+    const generation = authGeneration.current;
     // Switching clubs: hide club-scoped routes until the new club's role and
     // settings have loaded. This keeps role-based guards from acting on the
     // previous club's role, and remounts pages so they refetch for the new club.
     dispatch(setReady(false));
+    setLoadError(null);
     setLastVisitedClub(user.uid, currentClubId).catch(() => { /* ignore */ });
     let cancelled = false;
+    const isCurrent = () => !cancelled && generation === authGeneration.current && auth.currentUser?.uid === user.uid;
+    dispatch(setAccountName(getAuthAccountName(user)));
+    void fetchMemberDisplayName(currentClubId, user.uid).then((memberDisplayName) => {
+      if (isCurrent()) dispatch(setAccountName(memberDisplayName || getAuthAccountName(user)));
+    }).catch((err) => {
+      if (isCurrent()) console.error('[useClubBootstrap] Failed to load linked player name', err);
+    });
     Promise.all([
       fetchMemberRole(currentClubId, user.uid),
       fetchClub(currentClubId),
-      fetchMemberDisplayName(currentClubId, user.uid).catch((err) => {
-        console.error('[useClubBootstrap] Failed to load linked player name', err);
-        return null;
-      }),
-    ]).then(([role, club, memberDisplayName]) => {
-      if (cancelled) return;
+    ]).then(([role, club]) => {
+      if (!isCurrent()) return;
       dispatch(setRole(role));
       dispatch(setDisabledTabs(club?.disabledTabs ?? []));
-      dispatch(setAccountName(memberDisplayName || getAuthAccountName(user)));
       dispatch(setReady(true));
+    }).catch((err) => {
+      if (!isCurrent()) return;
+      console.error('[useClubBootstrap] Failed to load club navigation', err);
+      dispatch(setRole(null));
+      dispatch(setDisabledTabs([]));
+      setLoadError('Unable to load your club permissions and tabs. Reload to try again.');
     });
     return () => { cancelled = true; };
-  }, [currentClubId, dispatch]);
+  }, [currentClubId, dispatch, scope]);
+  return loadError;
 }
