@@ -27,8 +27,8 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   Google Drive, reusing the same Google sign-in (no separate credentials to set up).
 - **Gmail e-Transfer import** — admins can search Gmail for Interac e-Transfer autodeposit
   notifications, review the suggested player match and amount, then apply to credit a
-  player's balance. Every import is recorded and undoable, and processed emails are labelled
-  in Gmail so they aren't found again.
+  player's balance. Every import is recorded and undoable; processed Gmail message IDs
+  are deduplicated in Firestore without changing the mailbox.
   This feature is currently supported only for Canadian Interac e-Transfer autodeposit
   notifications. Before first use, submit the Google account email that receives these
   notifications to the Badminton Ledger administrator; it must be approved on the Google
@@ -55,16 +55,13 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   or clear the query to restore the default search. Allowed From mailboxes are
   always checked, even with custom queries; this is not cryptographic sender verification. See
   [Gmail search syntax](https://support.google.com/mail/answer/7190).
-  Home Screen apps use same-window Gmail authorization instead of a popup. After returning,
-  review the search options (reset to club defaults on reload) and select **Connect Gmail & Search**
-  again; authorization alone never imports or applies payments.
-  For iOS redirect authorization, serve the app through Firebase Hosting and set
-  `REACT_APP_FIREBASE_AUTH_DOMAIN` to the app's own hostname (without `https://`).
-  Add that hostname to Firebase Authentication's authorized domains and register
-  `https://<app-hostname>/__/auth/handler` as an authorized redirect URI on the project's
-  Google OAuth web client. Rebuild/redeploy after changing the environment variable.
-  This same-origin setup avoids Safari's third-party storage restrictions; merely adding
-  an authorized domain does not fix cross-origin redirect storage.
+  Gmail authorization is server-backed: complete Google consent in the browser,
+  sign into the same app account there if needed, and explicitly confirm the connection.
+  Then return to the Home Screen app and explicitly search. No Safari cookies, browser storage,
+  or credentials need to be copied into the installed app. Connections belong to the
+  signed-in administrator and club, so another administrator connects their own inbox.
+  Authorization and connection-status checks never import or apply payments.
+  See [Gmail backend setup](#gmail-backend-setup) before deploying this feature.
 
 ## Tech stack
 
@@ -145,6 +142,123 @@ Two GitHub Actions workflows deploy Hosting and the matching Firestore rules:
 - `firebase-hosting-pr.yml` — validates and deploys rules to the development project, then
   builds and deploys a preview channel for every pull request
 - `firebase-hosting-live.yml` — deploys rules and the live site on every push to `main`
+
+### Gmail backend setup
+
+Gmail now requires the `gmailApi` Cloud Function (Node.js 22) and a Blaze-enabled
+Firebase project. The Hosting workflows do **not** deploy Functions or configure
+secrets. Complete the backend deployment below before deploying the UI/preview;
+otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
+`badminton-ledger` (development) and `badminton-ledger-prod` (production).
+
+1. In the matching Google Cloud project, enable the **Gmail API**. Configure the
+   Google OAuth consent screen with the read-only scope
+   `https://www.googleapis.com/auth/gmail.readonly` and add the inbox account as a
+   test user if the app is in Testing. Gmail is a restricted scope: production use
+   may require Google verification and, when server-side access is involved, a
+   security assessment depending on Google's applicable exemptions. Testing-mode
+   refresh tokens may expire after seven days; reconnecting is then expected.
+2. Create a **Web application** OAuth client dedicated to Gmail. Keep existing
+   Firebase sign-in clients and redirect URIs unchanged. Add these **Authorized
+   redirect URIs** to the respective clients:
+   - Development: `https://badminton-ledger.web.app/api/gmail/callback`
+   - Production: `https://badminton-ledger-prod.web.app/api/gmail/callback`
+
+   These stable callbacks are independent of temporary preview URLs. The app's
+   Firebase login still needs its normal authorized domains; changing
+   `REACT_APP_FIREBASE_AUTH_DOMAIN` to a PR hostname is no longer necessary for
+   Gmail. Restore the normal project login domain if it was temporarily changed.
+3. From the repository root, install the backend's locked dependencies with
+   `npm --prefix functions ci`. Using your Firebase CLI, set the following
+   secrets interactively for each project (never put their values in frontend
+   environment variables, GitHub comments, or committed files):
+
+   ```bash
+   firebase functions:secrets:set GMAIL_OAUTH_CLIENT_ID --project badminton-ledger
+   firebase functions:secrets:set GMAIL_OAUTH_CLIENT_SECRET --project badminton-ledger
+   firebase functions:secrets:set GMAIL_TOKEN_ENCRYPTION_KEY --project badminton-ledger
+   ```
+
+   Supply the dedicated OAuth client's ID and secret. For the encryption secret,
+   generate a random 32-byte base64 key, for example with `openssl rand -base64 32`,
+   and store it securely. Use a separate key for production. Changing this key
+   makes previously stored credentials unreadable; disconnect/reconnect those
+   accounts as part of a deliberate rotation.
+4. Before deploying, create the ignored local configuration file
+   `functions/.env.badminton-ledger`:
+
+   ```dotenv
+   GMAIL_OAUTH_REDIRECT_URI=https://badminton-ledger.web.app/api/gmail/callback
+   GMAIL_ALLOWED_ORIGINS=https://badminton-ledger.web.app,https://badminton-ledger--pr35-copilot-fix-e-transf-0vydcc9e.web.app
+   ```
+
+   Check the current preview origin in the PR deployment comment and replace it
+   above if different. These values are not secrets. For production create
+   `functions/.env.badminton-ledger-prod` with the production callback and only
+   trusted production origins. The Function defaults to the project's stable
+   `web.app` origin/callback when overrides are absent; preview origins must be
+   added explicitly. Then deploy:
+
+   ```bash
+   firebase deploy --only functions:gmail --project badminton-ledger
+   ```
+
+   Allowed origins are exact HTTPS origins without trailing slashes. Include
+   PR #35's origin only while it is in use; update the allowlist and redeploy
+   for later previews. Keep `functions/.env.<project>` as local deployment
+   configuration, not something to commit. Restrict origins to trusted deployments.
+   Allow Firebase to provision the required Functions/Secret Manager services and
+   permissions; do not grant the deployment account access to unrelated projects.
+   In Firestore's **Time-to-live** settings, enable TTL on the `expiresAt` field
+   for collection group `gmailOAuthStates` to clean up abandoned authorization
+   requests. The backend enforces expiration itself; TTL is only cleanup.
+5. Deploy the stable callback route and private Firestore rules:
+
+   ```bash
+   firebase deploy --only hosting,firestore:rules --project badminton-ledger
+   ```
+
+   This command publishes the current `ui/build` to the development **live** site.
+   Build the intended UI first with development Firebase configuration, and confirm
+   that publishing to that site is appropriate. The stable live site's Hosting
+   configuration must include `/api/gmail/**` and the new account-confirmation UI
+   even when you test a PR preview.
+   Then rerun the PR preview deployment. Repeat the setup with the production
+   client, secrets, callback, and origins using `--project badminton-ledger-prod`
+   before releasing to production.
+
+To test, launch the installed preview, connect Gmail, open its authorization link
+in the browser, select the desired inbox, and finish consent. The callback opens
+the stable site's account page. Sign into the **same Badminton Ledger account**
+that started the connection (not necessarily the selected Gmail account), check
+the destination club, and explicitly confirm the connection. This one-time app
+sign-in in Safari prevents someone forwarding their link to attach your Gmail to
+their app account. Only the callback browser receives the completion ticket;
+the original app cannot discover it through connection status. Complete this step
+promptly before the short-lived authorization expires, and do not share these links.
+Then return to the Home Screen app. Check the connection or reopen the page and
+explicitly search. Do not expect iOS to automatically reopen the installed app.
+Closing/reopening it should retain the server connection when signed into the same
+account and club, without repeating Google consent on each login. This does not
+make iOS share the app's own login session with Safari. **Disconnect Gmail** removes
+the stored credentials and attempts
+Google revocation; reconnect if consent is revoked or expires.
+Revoking a Google grant can also affect other connections using that same Google
+account and OAuth client; those connections may need to reconnect.
+Very large searches fail rather than importing partial results: narrow the search
+window if it exceeds 20 Gmail result pages, the response-size limit, or the
+48-second server search budget.
+
+Access and refresh tokens are encrypted server-side and never returned to the UI.
+Client Firestore rules deny access to `gmailConnections` and `gmailOAuthStates`;
+keep Firestore backups and service-account access private too. Gmail endpoints
+verify Firebase identity and current club-admin membership, independently enforce
+saved sender restrictions, and cannot be used as an arbitrary Gmail proxy.
+Disconnect retains a credential-free generation record in `gmailConnections`;
+do not delete these records or enable TTL on that collection, because they block
+older in-flight callbacks from restoring a disconnected connection.
+Granting consent in Safari cannot sign the Home Screen app into a different club
+account or automatically apply payments.
 
 ## License
 

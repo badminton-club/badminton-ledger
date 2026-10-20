@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Container, Card, Button, Alert, ListGroup, Badge, Form, InputGroup, Spinner } from 'react-bootstrap';
 import type { User } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app';
@@ -20,6 +20,8 @@ import {
   createClub,
 } from '../services/firebase';
 import { useAppDispatch, useAppSelector } from '../hooks';
+import { confirmGmailConnection } from '../services/firebase/gmail';
+import { auth } from '../services/firebase/client';
 import {
   selectUserClubs,
   selectCurrentClubId,
@@ -104,6 +106,46 @@ export default function AuthPage() {
   const [resendBusy, setResendBusy] = useState(false);
   const [resendSent, setResendSent] = useState(false);
   const [resendError, setResendError] = useState('');
+  const [gmailHandoff] = useState(() => {
+    const params = new URL(window.location.href).searchParams;
+    const ticket = params.get('gmailHandoff');
+    const clubId = params.get('gmailClub');
+    return ticket !== null || clubId !== null ? { ticket: ticket || '', clubId: clubId || '' } : null;
+  });
+  const [gmailConfirmBusy, setGmailConfirmBusy] = useState(false);
+  const [gmailConfirmError, setGmailConfirmError] = useState('');
+  const [gmailConfirmed, setGmailConfirmed] = useState(false);
+  const gmailAttempt = useRef(0);
+
+  useEffect(() => {
+    gmailAttempt.current += 1;
+    setGmailConfirmBusy(false);
+    setGmailConfirmError('');
+    setGmailConfirmed(false);
+    return () => { gmailAttempt.current += 1; };
+  }, [user?.uid]);
+
+  const handleConfirmGmail = async () => {
+    if (!user || !gmailHandoff || gmailConfirmBusy || gmailConfirmed) return;
+    const uid = user.uid;
+    const attempt = ++gmailAttempt.current;
+    const isCurrent = () => gmailAttempt.current === attempt && auth.currentUser?.uid === uid;
+    setGmailConfirmBusy(true);
+    setGmailConfirmError('');
+    try {
+      await confirmGmailConnection(gmailHandoff.ticket, gmailHandoff.clubId);
+      if (!isCurrent()) return;
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete('gmailHandoff');
+      cleanUrl.searchParams.delete('gmailClub');
+      window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+      setGmailConfirmed(true);
+    } catch (err) {
+      if (isCurrent()) setGmailConfirmError(err instanceof Error ? err.message : 'Unable to confirm Gmail connection.');
+    } finally {
+      if (isCurrent()) setGmailConfirmBusy(false);
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChangedListener(setUser);
@@ -238,6 +280,11 @@ export default function AuthPage() {
     const returnUrl = new URL('/auth', window.location.origin);
     const invitationId = new URL(window.location.href).searchParams.get('invite');
     if (invitationId) returnUrl.searchParams.set('invite', invitationId);
+    if (gmailHandoff && /^[A-Za-z0-9_-]{43}$/.test(gmailHandoff.ticket)
+      && /^[A-Za-z0-9_-]{1,128}$/.test(gmailHandoff.clubId)) {
+      returnUrl.searchParams.set('gmailHandoff', gmailHandoff.ticket);
+      returnUrl.searchParams.set('gmailClub', gmailHandoff.clubId);
+    }
 
     setEmailAuthBusy(true);
     try {
@@ -352,6 +399,40 @@ export default function AuthPage() {
 
   return (
     <Container className="mt-4" style={{ maxWidth: 520 }}>
+      {gmailHandoff && (
+        <Card className="mb-3">
+          <Card.Body>
+            <Card.Title>Confirm Gmail connection</Card.Title>
+            {gmailConfirmed ? (
+              <Alert variant="success" className="mb-0">
+                Gmail connection confirmed. Close this tab and return to the app or reopen the Home Screen app
+                with the same app account and club. Check connection, then explicitly select Connect Gmail &amp; Search.
+                No payments have been imported.
+              </Alert>
+            ) : (
+              <>
+                <p>Destination club: <strong>{clubs.find((club) => club.id === gmailHandoff.clubId)?.name || gmailHandoff.clubId || 'Missing club'}</strong>
+                  {gmailHandoff.clubId && <span className="d-block text-muted small">Club ID: {gmailHandoff.clubId}</span>}
+                </p>
+                <p>
+                  Only confirm if you started this Gmail connection for this club. Do not confirm a link
+                  sent by someone else. Use the same app account that started the connection; the Gmail
+                  mailbox you authorized may be a different Google account.
+                </p>
+                {user ? (
+                  <p>Confirming as app account: <strong>{user.email || user.uid}</strong></p>
+                ) : (
+                  <Alert variant="info">Sign in below with the app account that started this connection, then explicitly confirm here.</Alert>
+                )}
+                <Button onClick={handleConfirmGmail} disabled={!user || !gmailHandoff.ticket || !gmailHandoff.clubId || gmailConfirmBusy}>
+                  {gmailConfirmBusy ? 'Confirming Gmail connection…' : 'Confirm Gmail connection'}
+                </Button>
+                {gmailConfirmError && <Alert variant="danger" className="mt-2 mb-0">{gmailConfirmError}</Alert>}
+              </>
+            )}
+          </Card.Body>
+        </Card>
+      )}
       <Card>
         <Card.Body className="text-center">
           <Card.Title>Account</Card.Title>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AuthPage from '../AuthPage';
 import { renderWithProviders, makeClubState } from '../../test-utils/renderWithProviders';
@@ -17,6 +17,13 @@ import {
   __getEmailSignInLinksSent,
 } from '../../test-utils/fakeAuth';
 import { signInWithGoogle } from '../../services/firebase';
+import { confirmGmailConnection, searchEtransferEmails } from '../../services/firebase/gmail';
+
+jest.mock('../../services/firebase/gmail', () => ({
+  ...jest.requireActual('../../services/firebase/gmail'),
+  confirmGmailConnection: jest.fn(),
+  searchEtransferEmails: jest.fn(),
+}));
 
 jest.mock('../../services/firebase', () => ({
   ...jest.requireActual('../../services/firebase'),
@@ -53,6 +60,8 @@ beforeEach(() => {
   window.history.replaceState({}, '', '/');
   jest.mocked(signInWithGoogle).mockReset();
   jest.mocked(signInWithGoogle).mockImplementation(actualFirebase.signInWithGoogle);
+  jest.mocked(confirmGmailConnection).mockReset().mockResolvedValue(undefined);
+  jest.mocked(searchEtransferEmails).mockReset();
 });
 
 afterEach(() => {
@@ -60,6 +69,94 @@ afterEach(() => {
 });
 
 describe('AuthPage', () => {
+  it('keeps a browser handoff pending through app login and only confirms on an explicit click', async () => {
+    const user = userEvent.setup();
+    window.history.replaceState({}, '', '/auth?gmailHandoff=browser-only-ticket&gmailClub=destination-club');
+    jest.mocked(signInWithGoogle).mockImplementationOnce(async () => {
+      setCurrentUser(currentUser);
+      return currentUser as never;
+    });
+    renderPage();
+    expect(screen.getByText(/Sign in below with the app account that started/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirm Gmail connection' })).toBeDisabled();
+    expect(confirmGmailConnection).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Sign in with Google' }));
+    const account = await screen.findByText(/Confirming as app account/);
+    expect(account).toHaveTextContent('grace@example.com');
+    expect(screen.getByText('Club ID: destination-club')).toBeInTheDocument();
+    expect(screen.getByText(/Only confirm if you started/)).toHaveTextContent('Do not confirm a link sent by someone else');
+    expect(confirmGmailConnection).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Confirm Gmail connection' }));
+    expect(confirmGmailConnection).toHaveBeenCalledTimes(1);
+    expect(confirmGmailConnection).toHaveBeenCalledWith('browser-only-ticket', 'destination-club');
+    expect(await screen.findByText(/Gmail connection confirmed/)).toHaveTextContent('No payments have been imported');
+    expect(window.location.search).toBe('');
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+  });
+
+  it('shows the destination independently of the selected club and does not auto-confirm for an existing app login', async () => {
+    setCurrentUser(currentUser);
+    window.history.replaceState({}, '', '/auth?invite=keep&gmailHandoff=ticket&gmailClub=destination-club');
+    const user = userEvent.setup();
+    const { store } = renderPage({
+      currentClubId: 'other-club', signedIn: true,
+      clubs: [{ id: 'destination-club', name: 'Destination Club', role: 'admin' }],
+    });
+    await screen.findByText(/Confirming as app account/);
+    expect(screen.getByText('Destination Club', { selector: 'strong' })).toBeInTheDocument();
+    expect(confirmGmailConnection).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Confirm Gmail connection' }));
+    await screen.findByText(/Gmail connection confirmed/);
+    expect(confirmGmailConnection).toHaveBeenCalledWith('ticket', 'destination-club');
+    expect(store.getState().club.currentClubId).toBe('other-club');
+    expect(window.location.search).toBe('?invite=keep');
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+  });
+
+  it('does not confirm incomplete handoffs or trigger searches', async () => {
+    setCurrentUser(currentUser);
+    window.history.replaceState({}, '', '/auth?gmailHandoff=ticket');
+    renderPage({ signedIn: true });
+    await screen.findByText(/Confirming as app account/);
+    expect(screen.getByRole('button', { name: 'Confirm Gmail connection' })).toBeDisabled();
+    expect(confirmGmailConnection).not.toHaveBeenCalled();
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+  });
+
+  it('preserves the ticket and explains a wrong-owner rejection without attaching or importing anything', async () => {
+    const user = userEvent.setup();
+    setCurrentUser(currentUser);
+    window.history.replaceState({}, '', '/auth?gmailHandoff=forwarded-ticket&gmailClub=attacker-club');
+    jest.mocked(confirmGmailConnection).mockRejectedValue(new Error('Sign in with the same app account that started this Gmail connection.'));
+    renderPage({ signedIn: true });
+    await screen.findByText(/Confirming as app account/);
+    await user.click(screen.getByRole('button', { name: 'Confirm Gmail connection' }));
+    expect(await screen.findByText('Sign in with the same app account that started this Gmail connection.')).toBeInTheDocument();
+    expect(window.location.search).toContain('gmailHandoff=forwarded-ticket');
+    expect(screen.queryByText(/Gmail connection confirmed/)).not.toBeInTheDocument();
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+  });
+
+  it('disables confirmation while pending and ignores completion if the app account changes', async () => {
+    const user = userEvent.setup();
+    let resolve!: () => void;
+    setCurrentUser(currentUser);
+    window.history.replaceState({}, '', '/auth?gmailHandoff=ticket&gmailClub=destination-club');
+    jest.mocked(confirmGmailConnection).mockReturnValue(new Promise((done) => { resolve = done; }));
+    renderPage({ signedIn: true });
+    await screen.findByText(/Confirming as app account/);
+    await user.click(screen.getByRole('button', { name: 'Confirm Gmail connection' }));
+    expect(screen.getByRole('button', { name: 'Confirming Gmail connection…' })).toBeDisabled();
+    await act(async () => {
+      setCurrentUser({ uid: 'different-user', displayName: null, email: 'other@example.com' });
+    });
+    await act(async () => { resolve(); });
+    expect(screen.queryByText(/Gmail connection confirmed/)).not.toBeInTheDocument();
+    expect(window.location.search).toContain('gmailHandoff=ticket');
+    expect(screen.getByText(/Confirming as app account/)).toHaveTextContent('other@example.com');
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+  });
+
   it('shows the Google sign-in button and signs the user in when clicked', async () => {
     const user = userEvent.setup();
     jest.mocked(signInWithGoogle).mockImplementationOnce(async () => {
@@ -311,6 +408,55 @@ describe('AuthPage', () => {
       returnUrl: 'http://localhost/auth?invite=invite-1',
     }]);
     expect(localStorage.getItem('emailForSignIn')).toBe('jamie@example.com');
+  });
+
+  it('preserves a validated Gmail confirmation ticket and destination through email-link login without confirming', async () => {
+    const user = userEvent.setup();
+    const ticket = 'a'.repeat(43);
+    window.history.replaceState({}, '', `/auth?invite=invite-1&gmailHandoff=${ticket}&gmailClub=destination-club`);
+    renderPage();
+    await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
+    await user.click(screen.getByRole('button', { name: 'Email me a sign-in link' }));
+    expect(await screen.findByText('A sign-in link has been sent to jamie@example.com.')).toBeInTheDocument();
+    expect(__getEmailSignInLinksSent()).toEqual([{
+      email: 'jamie@example.com',
+      returnUrl: `http://localhost/auth?invite=invite-1&gmailHandoff=${ticket}&gmailClub=destination-club`,
+    }]);
+    expect(confirmGmailConnection).not.toHaveBeenCalled();
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['short-ticket', 'destination-club'],
+    ['a'.repeat(43), '../other-club'],
+    ['a'.repeat(43), ''],
+  ])('does not forward malformed Gmail handoff fields through email-link login (%s, %s)', async (ticket, clubId) => {
+    const user = userEvent.setup();
+    window.history.replaceState({}, '', `/auth?gmailHandoff=${encodeURIComponent(ticket)}&gmailClub=${encodeURIComponent(clubId)}`);
+    renderPage();
+    await user.type(screen.getByLabelText('Email'), 'jamie@example.com');
+    await user.click(screen.getByRole('button', { name: 'Email me a sign-in link' }));
+    expect(await screen.findByText('A sign-in link has been sent to jamie@example.com.')).toBeInTheDocument();
+    expect(__getEmailSignInLinksSent()).toEqual([{ email: 'jamie@example.com', returnUrl: 'http://localhost/auth' }]);
+    expect(confirmGmailConnection).not.toHaveBeenCalled();
+  });
+
+  it('retains Gmail confirmation after automatic email-link sign-in but still requires an explicit confirm click', async () => {
+    const user = userEvent.setup();
+    const ticket = 'b'.repeat(43);
+    __registerAccount('jamie@example.com', 'hunter22');
+    localStorage.setItem('emailForSignIn', 'jamie@example.com');
+    window.history.replaceState({}, '', `/auth?mode=signIn&oobCode=valid-code&gmailHandoff=${ticket}&gmailClub=destination-club`);
+    renderPage();
+    expect(await screen.findByText(/Confirming as app account/)).toHaveTextContent('jamie@example.com');
+    expect(new URL(window.location.href).searchParams.get('gmailHandoff')).toBe(ticket);
+    expect(new URL(window.location.href).searchParams.has('oobCode')).toBe(false);
+    expect(confirmGmailConnection).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Confirm Gmail connection' }));
+    await screen.findByText(/Gmail connection confirmed/);
+    expect(confirmGmailConnection).toHaveBeenCalledWith(ticket, 'destination-club');
+    expect(window.location.search).toBe('');
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
   });
 
   it('automatically completes a same-device passwordless sign-in link', async () => {

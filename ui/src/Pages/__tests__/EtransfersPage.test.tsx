@@ -1,5 +1,5 @@
 import React from 'react';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import EtransfersPage from '../EtransfersPage';
 import { renderWithProviders, makeClubState, makePlayersState } from '../../test-utils/renderWithProviders';
@@ -16,7 +16,12 @@ import {
   searchEtransferEmails,
   getDefaultEtransferSearchAfterDate,
   parseEtransferMessage,
+  getGmailConnectionStatus,
+  startGmailConnection,
+  disconnectGmail,
+  GmailConnectionRequiredError,
 } from '../../services/firebase/gmail';
+import { setCurrentClub } from '../../features/club/clubSlice';
 import {
   rejectEtransferImport,
   dismissEtransferImport,
@@ -29,6 +34,9 @@ jest.mock('../../services/firebase/gmail', () => {
   return {
     ...actual,
     searchEtransferEmails: jest.fn(),
+    getGmailConnectionStatus: jest.fn(),
+    startGmailConnection: jest.fn(),
+    disconnectGmail: jest.fn(),
   };
 });
 
@@ -70,25 +78,220 @@ describe('EtransfersPage', () => {
     resetFirebaseTestState();
     setCurrentUser({ uid: 'admin-1', displayName: 'Admin', email: 'admin@example.com' });
     jest.mocked(searchEtransferEmails).mockReset();
+    jest.mocked(getGmailConnectionStatus).mockReset().mockResolvedValue({ connected: false });
+    jest.mocked(startGmailConnection).mockReset().mockResolvedValue({
+      authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=example',
+    });
+    jest.mocked(disconnectGmail).mockReset().mockResolvedValue(undefined);
     const actual = jest.requireActual('../../services/firebase');
     jest.mocked(rejectEtransferImport).mockImplementation(actual.rejectEtransferImport);
     jest.mocked(dismissEtransferImport).mockImplementation(actual.dismissEtransferImport);
   });
 
-  it('explains explicit search and reset options after Home Screen authorization', async () => {
-    Object.defineProperty(navigator, 'standalone', { configurable: true, value: true });
+  it('checks connection on mount and explains the browser handoff without importing', async () => {
+    jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected: true });
+    renderPage();
+    expect(await screen.findByText('Gmail connected.')).toBeInTheDocument();
+    expect(screen.getByText(/Authorize the club Gmail account/)).toHaveTextContent('reopen the Home Screen app with the same app user and club');
+    expect(screen.getByText(/Authorize the club Gmail account/)).toHaveTextContent('Authorization never imports payments');
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+    expect(startGmailConnection).not.toHaveBeenCalled();
+  });
+
+  it('provides a normal user-click browser link, then checks on focus without importing', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Connect Gmail', exact: true }));
+    const link = await screen.findByRole('link', { name: 'Authorize Gmail in browser' });
+    expect(link).toHaveAttribute('href', 'https://accounts.google.com/o/oauth2/v2/auth?state=example');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected: true });
+    fireEvent(window, new Event('focus'));
+    expect(await screen.findByText('Gmail connected.')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Authorize Gmail in browser' })).not.toBeInTheDocument();
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+  });
+
+  it('starts connection once on an explicit search requiring reconnect and never retries/imports on completion', async () => {
+    const user = userEvent.setup();
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.mocked(searchEtransferEmails).mockRejectedValue(new GmailConnectionRequiredError());
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Connect Gmail & Search' }));
+    await screen.findByRole('link', { name: 'Authorize Gmail in browser' });
+    expect(startGmailConnection).toHaveBeenCalledTimes(1);
+    jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected: true });
+    await user.click(screen.getByRole('button', { name: 'Check connection' }));
+    await screen.findByText('Gmail connected.');
+    expect(searchEtransferEmails).toHaveBeenCalledTimes(1);
+    expect(getClubDocData('etransferImports', 'msg-1')).toBeUndefined();
+    log.mockRestore();
+  });
+
+  it('checks on visibility and reports status errors with an explicit retry fallback', async () => {
+    const user = userEvent.setup();
+    jest.mocked(getGmailConnectionStatus).mockRejectedValue(new Error('Gmail backend unavailable.'));
+    renderPage();
+    expect(await screen.findByText('Gmail backend unavailable.')).toBeInTheDocument();
+    jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected: false });
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(screen.queryByText('Gmail backend unavailable.')).not.toBeInTheDocument());
+    jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected: true });
+    await user.click(screen.getByRole('button', { name: 'Check connection' }));
+    await screen.findByText('Gmail connected.');
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+  });
+
+  it('disconnects without searching and reports failures clearly', async () => {
+    const user = userEvent.setup();
+    jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected: true });
+    renderPage();
+    await screen.findByText('Gmail connected.');
+    jest.mocked(disconnectGmail).mockRejectedValueOnce(new Error('Disconnect failed.'));
+    await user.click(screen.getByRole('button', { name: 'Disconnect Gmail' }));
+    await screen.findByText('Disconnect failed.');
+    await user.click(screen.getByRole('button', { name: 'Disconnect Gmail' }));
+    await screen.findByText('Gmail not connected. Connect or reconnect to authorize access.');
+    expect(disconnectGmail).toHaveBeenCalledTimes(2);
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+  });
+
+  it('polls only during an explicit connection attempt and stops after success', async () => {
+    const { unmount } = renderPage();
+    await screen.findByText('Gmail not connected. Connect or reconnect to authorize access.');
+    jest.useFakeTimers();
     try {
-      renderPage();
-      expect(await screen.findByText(/Gmail authorization opens in this window/)).toHaveTextContent(
-        'After returning, review your search options and select Connect Gmail & Search again.'
-      );
-      expect(screen.getByText(/Gmail authorization opens in this window/)).toHaveTextContent(
-        'Search options reset to your club defaults'
-      );
+      const initialChecks = jest.mocked(getGmailConnectionStatus).mock.calls.length;
+      await act(async () => { jest.advanceTimersByTime(6000); });
+      expect(getGmailConnectionStatus).toHaveBeenCalledTimes(initialChecks);
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail', exact: true }));
+      await act(async () => {});
+      expect(screen.getByRole('link', { name: 'Authorize Gmail in browser' })).toBeInTheDocument();
+      await act(async () => { jest.advanceTimersByTime(3000); });
+      expect(getGmailConnectionStatus).toHaveBeenCalledTimes(initialChecks + 1);
+      jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected: true });
+      await act(async () => { jest.advanceTimersByTime(3000); });
+      expect(screen.getByText('Gmail connected.')).toBeInTheDocument();
+      const completedChecks = jest.mocked(getGmailConnectionStatus).mock.calls.length;
+      await act(async () => { jest.advanceTimersByTime(9000); });
+      expect(getGmailConnectionStatus).toHaveBeenCalledTimes(completedChecks);
       expect(searchEtransferEmails).not.toHaveBeenCalled();
     } finally {
-      delete (navigator as Navigator & { standalone?: boolean }).standalone;
+      unmount();
+      jest.useRealTimers();
     }
+  });
+
+  it('cleans up polling and focus listeners on unmount', async () => {
+    const { unmount } = renderPage();
+    await screen.findByRole('button', { name: 'Connect Gmail', exact: true });
+    jest.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail', exact: true }));
+      await act(async () => {});
+      expect(screen.getByRole('link', { name: 'Authorize Gmail in browser' })).toBeInTheDocument();
+      const checks = jest.mocked(getGmailConnectionStatus).mock.calls.length;
+      unmount();
+      await act(async () => {
+        jest.advanceTimersByTime(9000);
+        fireEvent(window, new Event('focus'));
+      });
+      expect(getGmailConnectionStatus).toHaveBeenCalledTimes(checks);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('expires a waiting authorization link after ten minutes and stops polling until a new connection attempt', async () => {
+    const { unmount } = renderPage();
+    await screen.findByRole('button', { name: 'Connect Gmail', exact: true });
+    jest.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail', exact: true }));
+      await act(async () => {});
+      expect(screen.getByRole('link', { name: 'Authorize Gmail in browser' })).toBeInTheDocument();
+      await act(async () => { jest.advanceTimersByTime(10 * 60 * 1000); });
+      expect(screen.getByText('Gmail authorization link expired. Connect Gmail again to get a new link.')).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Authorize Gmail in browser' })).not.toBeInTheDocument();
+      const checks = jest.mocked(getGmailConnectionStatus).mock.calls.length;
+      await act(async () => { jest.advanceTimersByTime(9000); });
+      expect(getGmailConnectionStatus).toHaveBeenCalledTimes(checks);
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail', exact: true }));
+      await act(async () => {});
+      expect(screen.getByRole('link', { name: 'Authorize Gmail in browser' })).toBeInTheDocument();
+      expect(screen.queryByText('Gmail authorization link expired. Connect Gmail again to get a new link.')).not.toBeInTheDocument();
+      expect(searchEtransferEmails).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      jest.useRealTimers();
+    }
+  });
+
+  it('stops polling and clears the browser link when changing clubs', async () => {
+    const { store, unmount } = renderPage();
+    await screen.findByRole('button', { name: 'Connect Gmail', exact: true });
+    jest.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail', exact: true }));
+      await act(async () => {});
+      expect(screen.getByRole('link', { name: 'Authorize Gmail in browser' })).toBeInTheDocument();
+      await act(async () => { store.dispatch(setCurrentClub('other-club')); });
+      expect(screen.queryByRole('link', { name: 'Authorize Gmail in browser' })).not.toBeInTheDocument();
+      const checks = jest.mocked(getGmailConnectionStatus).mock.calls.length;
+      await act(async () => { jest.advanceTimersByTime(9000); });
+      expect(getGmailConnectionStatus).toHaveBeenCalledTimes(checks);
+      expect(searchEtransferEmails).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      jest.useRealTimers();
+    }
+  });
+
+  it('ignores an old status response arriving after disconnect', async () => {
+    const user = userEvent.setup();
+    let resolve!: (value: { connected: boolean }) => void;
+    jest.mocked(getGmailConnectionStatus).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Disconnect Gmail' }));
+    await screen.findByText('Gmail not connected. Connect or reconnect to authorize access.');
+    await act(async () => { resolve({ connected: true }); });
+    expect(screen.queryByText('Gmail connected.')).not.toBeInTheDocument();
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+  });
+
+  it('does not overlap slow status checks or discard a valid response on repeated focus', async () => {
+    let resolve!: (value: { connected: boolean }) => void;
+    jest.mocked(getGmailConnectionStatus).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    renderPage();
+    await screen.findByRole('button', { name: 'Check connection' });
+    fireEvent(window, new Event('focus'));
+    fireEvent(document, new Event('visibilitychange'));
+    expect(getGmailConnectionStatus).toHaveBeenCalledTimes(1);
+    await act(async () => { resolve({ connected: true }); });
+    expect(screen.getByText('Gmail connected.')).toBeInTheDocument();
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+  });
+
+  it.each(['club', 'uid'])('ignores a stale authorization link after the %s changes', async (scope) => {
+    let resolve!: (value: { authorizationUrl: string }) => void;
+    jest.mocked(startGmailConnection).mockReturnValue(new Promise((done) => { resolve = done; }));
+    const { store } = renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Gmail', exact: true }));
+    await act(async () => {
+      if (scope === 'club') store.dispatch(setCurrentClub('another-club'));
+      else setCurrentUser({ uid: 'other-admin', displayName: 'Other', email: 'other@example.com' });
+    });
+    await act(async () => { resolve({ authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=stale' }); });
+    expect(screen.queryByRole('link', { name: 'Authorize Gmail in browser' })).not.toBeInTheDocument();
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+  });
+
+  it.each([{ role: 'member' as const }, { currentClubId: null }])('does not check status without admin + club: %j', async (overrides) => {
+    renderWithProviders(<EtransfersPage />, { preloadedState: { club: makeClubState(overrides) } });
+    await act(async () => {});
+    expect(getGmailConnectionStatus).not.toHaveBeenCalled();
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
   });
 
   it('uses the saved custom Gmail query without exposing search-setting editors', async () => {

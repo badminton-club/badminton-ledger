@@ -191,6 +191,14 @@ service cloud.firestore {
       );
     }
 
+    // OAuth credentials and handoff state are accessed only by the Admin SDK.
+    match /gmailConnections/{document=**} {
+      allow read, write: if false;
+    }
+    match /gmailOAuthStates/{document=**} {
+      allow read, write: if false;
+    }
+
     // ── Deny everything else ───────────────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;
