@@ -79,8 +79,9 @@ export async function fetchClub(clubId: string): Promise<Club | null> {
       const snap = await getDoc(clubDoc(clubId));
       if (!snap.exists()) return null;
       return { id: snap.id, ...(snap.data() as Omit<Club, 'id'>) };
-    } catch {
-      return null; // not a member yet → club doc read denied; treat as unknown
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'permission-denied') return null;
+      throw err;
     }
   });
 }
@@ -93,8 +94,9 @@ export async function fetchMemberRole(clubId: string, uid: string): Promise<Club
       if (!snap.exists()) return null;
       const role = snap.data().role;
       return role === 'superAdmin' || role === 'admin' || role === 'member' ? role : null;
-    } catch {
-      return null; // membership read denied / missing — treat as no access
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'permission-denied') return null;
+      throw err;
     }
   });
 }

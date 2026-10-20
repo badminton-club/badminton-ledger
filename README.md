@@ -21,6 +21,9 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
 - **Roles** — admins manage players, inventory, payouts, and settings; members get a
   self-serve attendance/balance view and can request profile changes or to be linked to a
   player for an admin to approve (no direct write access to sensitive data).
+  Club navigation waits for the signed-in user's role and tab settings to load,
+  including when accounts switch within the same club. Loading failures display
+  a reload action instead of leaving a silently incomplete set of tabs.
 - **Auth** — Google sign-in, or email + password sign-up (with a non-blocking email
   verification reminder).
 - **Google Drive backup/restore** — admins can export/import all club data to their own

@@ -1,8 +1,9 @@
 import React from 'react';
-import { screen } from '@testing-library/react';
+import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AppNavBar from '../AppNavBar';
 import { renderWithProviders, makeClubState } from '../../test-utils/renderWithProviders';
+import { setReady } from '../../features/club/clubSlice';
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -10,6 +11,21 @@ beforeEach(() => {
 });
 
 describe('AppNavBar', () => {
+  it('shows a loading indicator instead of partial club tabs until role and settings are ready', () => {
+    const { store } = renderWithProviders(<AppNavBar />, {
+      preloadedState: { club: makeClubState({ ready: false }) },
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('Loading club navigation');
+    expect(screen.queryByRole('link', { name: 'Attendance' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'e-Transfers' })).not.toBeInTheDocument();
+    expect(store.getState().club.ready).toBe(false);
+    act(() => { store.dispatch(setReady(true)); });
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /e-transfer/i })).toBeInTheDocument();
+  });
+
   it('shows home, attendance, and account access for non-admin members', () => {
     renderWithProviders(<AppNavBar />, {
       preloadedState: {

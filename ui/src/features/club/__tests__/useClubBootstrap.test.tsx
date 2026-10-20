@@ -1,9 +1,11 @@
 import React from 'react';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { MemoryRouter } from 'react-router-dom';
 import { useClubBootstrap } from '../useClubBootstrap';
-import { makeTestStore } from '../../../test-utils/renderWithProviders';
+import { makeClubState, makeTestStore } from '../../../test-utils/renderWithProviders';
+import * as clubService from '../../../services/firebase/clubs';
+import { setCurrentClub } from '../clubSlice';
 import {
   resetFirebaseTestState,
   seedClubDoc,
@@ -24,6 +26,7 @@ const currentUser = {
 };
 
 beforeEach(() => {
+  jest.restoreAllMocks();
   resetFirebaseTestState();
   localStorage.clear();
 });
@@ -40,7 +43,7 @@ function renderBootstrap(store: ReturnType<typeof makeTestStore>, route = '/') {
 
 describe('useClubBootstrap', () => {
   it('resets club state and signs out when there is no user', async () => {
-    const store = makeTestStore({ club: { currentClubId: 'stale', role: 'admin', clubs: [], disabledTabs: [], signedIn: true, accountName: 'Admin', ready: true } });
+    const store = makeTestStore({ club: makeClubState({ currentClubId: 'stale', role: 'admin', clubs: [], signedIn: true, accountName: 'Admin' }) });
     renderBootstrap(store);
 
     await waitFor(() => expect(store.getState().club.signedIn).toBe(false));
@@ -62,6 +65,85 @@ describe('useClubBootstrap', () => {
     await waitFor(() => expect(store.getState().club.currentClubId).toBe('club-a'));
     await waitFor(() => expect(store.getState().club.role).toBe('admin'));
     expect(store.getState().club.ready).toBe(true);
+  });
+
+  it('reloads role and tabs when switching users in the same club', async () => {
+    const otherUser = { ...currentUser, uid: 'user-2' };
+    for (const user of [currentUser, otherUser]) {
+      seedUserDoc(user.uid, { clubs: ['club-a'] });
+    }
+    seedClubMetaDoc('club-a', { name: 'Club A', disabledTabs: ['payout'] });
+    seedMemberDoc(currentUser.uid, { role: 'member' }, 'club-a');
+    seedMemberDoc(otherUser.uid, { role: 'admin' }, 'club-a');
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    renderBootstrap(store);
+    await waitFor(() => expect(store.getState().club.ready).toBe(true));
+    expect(store.getState().club.role).toBe('member');
+    seedClubMetaDoc('club-a', { name: 'Club A', disabledTabs: [] });
+    act(() => { setCurrentUser(otherUser); });
+    await waitFor(() => expect(store.getState().club.role).toBe('admin'));
+    expect(store.getState().club.ready).toBe(true);
+    expect(store.getState().club.disabledTabs).toEqual([]);
+  });
+
+  it('rejects an old user role response after a same-club account switch', async () => {
+    const otherUser = { ...currentUser, uid: 'user-2' };
+    for (const user of [currentUser, otherUser]) {
+      seedUserDoc(user.uid, { clubs: ['club-a'] });
+      seedMemberDoc(user.uid, { role: user.uid === currentUser.uid ? 'admin' : 'member' }, 'club-a');
+    }
+    seedClubMetaDoc('club-a', { name: 'Club A' });
+    const original = clubService.fetchMemberRole;
+    let resolve!: (value: 'admin') => void;
+    let reads = 0;
+    jest.spyOn(clubService, 'fetchMemberRole').mockImplementation((clubId, uid) => {
+      if (uid === currentUser.uid && ++reads === 1) {
+        return new Promise((done) => { resolve = done; });
+      }
+      return original(clubId, uid);
+    });
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    renderBootstrap(store);
+    await waitFor(() => expect(resolve).toBeDefined());
+    expect(store.getState().club.ready).toBe(false);
+    act(() => { setCurrentUser(otherUser); });
+    await waitFor(() => expect(store.getState().club.ready).toBe(true));
+    expect(store.getState().club.role).toBe('member');
+    await act(async () => { resolve('admin'); });
+    expect(store.getState().club.role).toBe('member');
+  });
+
+  it('surfaces club settings failures instead of declaring incomplete navigation ready', async () => {
+    seedUserDoc(currentUser.uid, { clubs: ['club-a', 'club-b'] });
+    for (const id of ['club-a', 'club-b']) {
+      seedClubMetaDoc(id, { name: id });
+      seedMemberDoc(currentUser.uid, { role: 'admin' }, id);
+    }
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    const { result } = renderBootstrap(store);
+    await waitFor(() => expect(store.getState().club.ready).toBe(true));
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    jest.spyOn(clubService, 'fetchClub').mockRejectedValueOnce(new Error('Network unavailable'));
+    act(() => { store.dispatch(setCurrentClub('club-b')); });
+    await waitFor(() => expect(result.current).toContain('Unable to load your club permissions'));
+    expect(store.getState().club.ready).toBe(false);
+    expect(store.getState().club.role).toBeNull();
+    expect(log).toHaveBeenCalled();
+  });
+
+  it('reports a failed club-list load without removing saved club membership', async () => {
+    seedUserDoc(currentUser.uid, { clubs: ['club-a'] });
+    jest.spyOn(clubService, 'fetchUserClubs').mockRejectedValueOnce(new Error('Network unavailable'));
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    const { result } = renderBootstrap(store);
+    await waitFor(() => expect(result.current).toContain('Unable to load your clubs'));
+    expect(store.getState().club.ready).toBe(false);
+    expect(__getDocData(`users/${currentUser.uid}`)).toMatchObject({ clubs: ['club-a'] });
   });
 
   it("prefers the user's lastVisitedClub over the first club", async () => {

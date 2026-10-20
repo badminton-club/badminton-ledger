@@ -9,6 +9,7 @@ import {
     selectClubRole,
     selectDisabledTabs,
     selectAccountName,
+    selectClubReady,
     setCurrentClub,
 } from "../features/club/clubSlice";
 import { TOGGLEABLE_TABS } from "../features/club/tabs";
@@ -22,7 +23,8 @@ export default function AppNavbar() {
     const role = useAppSelector(selectClubRole);
     const disabledTabs = useAppSelector(selectDisabledTabs);
     const accountName = useAppSelector(selectAccountName);
-    const isAdmin = role === "admin" || role === "superAdmin";
+    const ready = useAppSelector(selectClubReady);
+    const isAdmin = ready && (role === "admin" || role === "superAdmin");
 
     return (
         <Navbar bg="primary" variant="dark" expand="lg" sticky="top" style={{ marginBottom: 20, paddingBottom: 10 }}>
@@ -69,7 +71,8 @@ export default function AppNavbar() {
                         <Nav.Link as={Link} to="/">
                             Home
                         </Nav.Link>
-                        {currentClubId && !disabledTabs.includes("attendance") && (
+                        {!ready && <Nav.Item role="status" className="text-white small">Loading club navigation…</Nav.Item>}
+                        {ready && currentClubId && !disabledTabs.includes("attendance") && (
                             <Nav.Link as={Link} to="/attendance">
                                 Attendance
                             </Nav.Link>
@@ -86,7 +89,7 @@ export default function AppNavbar() {
                                 </Nav.Link>
                             </>
                         )}
-                        {currentClubId && (
+                        {ready && currentClubId && (
                             <Nav.Link as={Link} to="/faq">
                                 Help &amp; FAQ
                             </Nav.Link>
