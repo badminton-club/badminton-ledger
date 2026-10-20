@@ -105,7 +105,9 @@ export function useClubBootstrap(): string | null {
       const deadClubIds = clubs.filter((c) => c.role === null).map((c) => c.id);
       const liveClubs = deadClubIds.length > 0 ? clubs.filter((c) => c.role !== null) : clubs;
       if (deadClubIds.length > 0) {
-        await Promise.all(deadClubIds.map((id) => removeClubFromUser(user.uid, id).catch(() => { /* best effort */ })));
+        void Promise.all(deadClubIds.map((id) => removeClubFromUser(user.uid, id).catch((err) => {
+          console.error('[useClubBootstrap] Failed to remove inaccessible saved club', err);
+        })));
       }
       if (!isCurrent()) return;
       dispatch(setClubs(liveClubs));
@@ -166,21 +168,23 @@ export function useClubBootstrap(): string | null {
     setLoadError(null);
     setLastVisitedClub(user.uid, currentClubId).catch(() => { /* ignore */ });
     let cancelled = false;
+    const isCurrent = () => !cancelled && generation === authGeneration.current && auth.currentUser?.uid === user.uid;
+    dispatch(setAccountName(getAuthAccountName(user)));
+    void fetchMemberDisplayName(currentClubId, user.uid).then((memberDisplayName) => {
+      if (isCurrent()) dispatch(setAccountName(memberDisplayName || getAuthAccountName(user)));
+    }).catch((err) => {
+      if (isCurrent()) console.error('[useClubBootstrap] Failed to load linked player name', err);
+    });
     Promise.all([
       fetchMemberRole(currentClubId, user.uid),
       fetchClub(currentClubId),
-      fetchMemberDisplayName(currentClubId, user.uid).catch((err) => {
-        console.error('[useClubBootstrap] Failed to load linked player name', err);
-        return null;
-      }),
-    ]).then(([role, club, memberDisplayName]) => {
-      if (cancelled || generation !== authGeneration.current || auth.currentUser?.uid !== user.uid) return;
+    ]).then(([role, club]) => {
+      if (!isCurrent()) return;
       dispatch(setRole(role));
       dispatch(setDisabledTabs(club?.disabledTabs ?? []));
-      dispatch(setAccountName(memberDisplayName || getAuthAccountName(user)));
       dispatch(setReady(true));
     }).catch((err) => {
-      if (cancelled || generation !== authGeneration.current || auth.currentUser?.uid !== user.uid) return;
+      if (!isCurrent()) return;
       console.error('[useClubBootstrap] Failed to load club navigation', err);
       dispatch(setRole(null));
       dispatch(setDisabledTabs([]));

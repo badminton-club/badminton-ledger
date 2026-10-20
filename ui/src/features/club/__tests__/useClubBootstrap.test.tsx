@@ -42,6 +42,63 @@ function renderBootstrap(store: ReturnType<typeof makeTestStore>, route = '/') {
 }
 
 describe('useClubBootstrap', () => {
+  it('makes admin tabs ready before a slow linked-player name finishes', async () => {
+    seedUserDoc(currentUser.uid, { clubs: ['club-a'] });
+    seedClubMetaDoc('club-a', { name: 'Club A', disabledTabs: ['payout'] });
+    seedMemberDoc(currentUser.uid, { role: 'admin' }, 'club-a');
+    let resolveName!: (value: string) => void;
+    jest.spyOn(clubService, 'fetchMemberDisplayName').mockReturnValueOnce(
+      new Promise((done) => { resolveName = done; })
+    );
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    renderBootstrap(store);
+    await waitFor(() => expect(store.getState().club.ready).toBe(true));
+    expect(store.getState().club.role).toBe('admin');
+    expect(store.getState().club.disabledTabs).toEqual(['payout']);
+    expect(store.getState().club.accountName).toBe(currentUser.email);
+    await act(async () => { resolveName('Linked Player'); });
+    expect(store.getState().club.accountName).toBe('Linked Player');
+  });
+
+  it('loads navigation before stale-club cleanup writes finish', async () => {
+    seedUserDoc(currentUser.uid, { clubs: ['dead-club', 'club-a'] });
+    seedClubMetaDoc('club-a', { name: 'Club A' });
+    seedMemberDoc(currentUser.uid, { role: 'admin' }, 'club-a');
+    let finishCleanup!: () => void;
+    jest.spyOn(clubService, 'removeClubFromUser').mockReturnValueOnce(
+      new Promise((done) => { finishCleanup = done; })
+    );
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    renderBootstrap(store);
+    await waitFor(() => expect(store.getState().club.ready).toBe(true));
+    expect(store.getState().club.currentClubId).toBe('club-a');
+    expect(store.getState().club.role).toBe('admin');
+    expect(store.getState().club.clubs.map((club) => club.id)).toEqual(['club-a']);
+    await act(async () => { finishCleanup(); });
+  });
+
+  it('ignores a slow linked name from a previously selected club', async () => {
+    seedUserDoc(currentUser.uid, { clubs: ['club-a', 'club-b'] });
+    for (const id of ['club-a', 'club-b']) {
+      seedClubMetaDoc(id, { name: id });
+      seedMemberDoc(currentUser.uid, { role: 'admin' }, id);
+    }
+    let resolveOldName!: (value: string) => void;
+    jest.spyOn(clubService, 'fetchMemberDisplayName')
+      .mockReturnValueOnce(new Promise((done) => { resolveOldName = done; }))
+      .mockResolvedValueOnce('Current Player');
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    renderBootstrap(store);
+    await waitFor(() => expect(store.getState().club.ready).toBe(true));
+    act(() => { store.dispatch(setCurrentClub('club-b')); });
+    await waitFor(() => expect(store.getState().club.accountName).toBe('Current Player'));
+    await act(async () => { resolveOldName('Old Player'); });
+    expect(store.getState().club.accountName).toBe('Current Player');
+  });
+
   it('resets club state and signs out when there is no user', async () => {
     const store = makeTestStore({ club: makeClubState({ currentClubId: 'stale', role: 'admin', clubs: [], signedIn: true, accountName: 'Admin' }) });
     renderBootstrap(store);

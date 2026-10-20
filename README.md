@@ -24,6 +24,8 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   Club navigation waits for the signed-in user's role and tab settings to load,
   including when accounts switch within the same club. Loading failures display
   a reload action instead of leaving a silently incomplete set of tabs.
+  Linked-player display names and stale saved-club cleanup run independently so
+  they do not delay navigation once the selected club's permissions are loaded.
 - **Auth** — Google sign-in, or email + password sign-up (with a non-blocking email
   verification reminder).
 - **Google Drive backup/restore** — admins can export/import all club data to their own
