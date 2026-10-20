@@ -234,8 +234,8 @@ otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
    [the production workflow](.github/workflows/firebase-hosting-live.yml) tests and
    deploys Gmail before publishing Hosting on every push to `main`.
    [Deploy Gmail backend (development)](.github/workflows/firebase-functions-dev.yml)
-   is manually triggered and only deploys the shared development backend; PR previews
-   do not replace it.
+   is explicitly triggered and only deploys the shared development backend; ordinary
+   PR preview runs do not replace it.
 
    1. Create the three Gmail secrets from step 3 in **each project's** Google Cloud
       Secret Manager. The console's **Create secret** action is an alternative to the
@@ -277,12 +277,17 @@ otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
         [Cloud Run functions builds](https://cloud.google.com/functions/docs/building).
       - If deployment reports a missing permission, use the named identity and
         resource in the error to resolve it; do not grant Owner or Editor as a shortcut.
-   4. Merge the workflows onto the default branch so GitHub exposes the manual
-      trigger. Open **Actions > Deploy Gmail backend (development) > Run workflow**,
-      selecting the trusted branch containing the backend version you intend to deploy.
-      This changes the shared development backend for all previews. Production
-      deployment runs automatically when the changes reach `main`, so prepare both
-      projects and all four variables before merging.
+   4. To test before merging, create the `deploy-gmail-dev` repository label and
+      apply it to a trusted, same-repository PR containing this workflow. That label
+      event tests and deploys the PR's Gmail backend to development only; fork PRs
+      cannot run this job. Later pushes do not redeploy automatically: remove and
+      reapply the label to deploy the updated PR, or rerun the desired workflow run.
+      Once the workflow reaches the default branch, you can also use **Actions >
+      Deploy Gmail backend (development) > Run workflow**, selecting the trusted
+      branch containing the intended version. Both methods change the shared
+      development backend for all previews. Production deployment runs automatically
+      when changes reach `main`, so prepare both projects and all four variables
+      before merging.
 
    The manual workflow does **not** publish the development live website or Firestore
    rules. Complete step 5 above for the stable callback and confirmation page, even

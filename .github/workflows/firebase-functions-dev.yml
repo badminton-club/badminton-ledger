@@ -2,17 +2,22 @@ name: Deploy Gmail backend (development)
 
 on:
   workflow_dispatch:
+  pull_request:
+    types: [labeled]
 
 permissions:
   contents: read
 
-concurrency:
-  group: firebase-development-gmail-deploy
-  cancel-in-progress: false
-
 jobs:
   deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.label.name == 'deploy-gmail-dev' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    concurrency:
+      group: firebase-development-gmail-deploy
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
