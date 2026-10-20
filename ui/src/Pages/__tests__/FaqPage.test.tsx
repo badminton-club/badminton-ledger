@@ -1,5 +1,5 @@
 import React from 'react';
-import { screen, waitFor } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders, makeClubState } from '../../test-utils/renderWithProviders';
 import { resetFirebaseTestState, setCurrentUser, TEST_CLUB_ID } from '../../test-utils/firebaseTestHelpers';
@@ -63,7 +63,7 @@ describe('FaqPage', () => {
     expect(requestLink.getAttribute('href')).toContain('treasurer%40gmail.com');
   });
 
-  it('submits a suggestion and saves it under the current club', async () => {
+  it('opens an encoded GitHub issue draft without saving or adding private account data', async () => {
     const user = userEvent.setup();
     setCurrentUser({ uid: 'member-1', displayName: 'Jamie Lee', email: 'jamie@example.com' });
 
@@ -72,27 +72,45 @@ describe('FaqPage', () => {
     });
 
     const textarea = screen.getByPlaceholderText('What would you like to suggest?');
-    await user.type(textarea, 'Add dark mode please');
+    const message = 'Add dark mode & contrast?\nThanks #1 + 你好';
+    await user.type(textarea, message);
 
-    const submitButton = screen.getByRole('button', { name: 'Submit suggestion' });
-    await user.click(submitButton);
-
-    expect(await screen.findByText('Thanks — your suggestion was submitted.')).toBeInTheDocument();
-    // Clears the box so a second suggestion isn't accidentally appended to it.
-    expect(textarea).toHaveValue('');
-
-    await waitFor(() => {
-      const path = __getAllPaths().find((p) => p.startsWith(`clubs/${TEST_CLUB_ID}/suggestions/`));
-      expect(path).toBeDefined();
-    });
+    const draftLink = screen.getByRole('link', { name: 'Open GitHub issue draft' });
+    const url = new URL(draftLink.getAttribute('href')!);
+    expect(url.origin + url.pathname).toBe('https://github.com/badminton-club/badminton-ledger/issues/new');
+    expect(Array.from(url.searchParams.entries())).toEqual([
+      ['title', 'App suggestion'],
+      ['body', message],
+    ]);
+    expect(draftLink).toHaveAttribute('target', '_blank');
+    expect(draftLink).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(draftLink).toHaveAttribute('aria-disabled', 'false');
+    expect(textarea).toHaveValue(message);
+    expect(screen.getByText(/GitHub issues are public/)).toBeInTheDocument();
+    expect(screen.getByText(/review the draft, and submit it there/)).toBeInTheDocument();
+    expect(screen.queryByText('Thanks — your suggestion was submitted.')).not.toBeInTheDocument();
+    expect(__getAllPaths().some((p) => p.includes('/suggestions/'))).toBe(false);
   });
 
-  it('disables the submit button until a suggestion is typed', () => {
-    setCurrentUser({ uid: 'member-1', displayName: 'Jamie Lee', email: 'jamie@example.com' });
-    renderWithProviders(<FaqPage />, {
-      preloadedState: { club: makeClubState({ currentClubId: TEST_CLUB_ID }) },
-    });
+  it('disables the issue draft link for empty or whitespace-only suggestions', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<FaqPage />);
+    const draftLink = screen.getByRole('link', { name: 'Open GitHub issue draft' });
+    expect(draftLink).toHaveAttribute('aria-disabled', 'true');
+    expect(draftLink).toHaveAttribute('tabindex', '-1');
+    await user.type(screen.getByLabelText('Your app suggestion'), '   ');
+    expect(draftLink).toHaveAttribute('aria-disabled', 'true');
+    expect(draftLink).toHaveAttribute('href', '#');
+  });
 
-    expect(screen.getByRole('button', { name: 'Submit suggestion' })).toBeDisabled();
+  it('allows app feedback without a signed-in account or a selected club', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<FaqPage />, {
+      preloadedState: { club: makeClubState({ currentClubId: null }) },
+    });
+    await user.type(screen.getByLabelText('Your app suggestion'), '  Improve help  ');
+    const draftLink = screen.getByRole('link', { name: 'Open GitHub issue draft' });
+    expect(new URL(draftLink.getAttribute('href')!).searchParams.get('body')).toBe('Improve help');
+    expect(draftLink).toHaveAttribute('aria-disabled', 'false');
   });
 });

@@ -883,6 +883,13 @@ export default function EtransfersPage() {
           )}
         </Card.Header>
         <Card.Body className="p-0">
+          {pending.length > 0 && (
+            <p className="text-muted p-3 pb-0" id="remember-mapping-access">
+              Remembering an email match also allows an account with that verified email
+              to join this club as a member and link to the selected player on sign-in.
+              Only remember email matches you trust. Name-only matches do not grant access.
+            </p>
+          )}
           {pending.length === 0 ? (
             <p className="text-muted p-3 mb-0">Nothing to review — search Gmail to find new e-Transfers.</p>
           ) : (
@@ -983,6 +990,7 @@ export default function EtransfersPage() {
                         <Form.Check
                           type="checkbox"
                           aria-label={`Remember "${imp.senderName}" → this player for future imports`}
+                          aria-describedby="remember-mapping-access"
                           checked={edit.remember}
                           onChange={(e) => updateRowEdit(imp.id, { remember: e.target.checked })}
                           disabled={batchApplying || batchPreviewing}
@@ -1161,6 +1169,10 @@ export default function EtransfersPage() {
             from their name in the app) and a player. Change the player or remove a mapping below —
             removing one just means that sender's next email will need to be matched again, either
             automatically by name or manually.
+            {' '}Saving an email mapping also lets an account with that verified email automatically
+            join this club as a member and link to the player on sign-in. Name-only mappings do not
+            grant access. Removing or changing a mapping does not revoke an existing membership or player link.
+            {' '}To revoke access and prevent rejoining, remove the email mapping as well as the membership.
           </p>
           {mappingError && <Alert variant="danger" className="mx-3 mt-3 mb-0 py-2">{mappingError}</Alert>}
           {mappings.length === 0 ? (

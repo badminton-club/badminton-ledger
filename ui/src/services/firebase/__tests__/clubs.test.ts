@@ -114,22 +114,57 @@ describe('createClub', () => {
   it('creates the club, owner membership, and updates the owner profile', async () => {
     seedUserDoc('owner-1', { clubs: ['existing-club'], lastVisitedClub: 'existing-club' });
 
-    await createClub('club-a', 'Alpha Club', 'owner-1');
+    const clubId = await createClub('Alpha Club', 'owner-1');
+    expect(clubId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 
-    expect(__getDocData('clubs/club-a')).toMatchObject({
+    expect(__getDocData(`clubs/${clubId}`)).toMatchObject({
       name: 'Alpha Club',
       ownerUid: 'owner-1',
       defaultCourtCount: 4,
       createdAt: expect.any(Timestamp),
     });
-    expect(__getDocData('clubs/club-a/members/owner-1')).toMatchObject({
+    expect(__getDocData(`clubs/${clubId}/members/owner-1`)).toMatchObject({
       role: 'superAdmin',
       addedAt: expect.any(Timestamp),
     });
     expect(__getDocData('users/owner-1')).toMatchObject({
-      clubs: ['existing-club', 'club-a'],
-      lastVisitedClub: 'club-a',
+      clubs: ['existing-club', clubId],
+      lastVisitedClub: clubId,
     });
+  });
+
+  it('creates distinct clubs with the same name without changing a legacy club', async () => {
+    seedClubMetaDoc('alpha-club', { name: 'Alpha Club', ownerUid: 'legacy-owner' });
+    const first = await createClub('Alpha Club', 'owner-1');
+    const second = await createClub('Alpha Club', 'owner-2');
+    expect(first).not.toBe(second);
+    expect(__getDocData(`clubs/${first}`)).toMatchObject({ name: 'Alpha Club', ownerUid: 'owner-1' });
+    expect(__getDocData(`clubs/${second}`)).toMatchObject({ name: 'Alpha Club', ownerUid: 'owner-2' });
+    expect(__getDocData('clubs/alpha-club')).toMatchObject({ ownerUid: 'legacy-owner' });
+  });
+
+  it('allows non-Latin names without deriving an id from them', async () => {
+    const id = await createClub('  羽毛球  ', 'owner-1');
+    expect(__getDocData(`clubs/${id}`)).toMatchObject({ name: '羽毛球' });
+  });
+
+  it('supports the existing invitation flow for a generated club id', async () => {
+    const clubId = await createClub('Invited Club', 'owner-1');
+    const invitation = await createClubInvitation(clubId, 'player@example.com', 'member', null, 'owner-1');
+    await expect(acceptClubInvitation(invitation.id, 'player-1', 'player@example.com', true))
+      .resolves.toBe(clubId);
+    expect(__getDocData(`clubs/${clubId}/members/player-1`)).toMatchObject({
+      role: 'member', acceptedInviteId: invitation.id,
+    });
+    expect(__getDocData('users/player-1')).toMatchObject({ clubs: [clubId] });
+    expect(__getDocData(`clubInvitations/${invitation.id}`)).toBeUndefined();
+  });
+
+  it('rejects an empty name before writing club data', async () => {
+    const paths = __getAllPaths();
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(createClub('  ', 'owner-1')).rejects.toThrow('Enter a club name.');
+    expect(__getAllPaths()).toEqual(paths);
   });
 });
 

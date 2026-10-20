@@ -109,7 +109,7 @@ function fromCents(cents: number): number {
 
 /** Normalizes a sender identity to the doc id used for its remembered mapping. */
 function mappingKeyFor(senderEmail: string | null, senderName: string): string {
-  if (senderEmail) return senderEmail.toLowerCase();
+  if (senderEmail) return senderEmail.trim().toLowerCase();
   return `name:${senderName.trim().toLowerCase()}`;
 }
 
@@ -248,7 +248,7 @@ export async function saveEtransferSenderMapping(
     const key = mappingKeyFor(senderEmail, senderName);
     await setDoc(doc(refs.etransferSenderMappings, key), {
       senderName,
-      senderEmail,
+      senderEmail: senderEmail?.trim().toLowerCase() ?? null,
       playerId,
       updatedAt: serverTimestamp(),
     });
@@ -664,7 +664,7 @@ export async function applyEtransferApprovalBatch(
           const senderEmail = (importData.senderEmail as string | null) ?? null;
           tx.set(doc(refs.etransferSenderMappings, mappingKeyFor(senderEmail, senderName)), {
             senderName,
-            senderEmail,
+            senderEmail: senderEmail?.trim().toLowerCase() ?? null,
             playerId: input.playerId,
             updatedAt: serverTimestamp(),
           });

@@ -7,6 +7,11 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
 
 ## Features
 
+- **App suggestions** — Help & FAQ opens a prefilled issue draft in the
+  [project repository](https://github.com/badminton-club/badminton-ledger/issues).
+  Users sign in to GitHub and review and submit the issue there. Issues are public;
+  no account or club details are added automatically. The previous club-admin suggestion
+  inbox has been removed; historical stored feedback is not deleted or published.
 - **Sessions & attendance** — a calendar for scheduling sessions, marking who attended, and
   splitting costs across players (including waitlist/paste-from-text roster entry).
   The session detail view remembers your Compact/Comfy choice in the same browser across
@@ -18,6 +23,9 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   batches and consumed per session, with usage history and charts.
 - **Multi-club support** — a user can belong to multiple clubs and switch between them; new
   clubs can be created or joined via a shareable link/id.
+  New club IDs are generated UUIDs, not user-entered values or name-derived slugs.
+  Clubs may share a display name. Existing club IDs and invitation links remain valid;
+  no existing clubs or memberships are migrated.
 - **Roles** — admins manage players, inventory, payouts, and settings; members get a
   self-serve attendance/balance view and can request profile changes or to be linked to a
   player for an admin to approve (no direct write access to sensitive data).
@@ -28,6 +36,18 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
   they do not delay navigation once the selected club's permissions are loaded.
 - **Auth** — Google sign-in, or email + password sign-up (with a non-blocking email
   verification reminder).
+  On verified sign-in (including existing accounts), an admin-saved e-Transfer email
+  mapping automatically grants member access to that club and links the matching player.
+  Email matching is case-insensitive; name-only matches and player profile emails do not
+  grant access. Existing player links and roles are preserved, and players linked to another
+  account require admin review. Email/password users must verify their address and sign in
+  again first. Matching runs independently of existing navigation loading; errors are shown
+  with a reload action. Removing a mapping does not revoke previously granted access:
+  admins must remove both the email mapping and membership to revoke access and prevent rejoining.
+  Deploy the `linkPlayerByEmail` callable in the existing Functions codebase and the
+  collection-group index in `firestore.indexes.json` before using this flow; allow the
+  index to finish building. The existing development and production deployment workflows
+  deploy both. No Gmail connection or Gmail OAuth secrets are required by this callable.
 - **Google Drive backup/restore** — admins can export/import all club data to their own
   Google Drive, reusing the same Google sign-in (no separate credentials to set up).
 - **Gmail e-Transfer import** — admins can search Gmail for Interac e-Transfer autodeposit
@@ -281,6 +301,15 @@ otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
       - Retain the existing Hosting/Firestore deployment permissions. Grant the
         deployment service account **Cloud Functions Admin**, **Cloud Run Admin**,
         and **Service Usage Consumer** in that project.
+      - Grant the deployment service account **Cloud Datastore Index Admin**
+        (`roles/datastore.indexAdmin`) in that project for the player-linking
+        collection-group index. Rules deployment permissions alone do not allow
+        updating index configuration. A 403 on
+        `collectionGroups/etransferSenderMappings/fields/senderEmail` means this
+        permission is missing; grant the role and rerun the failed workflow.
+        Configure it separately for the development and production deployment
+        accounts. Do not add `--force` to remove existing indexes absent from
+        the local index file.
       - Grant it **Service Account User** on the function's runtime and build service
         accounts, not unrelated service accounts. The default Gen 2 runtime account
         is usually `PROJECT_NUMBER-compute@developer.gserviceaccount.com`; confirm

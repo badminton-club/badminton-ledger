@@ -259,7 +259,7 @@ export interface Club {
 // clubs/{clubId}/members/{uid}
 export interface ClubMembership {
   role: ClubRole;
-  playerId?: string | null;   // the player record this user is linked to (set by an admin)
+  playerId?: string | null;   // linked by an admin, invitation, or verified email mapping
   acceptedInviteId?: string;  // invitation used to create this membership, when applicable
   addedAt?: Timestamp;
 }
