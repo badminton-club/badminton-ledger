@@ -507,8 +507,7 @@ describe('SettingsPage', () => {
     expect(__getDocData(`clubs/${TEST_CLUB_ID}/players/p1`)).toBeUndefined(); // never touched
   });
 
-  it('shows submitted suggestions and lets an admin dismiss one', async () => {
-    const user = userEvent.setup();
+  it('does not show historical suggestions or delete their stored data', async () => {
     __seedDoc(`clubs/${TEST_CLUB_ID}/suggestions/sug-1`, {
       submittedByUid: 'member-1',
       submittedByName: 'Jamie Lee',
@@ -518,16 +517,12 @@ describe('SettingsPage', () => {
 
     renderPage({ role: 'admin' });
 
-    const suggestionsCard = (await screen.findByText('Previous club suggestions')).closest('.card') as HTMLElement;
-    expect(await within(suggestionsCard).findByText('Add dark mode please')).toBeInTheDocument();
-    expect(within(suggestionsCard).getByText(/Jamie Lee/)).toBeInTheDocument();
-
-    await user.click(within(suggestionsCard).getByRole('button', { name: 'Dismiss' }));
-
-    await waitFor(() => {
-      expect(__getDocData(`clubs/${TEST_CLUB_ID}/suggestions/sug-1`)).toBeUndefined();
+    await screen.findByText('Members & player links');
+    expect(screen.queryByText('Previous club suggestions')).not.toBeInTheDocument();
+    expect(screen.queryByText('Add dark mode please')).not.toBeInTheDocument();
+    expect(__getDocData(`clubs/${TEST_CLUB_ID}/suggestions/sug-1`)).toMatchObject({
+      message: 'Add dark mode please',
     });
-    expect(within(suggestionsCard).getByText('No previous club suggestions.')).toBeInTheDocument();
   });
 
   it('refreshes the link-request list on demand', async () => {
