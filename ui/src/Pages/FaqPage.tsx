@@ -1,9 +1,5 @@
 import React, { useState } from 'react';
-import { Accordion, Alert, Button, Container, Form, Spinner } from 'react-bootstrap';
-import { auth } from '../services/firebase/client';
-import { submitSuggestion } from '../services/firebase';
-import { useAppSelector } from '../hooks';
-import { selectCurrentClubId } from '../features/club/clubSlice';
+import { Accordion, Alert, Button, Container, Form } from 'react-bootstrap';
 
 // A plain-language, one-pager explanation of the terms and concepts used
 // throughout the ledger (sessions, balances, settlement methods, etc.) for
@@ -188,12 +184,14 @@ const FAQ_SECTIONS: { question: string; answer: React.ReactNode }[] = [
 ];
 
 export default function FaqPage() {
-  const clubId = useAppSelector(selectCurrentClubId);
   const [testerEmail, setTesterEmail] = useState('');
   const [message, setMessage] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [sent, setSent] = useState(false);
+  const suggestionHref = message.trim()
+    ? `https://github.com/badminton-club/badminton-ledger/issues/new?${new URLSearchParams({
+      title: 'App suggestion',
+      body: message.trim(),
+    }).toString()}`
+    : undefined;
   const validTesterEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testerEmail.trim());
   const testerRequestHref = validTesterEmail
     ? `mailto:wedclub2026@gmail.com?subject=${encodeURIComponent('Badminton Ledger e-Transfer tester access request')}`
@@ -202,24 +200,6 @@ export default function FaqPage() {
         + 'I understand that this feature currently supports Canadian Interac e-Transfer autodeposit notifications.\n\nThank you.'
       )}`
     : undefined;
-
-  const handleSubmit = async () => {
-    if (!clubId) return;
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    setError('');
-    setSubmitting(true);
-    try {
-      const name = auth.currentUser?.displayName || auth.currentUser?.email || 'A member';
-      await submitSuggestion(clubId, uid, name, message);
-      setMessage('');
-      setSent(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to submit suggestion.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   return (
     <Container className="py-4" style={{ maxWidth: 820 }}>
@@ -296,28 +276,38 @@ export default function FaqPage() {
 
       <h3 className="mt-5 mb-2">Have a suggestion?</h3>
       <p className="text-muted mb-3">
-        Missing something, found something confusing, or have an idea for the club's ledger?
-        Let us know below — only club admins can see what's submitted here.
+        Missing something, found something confusing, or have an idea for Badminton Ledger?
+        Share app feedback with the project maintainers on GitHub, not your club admins.
       </p>
+      <Alert variant="info" id="faq-suggestion-guidance">
+        GitHub issues are public. Do not include names, email addresses, payment details,
+        or other private club information. No account or club details are added automatically.
+        You will need to sign in to GitHub, review the draft, and submit it there.
+      </Alert>
       <Form.Group controlId="faq-suggestion-message" className="mb-2">
+        <Form.Label>Your app suggestion</Form.Label>
         <Form.Control
           as="textarea"
           rows={3}
           placeholder="What would you like to suggest?"
           value={message}
-          onChange={(e) => {
-            setMessage(e.target.value);
-            setSent(false);
-            setError('');
-          }}
-          disabled={submitting}
+          onChange={(e) => setMessage(e.target.value)}
+          aria-describedby="faq-suggestion-guidance"
         />
       </Form.Group>
-      <Button onClick={handleSubmit} disabled={submitting || !message.trim()}>
-        {submitting ? <Spinner size="sm" animation="border" /> : 'Submit suggestion'}
-      </Button>
-      {sent && <Alert variant="success" className="mt-2 mb-0 py-2">Thanks — your suggestion was submitted.</Alert>}
-      {error && <Alert variant="danger" className="mt-2 mb-0 py-2">{error}</Alert>}
+      <a
+        href={suggestionHref ?? '#'}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`btn btn-primary${suggestionHref ? '' : ' disabled'}`}
+        aria-disabled={!suggestionHref}
+        tabIndex={suggestionHref ? 0 : -1}
+        onClick={(e) => {
+          if (!suggestionHref) e.preventDefault();
+        }}
+      >
+        Open GitHub issue draft
+      </a>
     </Container>
   );
 }

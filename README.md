@@ -7,6 +7,11 @@ Built for a real weekly club, running on Firebase (Auth + Firestore + Hosting).
 
 ## Features
 
+- **App suggestions** — Help & FAQ opens a prefilled issue draft in the
+  [project repository](https://github.com/badminton-club/badminton-ledger/issues).
+  Users sign in to GitHub and review and submit the issue there. Issues are public;
+  no account or club details are added automatically. Previous private club suggestions
+  remain available to club admins under Previous club suggestions; they are not published.
 - **Sessions & attendance** — a calendar for scheduling sessions, marking who attended, and
   splitting costs across players (including waitlist/paste-from-text roster entry).
   The session detail view remembers your Compact/Comfy choice in the same browser across

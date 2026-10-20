@@ -1147,7 +1147,7 @@ export default function SettingsPage() {
 
       <Card className="mt-3">
         <Card.Header className="d-flex justify-content-between align-items-center">
-          <span>Suggestions</span>
+          <span>Previous club suggestions</span>
           <Button
             size="sm"
             variant="outline-secondary"
@@ -1159,14 +1159,15 @@ export default function SettingsPage() {
         </Card.Header>
         <Card.Body>
           <Card.Text className="text-muted">
-            Feedback submitted from the Help &amp; FAQ page's suggestion box. Dismiss one once
-            you've read/addressed it.
+            Private feedback submitted before suggestions moved to GitHub. New app feedback
+            goes to the project repository from Help &amp; FAQ, not this inbox.
+            These older submissions remain private; dismiss one once you've read/addressed it.
           </Card.Text>
           {suggestionsError && <Alert variant="danger" className="py-2">{suggestionsError}</Alert>}
           {suggestionsLoading ? (
             <Spinner animation="border" size="sm" />
           ) : suggestions.length === 0 ? (
-            <p className="text-muted mb-0">No suggestions submitted yet.</p>
+            <p className="text-muted mb-0">No previous club suggestions.</p>
           ) : (
             <ListGroup variant="flush">
               {suggestions.map((s) => (

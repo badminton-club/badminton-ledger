@@ -518,7 +518,7 @@ describe('SettingsPage', () => {
 
     renderPage({ role: 'admin' });
 
-    const suggestionsCard = (await screen.findByText('Suggestions')).closest('.card') as HTMLElement;
+    const suggestionsCard = (await screen.findByText('Previous club suggestions')).closest('.card') as HTMLElement;
     expect(await within(suggestionsCard).findByText('Add dark mode please')).toBeInTheDocument();
     expect(within(suggestionsCard).getByText(/Jamie Lee/)).toBeInTheDocument();
 
@@ -527,7 +527,7 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(__getDocData(`clubs/${TEST_CLUB_ID}/suggestions/sug-1`)).toBeUndefined();
     });
-    expect(within(suggestionsCard).getByText('No suggestions submitted yet.')).toBeInTheDocument();
+    expect(within(suggestionsCard).getByText('No previous club suggestions.')).toBeInTheDocument();
   });
 
   it('refreshes the link-request list on demand', async () => {
