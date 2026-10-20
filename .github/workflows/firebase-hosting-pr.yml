@@ -12,8 +12,9 @@ jobs:
     # Skip PRs from forks — they can't access the service-account secret.
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
-    outputs:
-      preview_origin: ${{ steps.preview.outputs.details_url }}
+    concurrency:
+      group: firebase-development-gmail-deploy
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
@@ -74,16 +75,6 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           projectId: badminton-ledger
 
-  deploy_gmail:
-    needs: build_and_preview
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-latest
-    concurrency:
-      group: firebase-development-gmail-deploy
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -107,7 +98,7 @@ jobs:
         env:
           GMAIL_OAUTH_REDIRECT_URI: ${{ vars.GMAIL_OAUTH_REDIRECT_URI }}
           GMAIL_ALLOWED_ORIGINS: ${{ vars.GMAIL_ALLOWED_ORIGINS }}
-          PREVIEW_ORIGIN: ${{ needs.build_and_preview.outputs.preview_origin }}
+          PREVIEW_ORIGIN: ${{ steps.preview.outputs.details_url }}
         run: |
           test -n "$PREVIEW_ORIGIN" || { echo "::error::Hosting did not return a preview URL"; exit 1; }
           node .github/scripts/configure-gmail-development.cjs
