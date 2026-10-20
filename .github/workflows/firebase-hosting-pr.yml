@@ -24,16 +24,6 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
-      - name: Identify deployment service account
-        env:
-          SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: |
-          node -e '
-            const credentials = JSON.parse(process.env.SERVICE_ACCOUNT_JSON);
-            if (!credentials.client_email) throw new Error("Missing client_email");
-            console.log("Deployment account:", credentials.client_email);
-          '
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
