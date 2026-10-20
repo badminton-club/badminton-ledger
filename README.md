@@ -335,6 +335,9 @@ the original app cannot discover it through connection status. Complete this ste
 promptly before the short-lived authorization expires, and do not share these links.
 Then return to the Home Screen app. Check the connection or reopen the page and
 explicitly search. Do not expect iOS to automatically reopen the installed app.
+The import page uses **Scan connected Gmail** to scan explicitly. Connection
+checks and disconnect are under **Manage Gmail connection**; connecting or
+confirming access never starts a scan automatically.
 Closing/reopening it should retain the server connection when signed into the same
 account and club, without repeating Google consent on each login. This does not
 make iOS share the app's own login session with Safari. **Disconnect Gmail** removes

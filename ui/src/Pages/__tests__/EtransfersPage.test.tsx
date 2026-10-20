@@ -92,8 +92,10 @@ describe('EtransfersPage', () => {
     jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected: true });
     renderPage();
     expect(await screen.findByText('Gmail connected.')).toBeInTheDocument();
-    expect(screen.getByText(/Authorize the club Gmail account/)).toHaveTextContent('reopen the Home Screen app with the same app user and club');
-    expect(screen.getByText(/Authorize the club Gmail account/)).toHaveTextContent('Authorization never imports payments');
+    expect(screen.getByText(/Ready to scan for e-Transfers/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Connect Gmail' })).not.toBeInTheDocument();
+    expect(screen.getByText('Manage Gmail connection').closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByRole('button', { name: 'Scan connected Gmail' })).toBeInTheDocument();
     expect(searchEtransferEmails).not.toHaveBeenCalled();
     expect(startGmailConnection).not.toHaveBeenCalled();
   });
@@ -101,8 +103,10 @@ describe('EtransfersPage', () => {
   it('provides a normal user-click browser link, then checks on focus without importing', async () => {
     const user = userEvent.setup();
     renderPage();
-    await user.click(await screen.findByRole('button', { name: 'Connect Gmail', exact: true }));
+    await user.click(await screen.findByRole('button', { name: 'Connect Gmail' }));
     const link = await screen.findByRole('link', { name: 'Authorize Gmail in browser' });
+    expect(screen.queryByRole('button', { name: 'Connect Gmail' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Connecting does not scan or import payments/)).toBeInTheDocument();
     expect(link).toHaveAttribute('href', 'https://accounts.google.com/o/oauth2/v2/auth?state=example');
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
@@ -118,10 +122,11 @@ describe('EtransfersPage', () => {
     const log = jest.spyOn(console, 'error').mockImplementation(() => {});
     jest.mocked(searchEtransferEmails).mockRejectedValue(new GmailConnectionRequiredError());
     renderPage();
-    await user.click(await screen.findByRole('button', { name: 'Connect Gmail & Search' }));
+    await user.click(await screen.findByRole('button', { name: 'Scan connected Gmail' }));
     await screen.findByRole('link', { name: 'Authorize Gmail in browser' });
     expect(startGmailConnection).toHaveBeenCalledTimes(1);
     jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected: true });
+    await user.click(screen.getByText('Manage Gmail connection'));
     await user.click(screen.getByRole('button', { name: 'Check connection' }));
     await screen.findByText('Gmail connected.');
     expect(searchEtransferEmails).toHaveBeenCalledTimes(1);
@@ -138,6 +143,7 @@ describe('EtransfersPage', () => {
     fireEvent(document, new Event('visibilitychange'));
     await waitFor(() => expect(screen.queryByText('Gmail backend unavailable.')).not.toBeInTheDocument());
     jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected: true });
+    await user.click(screen.getByText('Manage Gmail connection'));
     await user.click(screen.getByRole('button', { name: 'Check connection' }));
     await screen.findByText('Gmail connected.');
     expect(searchEtransferEmails).not.toHaveBeenCalled();
@@ -148,6 +154,7 @@ describe('EtransfersPage', () => {
     jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected: true });
     renderPage();
     await screen.findByText('Gmail connected.');
+    await user.click(screen.getByText('Manage Gmail connection'));
     jest.mocked(disconnectGmail).mockRejectedValueOnce(new Error('Disconnect failed.'));
     await user.click(screen.getByRole('button', { name: 'Disconnect Gmail' }));
     await screen.findByText('Disconnect failed.');
@@ -165,7 +172,7 @@ describe('EtransfersPage', () => {
       const initialChecks = jest.mocked(getGmailConnectionStatus).mock.calls.length;
       await act(async () => { jest.advanceTimersByTime(6000); });
       expect(getGmailConnectionStatus).toHaveBeenCalledTimes(initialChecks);
-      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail', exact: true }));
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail' }));
       await act(async () => {});
       expect(screen.getByRole('link', { name: 'Authorize Gmail in browser' })).toBeInTheDocument();
       await act(async () => { jest.advanceTimersByTime(3000); });
@@ -185,10 +192,10 @@ describe('EtransfersPage', () => {
 
   it('cleans up polling and focus listeners on unmount', async () => {
     const { unmount } = renderPage();
-    await screen.findByRole('button', { name: 'Connect Gmail', exact: true });
+    await screen.findByRole('button', { name: 'Connect Gmail' });
     jest.useFakeTimers();
     try {
-      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail', exact: true }));
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail' }));
       await act(async () => {});
       expect(screen.getByRole('link', { name: 'Authorize Gmail in browser' })).toBeInTheDocument();
       const checks = jest.mocked(getGmailConnectionStatus).mock.calls.length;
@@ -205,10 +212,10 @@ describe('EtransfersPage', () => {
 
   it('expires a waiting authorization link after ten minutes and stops polling until a new connection attempt', async () => {
     const { unmount } = renderPage();
-    await screen.findByRole('button', { name: 'Connect Gmail', exact: true });
+    await screen.findByRole('button', { name: 'Connect Gmail' });
     jest.useFakeTimers();
     try {
-      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail', exact: true }));
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail' }));
       await act(async () => {});
       expect(screen.getByRole('link', { name: 'Authorize Gmail in browser' })).toBeInTheDocument();
       await act(async () => { jest.advanceTimersByTime(10 * 60 * 1000); });
@@ -217,7 +224,7 @@ describe('EtransfersPage', () => {
       const checks = jest.mocked(getGmailConnectionStatus).mock.calls.length;
       await act(async () => { jest.advanceTimersByTime(9000); });
       expect(getGmailConnectionStatus).toHaveBeenCalledTimes(checks);
-      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail', exact: true }));
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail' }));
       await act(async () => {});
       expect(screen.getByRole('link', { name: 'Authorize Gmail in browser' })).toBeInTheDocument();
       expect(screen.queryByText('Gmail authorization link expired. Connect Gmail again to get a new link.')).not.toBeInTheDocument();
@@ -230,10 +237,10 @@ describe('EtransfersPage', () => {
 
   it('stops polling and clears the browser link when changing clubs', async () => {
     const { store, unmount } = renderPage();
-    await screen.findByRole('button', { name: 'Connect Gmail', exact: true });
+    await screen.findByRole('button', { name: 'Connect Gmail' });
     jest.useFakeTimers();
     try {
-      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail', exact: true }));
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail' }));
       await act(async () => {});
       expect(screen.getByRole('link', { name: 'Authorize Gmail in browser' })).toBeInTheDocument();
       await act(async () => { store.dispatch(setCurrentClub('other-club')); });
@@ -253,6 +260,7 @@ describe('EtransfersPage', () => {
     let resolve!: (value: { connected: boolean }) => void;
     jest.mocked(getGmailConnectionStatus).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
     renderPage();
+    await user.click(await screen.findByText('Manage Gmail connection'));
     await user.click(await screen.findByRole('button', { name: 'Disconnect Gmail' }));
     await screen.findByText('Gmail not connected. Connect or reconnect to authorize access.');
     await act(async () => { resolve({ connected: true }); });
@@ -264,7 +272,7 @@ describe('EtransfersPage', () => {
     let resolve!: (value: { connected: boolean }) => void;
     jest.mocked(getGmailConnectionStatus).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
     renderPage();
-    await screen.findByRole('button', { name: 'Check connection' });
+    await screen.findByText('Manage Gmail connection');
     fireEvent(window, new Event('focus'));
     fireEvent(document, new Event('visibilitychange'));
     expect(getGmailConnectionStatus).toHaveBeenCalledTimes(1);
@@ -277,7 +285,7 @@ describe('EtransfersPage', () => {
     let resolve!: (value: { authorizationUrl: string }) => void;
     jest.mocked(startGmailConnection).mockReturnValue(new Promise((done) => { resolve = done; }));
     const { store } = renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: 'Connect Gmail', exact: true }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Gmail' }));
     await act(async () => {
       if (scope === 'club') store.dispatch(setCurrentClub('another-club'));
       else setCurrentUser({ uid: 'other-admin', displayName: 'Other', email: 'other@example.com' });
@@ -311,7 +319,7 @@ describe('EtransfersPage', () => {
     expect(screen.getByRole('spinbutton', { name: 'Ignore amounts over' })).toHaveValue(20);
     expect(screen.queryByRole('button', { name: 'Save limit' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
     await screen.findByText('No new autodeposit emails found.');
     expect(searchEtransferEmails).toHaveBeenLastCalledWith(
       ['notify@payments.interac.ca'], getDefaultEtransferSearchAfterDate(), 'label:forwarded'
@@ -328,7 +336,7 @@ describe('EtransfersPage', () => {
     jest.mocked(searchEtransferEmails).mockResolvedValue([]);
     renderPage();
     expect(await screen.findByText(/using custom gmail query/i)).toHaveTextContent('Allowed senders: notify@payments.interac.ca, forwarder@example.com');
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
     await screen.findByText('No new autodeposit emails found.');
     expect(searchEtransferEmails).toHaveBeenLastCalledWith(
       ['notify@payments.interac.ca', 'forwarder@example.com'], getDefaultEtransferSearchAfterDate(), 'label:forwarded'
@@ -344,7 +352,7 @@ describe('EtransfersPage', () => {
     expect(screen.queryByLabelText('Allowed sender addresses')).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Search window' })).toBeEnabled();
     expect(getClubMetaDocData('test-club')).not.toHaveProperty('etransferSenderAddresses');
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
     await screen.findByText('No new autodeposit emails found.');
     expect(searchEtransferEmails).toHaveBeenLastCalledWith(['bank@example.com'], getDefaultEtransferSearchAfterDate(), '');
   });
@@ -355,7 +363,7 @@ describe('EtransfersPage', () => {
     });
     renderPage();
     expect(await screen.findByText(/Enter at least one valid allowed sender/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /connect gmail & search/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /scan connected gmail/i })).toBeDisabled();
     expect(searchEtransferEmails).not.toHaveBeenCalled();
     expect(screen.getByRole('link', { name: 'Edit search defaults' })).toHaveAttribute('href', '/settings');
   });
@@ -387,7 +395,7 @@ describe('EtransfersPage', () => {
     await user.click(screen.getByRole('button', { name: 'Explain auto-settle exact amounts' }));
     expect(screen.getByText(/Turn this off to send every new payment to review/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
 
     expect(searchEtransferEmails).toHaveBeenCalledWith(['notify@payments.interac.ca'], defaultSearchDate, '');
     expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
@@ -418,7 +426,7 @@ describe('EtransfersPage', () => {
     jest.mocked(searchEtransferEmails).mockResolvedValue([parsed]);
     renderPage();
     await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
 
     const row = (await screen.findByText('BANK PAYER NAME')).closest('tr') as HTMLElement;
     expect(getClubDocData('etransferImports', 'forwarded')).toMatchObject({
@@ -451,7 +459,7 @@ describe('EtransfersPage', () => {
     jest.mocked(searchEtransferEmails).mockResolvedValue([{
       ...parsed, gmailMessageId: 'forwarded-next', gmailThreadId: 'thread-forwarded-next',
     }]);
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
     await waitFor(() => expect(getClubDocData('etransferImports', 'forwarded-next')).toMatchObject({
       senderEmail: null, status: 'pending', matchedPlayerId: 'p1', matchSource: 'mapping',
     }));
@@ -489,7 +497,7 @@ describe('EtransfersPage', () => {
 
     renderPage();
     await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
 
     expect(await screen.findByText(/1 exact payment automatically settled/i)).toBeInTheDocument();
     const autoSettledCard = screen.getByText('Auto-settled exact payments (1)').closest('.card') as HTMLElement;
@@ -534,7 +542,7 @@ describe('EtransfersPage', () => {
     renderPage();
     await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
     expect(screen.getByRole('checkbox', { name: 'Auto-settle exact amounts' })).not.toBeChecked();
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
 
     expect(await screen.findByText(/1 new, added below for review/i)).toBeInTheDocument();
     expect(getClubDocData('etransferImports', 'msg-exact-pending')).toMatchObject({
@@ -571,7 +579,7 @@ describe('EtransfersPage', () => {
 
     renderPage();
     await screen.findByText('Nothing to review — search Gmail to find new e-Transfers.');
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
 
     // $30 exactly matches owed, but exceeds the default $20 ignore-above
     // amount, so it's never picked up at all — not added for review, and
@@ -612,7 +620,7 @@ describe('EtransfersPage', () => {
     await user.clear(limitInput);
     await user.type(limitInput, '50');
     expect(screen.queryByRole('button', { name: 'Save limit' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
 
     expect(await screen.findByText(/1 exact payment automatically settled/i)).toBeInTheDocument();
     expect(getClubDocData('etransferImports', 'msg-raised-limit')).toMatchObject({ status: 'applied' });
@@ -632,7 +640,7 @@ describe('EtransfersPage', () => {
     expect(windowSelect).toHaveValue('30');
     await user.selectOptions(windowSelect, '14');
     expect(screen.queryByRole('button', { name: 'Save window' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
     expect(searchEtransferEmails).toHaveBeenLastCalledWith(
       ['notify@payments.interac.ca'],
       resolveEtransferSearchAfterDate({ etransferSearchWindowDays: 14 }),
@@ -657,7 +665,7 @@ describe('EtransfersPage', () => {
     expect(dateInput).toHaveValue('2026-09-01');
     await user.clear(dateInput);
     await user.type(dateInput, '2026-09-02');
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
     expect(searchEtransferEmails).toHaveBeenLastCalledWith(
       ['notify@payments.interac.ca'], '2026-09-02', ''
     );
@@ -869,7 +877,7 @@ describe('EtransfersPage', () => {
       referenceNumber: null,
       emailDate: new Date('2026-08-26T14:47:00.000Z'),
     }]);
-    await user.click(screen.getByRole('button', { name: /connect gmail & search/i }));
+    await user.click(screen.getByRole('button', { name: /scan connected gmail/i }));
     expect(await screen.findByText('CAI FANG WU')).toBeInTheDocument();
 
     confirmSpy.mockRestore();

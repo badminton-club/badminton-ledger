@@ -90,6 +90,7 @@ describe('AuthPage', () => {
     expect(confirmGmailConnection).toHaveBeenCalledTimes(1);
     expect(confirmGmailConnection).toHaveBeenCalledWith('browser-only-ticket', 'destination-club');
     expect(await screen.findByText(/Gmail connection confirmed/)).toHaveTextContent('No payments have been imported');
+    expect(screen.getByText(/Gmail connection confirmed/)).toHaveTextContent('select Scan connected Gmail when ready');
     expect(window.location.search).toBe('');
     expect(searchEtransferEmails).not.toHaveBeenCalled();
   });

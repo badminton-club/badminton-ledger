@@ -405,8 +405,8 @@ export default function AuthPage() {
             <Card.Title>Confirm Gmail connection</Card.Title>
             {gmailConfirmed ? (
               <Alert variant="success" className="mb-0">
-                Gmail connection confirmed. Close this tab and return to the app or reopen the Home Screen app
-                with the same app account and club. Check connection, then explicitly select Connect Gmail &amp; Search.
+                Gmail connection confirmed. Close this browser tab or sheet and return to the app.
+                With the same app account and club, select Scan connected Gmail when ready.
                 No payments have been imported.
               </Alert>
             ) : (
@@ -416,8 +416,7 @@ export default function AuthPage() {
                 </p>
                 <p>
                   Only confirm if you started this Gmail connection for this club. Do not confirm a link
-                  sent by someone else. Use the same app account that started the connection; the Gmail
-                  mailbox you authorized may be a different Google account.
+                  sent by someone else. Your Gmail inbox can differ from your app sign-in account.
                 </p>
                 {user ? (
                   <p>Confirming as app account: <strong>{user.email || user.uid}</strong></p>

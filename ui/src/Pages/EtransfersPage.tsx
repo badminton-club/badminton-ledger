@@ -664,35 +664,44 @@ export default function EtransfersPage() {
       </p>
       <Card className="mb-3">
         <Card.Body>
-          <p role="status">
+          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+          <p role="status" className="mb-0">
             {gmailConnected === true ? 'Gmail connected.' : gmailConnected === false
               ? 'Gmail not connected. Connect or reconnect to authorize access.'
               : 'Gmail connection status not confirmed.'}
-            {waitingForConnection && ' Waiting for authorization in your browser…'}
+            {waitingForConnection && ' Finish authorization and confirm the connection in your browser.'}
           </p>
-          <div className="d-flex flex-wrap gap-2 mb-2">
-            <Button variant="outline-primary" onClick={handleConnect} disabled={gmailConnected === true || connectionBusy || searching}>
+          <details>
+            <summary className="text-muted small">Manage Gmail connection</summary>
+            <div className="d-flex flex-wrap gap-2 mt-2">
+              <Button size="sm" variant="outline-secondary" onClick={() => { void checkConnection(); }} disabled={connectionBusy}>
+                Check connection
+              </Button>
+              <Button size="sm" variant="outline-danger" onClick={handleDisconnect} disabled={connectionBusy || searching}>
+                Disconnect Gmail
+              </Button>
+            </div>
+          </details>
+          </div>
+          {gmailConnected !== true && !authorizationUrl && (
+            <Button variant="primary" onClick={handleConnect} disabled={connectionBusy || searching}>
               Connect Gmail
             </Button>
-            <Button variant="outline-secondary" onClick={() => { void checkConnection(); }} disabled={connectionBusy}>
-              Check connection
-            </Button>
-            <Button variant="outline-danger" onClick={handleDisconnect} disabled={connectionBusy || searching}>
-              Disconnect Gmail
-            </Button>
-          </div>
-          {authorizationUrl && (
-            <p>
-              <a href={authorizationUrl} target="_blank" rel="noopener noreferrer">Authorize Gmail in browser</a>
-            </p>
           )}
-          <p className="text-muted small mb-0">
-            Authorize the club Gmail account in your browser, then sign in with the same app account
-            and explicitly confirm the destination club there. When complete, close that tab and return
-            here, or reopen the Home Screen app with the same app user and club. Use Check connection
-            if needed. Authorization never imports payments: review your options and select
-            Connect Gmail &amp; Search explicitly. Search options reset to club defaults after a reload.
-            To connect a different Gmail account, disconnect first.
+          {authorizationUrl && (
+            <>
+              <a className="btn btn-primary" href={authorizationUrl} target="_blank" rel="noopener noreferrer">Authorize Gmail in browser</a>
+              <ol className="small mt-3 mb-0">
+                <li>Authorize the Gmail inbox you want to scan.</li>
+                <li>Sign into Badminton Ledger with this app account and confirm the destination club.</li>
+                <li>Close the browser tab or sheet and return here. Your connection status updates automatically.</li>
+              </ol>
+            </>
+          )}
+          <p className="text-muted small mt-2 mb-0">
+            {gmailConnected === true
+              ? 'Ready to scan for e-Transfers. Review your scan options below before continuing.'
+              : 'Connect once to authorize read-only Gmail access. Connecting does not scan or import payments.'}
           </p>
           {connectionError && <Alert variant="danger" className="mt-2 mb-0">{connectionError}</Alert>}
         </Card.Body>
@@ -705,7 +714,7 @@ export default function EtransfersPage() {
               onClick={handleSearch}
               disabled={!!loadError || searching || connectionBusy || ignoreAboveAmount == null || (!customGmailQuery && !searchAfterDate)}
             >
-              {searching ? <><Spinner size="sm" animation="border" className="me-2" />Connecting to Gmail…</> : 'Connect Gmail & Search'}
+              {searching ? <><Spinner size="sm" animation="border" className="me-2" />Scanning Gmail…</> : 'Scan connected Gmail'}
             </Button>
             <div className="d-flex align-items-center gap-1">
               <Form.Check
