@@ -43,6 +43,7 @@ function harness(options = {}) {
     },
   };
   const calls = [];
+  const logs = [];
   const store = createFirestoreStore(db);
   let clock = baseTime;
   let upstream = options.fetch || (async () => reply({
@@ -50,6 +51,7 @@ function harness(options = {}) {
     token_type: 'Bearer', scope,
   }));
   const handler = createHandler({
+    logger: { error: (...args) => logs.push(args) },
     store, config: { ...config, ...options.config }, now: () => clock, timeoutMs: options.timeoutMs || 100,
     searchTimeoutMs: options.searchTimeoutMs || 1000,
     auth: { async verifyIdToken(token, revoked) {
@@ -98,7 +100,7 @@ function harness(options = {}) {
     const { state } = await begin();
     assert.equal((await confirm(await handoff(state))).statusCode, 200);
   }
-  return { docs, store, calls, request, begin, callback, handoff, confirm, connect,
+  return { docs, store, calls, logs, request, begin, callback, handoff, confirm, connect,
     tick: (ms) => { clock += ms; }, setFetch: (fn) => { upstream = fn; } };
 }
 
@@ -139,6 +141,45 @@ test('PKCE, hashed state, stable callback and single-use public OAuth completion
   assert.notEqual(record.refreshToken, 'refresh-secret');
   assert.equal(record.expiresAtMillis, baseTime + 3600000);
   assert.deepEqual((await h.request('status')).body, { connected: true });
+});
+
+test('callback configuration failures report a safe reference without logging authorization data', async () => {
+  const h = harness({ config: { encryptionKey: Buffer.alloc(4).toString('base64') } });
+  const { state } = await h.begin();
+  const response = await h.callback(state);
+  assert.equal(response.statusCode, 400);
+  assert.match(response.body, /check the token encryption key/);
+  const [message, details] = h.logs[0];
+  assert.equal(message, 'Gmail OAuth callback failed');
+  assert.equal(details.stage, 'encrypt-handoff');
+  assert.equal(details.reason, 'configuration');
+  assert.match(details.reference, /^[a-f0-9]{16}$/);
+  assert.ok(response.body.includes(details.reference));
+  assert.doesNotMatch(JSON.stringify(h.logs), new RegExp(`${state}|authorization-code|admin|club`));
+});
+
+test('expired callback failures explain retry and log only fixed diagnostic fields', async () => {
+  const h = harness();
+  const { state } = await h.begin();
+  h.tick(600000);
+  const response = await h.callback(state);
+  assert.match(response.body, /expired, was already used, was cancelled/);
+  assert.equal(h.logs[0][1].reason, 'invalid-state');
+  assert.equal(h.logs[0][1].stage, 'consume-state');
+  assert.deepEqual(Object.keys(h.logs[0][1]).sort(), ['reason', 'reference', 'stage']);
+});
+
+test('unexpected callback storage failures never expose raw errors', async () => {
+  const h = harness();
+  const { state } = await h.begin();
+  h.store.consume = async () => {
+    throw Object.assign(new Error('private-storage-message'), { code: 'private-error-code' });
+  };
+  const response = await h.callback(state);
+  assert.match(response.body, /check the function logs/);
+  assert.equal(h.logs[0][1].reason, 'internal');
+  assert.equal(h.logs[0][1].stage, 'consume-state');
+  assert.doesNotMatch(response.body + JSON.stringify(h.logs), /private-storage-message|private-error-code|authorization-code/);
 });
 
 test('OAuth expiry, malformed state, cancellation and replay do not exchange codes', async () => {

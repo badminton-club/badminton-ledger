@@ -316,6 +316,14 @@ otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
    `firebase functions:artifacts:setpolicy --location us-central1 --project PROJECT_ID`
    from an approved CLI environment before rerunning the workflow.
 
+If the callback shows **Gmail connection not completed**, use its reference to
+find the `Gmail OAuth callback failed` entry in the function's Cloud Logging logs.
+Entries contain only a random reference, a fixed processing stage, and a safe
+failure category, never authorization codes, state, tokens, or mailbox details.
+An invalid-state failure requires a fresh connection; a configuration failure
+requires checking that the token encryption secret decodes to exactly 32 bytes.
+Do not rotate an existing valid encryption key while troubleshooting.
+
 To test, launch the installed preview, connect Gmail, open its authorization link
 in the browser, select the desired inbox, and finish consent. The callback opens
 the stable site's account page. Sign into the **same Badminton Ledger account**

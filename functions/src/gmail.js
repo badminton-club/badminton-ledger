@@ -177,7 +177,7 @@ function projectPayload(payload, depth = 0) {
 
 function createHandler({
   auth, store, config, fetchImpl = fetch, now = Date.now,
-  timeoutMs = 15000, searchTimeoutMs = 48000,
+  timeoutMs = 15000, searchTimeoutMs = 48000, logger = console,
 }) {
   const allowedOrigins = new Set(config.allowedOrigins.split(',').map((s) => s.trim()).filter(Boolean));
   async function upstream(url, options = {}) {
@@ -369,34 +369,50 @@ function createHandler({
     }
   }
   async function callback(req, res) {
+    let stage = 'validate-state';
+    let reason = 'internal';
+    const reference = crypto.randomBytes(8).toString('hex');
     try {
       const { state, code, error } = req.query || {};
       if (typeof state !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(state)) throw fail(400, 'gmail/invalid-state');
+      stage = 'consume-state';
       const pending = await store.consume(hash(state), now());
       if (!pending || error || typeof code !== 'string' || !code || code.length > 4096) {
         throw fail(400, 'gmail/invalid-state');
       }
       const ticket = crypto.randomBytes(32).toString('base64url');
       const ticketHash = hash(ticket);
+      stage = 'encrypt-handoff';
       const authorization = cipher(config.encryptionKey).encrypt(
         JSON.stringify({ code, verifier: pending.verifier }),
         `${connectionId(pending.uid, pending.clubId)}:${ticketHash}`,
       );
+      stage = 'save-handoff';
       if (!await store.complete(ticketHash, {
         uid: pending.uid, clubId: pending.clubId, generation: pending.generation,
         authorization, expiresAtMillis: Math.min(pending.expiresAtMillis, now() + 5 * 60 * 1000),
       })) throw fail(400, 'gmail/invalid-state');
+      stage = 'redirect';
       const destination = new URL('/auth', config.redirectUri);
       destination.searchParams.set('gmailHandoff', ticket);
       destination.searchParams.set('gmailClub', pending.clubId);
       res.set('Referrer-Policy', 'no-referrer');
       res.set('Location', destination.toString());
       return res.status(303).send('');
-    } catch { /* Never expose authorization codes, state, or upstream errors. */ }
+    } catch (error) {
+      if (error?.code === 'gmail/invalid-state') reason = 'invalid-state';
+      if (error?.code === 'gmail/configuration') reason = 'configuration';
+      logger.error('Gmail OAuth callback failed', { reference, stage, reason });
+    }
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
     res.set('Referrer-Policy', 'no-referrer');
-    res.status(400).send('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Gmail connection</title><body><h1>Gmail connection not completed</h1><p>Return to your Home Screen app. You can try connecting again there.</p></body></html>');
+    const message = reason === 'configuration'
+      ? 'The Gmail backend configuration is invalid. Ask an administrator to check the token encryption key.'
+      : reason === 'invalid-state'
+        ? 'This authorization attempt expired, was already used, was cancelled, or is no longer valid. Start a new connection from the app and complete consent promptly.'
+        : 'The backend could not finish this connection. Ask an administrator to check the function logs using the reference below.';
+    res.status(400).send(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Gmail connection</title><body><h1>Gmail connection not completed</h1><p>${message}</p><p>Reference: ${reference}</p><p>Return to your Home Screen app. You can try connecting again there.</p></body></html>`);
   }
   return async (req, res) => {
     res.set('Cache-Control', 'no-store');
