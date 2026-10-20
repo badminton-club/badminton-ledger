@@ -27,16 +27,6 @@ jobs:
           cache: npm
           cache-dependency-path: functions/package-lock.json
 
-      - name: Configure Gmail backend
-        env:
-          GMAIL_OAUTH_REDIRECT_URI: ${{ vars.GMAIL_OAUTH_REDIRECT_URI }}
-          GMAIL_ALLOWED_ORIGINS: ${{ vars.GMAIL_ALLOWED_ORIGINS }}
-        run: |
-          test -n "$GMAIL_OAUTH_REDIRECT_URI" || { echo "::error::Set the GMAIL_OAUTH_REDIRECT_URI repository variable"; exit 1; }
-          test -n "$GMAIL_ALLOWED_ORIGINS" || { echo "::error::Set the GMAIL_ALLOWED_ORIGINS repository variable"; exit 1; }
-          printf 'GMAIL_OAUTH_REDIRECT_URI=%s\nGMAIL_ALLOWED_ORIGINS=%s\n' \
-            "$GMAIL_OAUTH_REDIRECT_URI" "$GMAIL_ALLOWED_ORIGINS" > functions/.env.badminton-ledger
-
       - name: Install backend dependencies
         working-directory: functions
         run: npm ci
@@ -49,6 +39,12 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Preserve registered preview origins
+        env:
+          GMAIL_OAUTH_REDIRECT_URI: ${{ vars.GMAIL_OAUTH_REDIRECT_URI }}
+          GMAIL_ALLOWED_ORIGINS: ${{ vars.GMAIL_ALLOWED_ORIGINS }}
+        run: node .github/scripts/configure-gmail-development.cjs
 
       - name: Deploy Gmail backend
         run: npx --yes firebase-tools@15.28.1 deploy --only functions:gmail --project badminton-ledger --non-interactive

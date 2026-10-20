@@ -12,6 +12,8 @@ jobs:
     # Skip PRs from forks — they can't access the service-account secret.
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
+    outputs:
+      preview_origin: ${{ steps.preview.outputs.details_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -65,8 +67,50 @@ jobs:
         run: npx --yes firebase-tools@15.28.1 deploy --only firestore:rules --project badminton-ledger --non-interactive
 
       - name: Deploy preview channel
+        id: preview
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           projectId: badminton-ledger
+
+  deploy_gmail:
+    needs: build_and_preview
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: firebase-development-gmail-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: functions
+        run: npm ci
+
+      - name: Test Gmail backend
+        working-directory: functions
+        run: npm test
+
+      - name: Authenticate Firebase deployment
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Register exact preview origin
+        env:
+          GMAIL_OAUTH_REDIRECT_URI: ${{ vars.GMAIL_OAUTH_REDIRECT_URI }}
+          GMAIL_ALLOWED_ORIGINS: ${{ vars.GMAIL_ALLOWED_ORIGINS }}
+          PREVIEW_ORIGIN: ${{ needs.build_and_preview.outputs.preview_origin }}
+        run: |
+          test -n "$PREVIEW_ORIGIN" || { echo "::error::Hosting did not return a preview URL"; exit 1; }
+          node .github/scripts/configure-gmail-development.cjs
+
+      - name: Deploy Gmail backend
+        run: npx --yes firebase-tools@15.28.1 deploy --only functions:gmail --project badminton-ledger --non-interactive

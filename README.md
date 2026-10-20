@@ -147,7 +147,8 @@ Two GitHub Actions workflows deploy Hosting and the matching Firestore rules:
 
 Gmail now requires the `gmailApi` Cloud Function (Node.js 22) and a Blaze-enabled
 Firebase project. The production workflow deploys Functions before Hosting;
-development Functions deploy through a separate manual workflow. Neither creates
+development Functions deploy automatically after trusted PR previews, or through
+a separate explicit deployment workflow. Neither creates
 Gmail secrets. Complete the backend setup below before deploying the UI/preview;
 otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
 `badminton-ledger` (development) and `badminton-ledger-prod` (production).
@@ -234,8 +235,9 @@ otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
    [the production workflow](.github/workflows/firebase-hosting-live.yml) tests and
    deploys Gmail before publishing Hosting on every push to `main`.
    [Deploy Gmail backend (development)](.github/workflows/firebase-functions-dev.yml)
-   is explicitly triggered and only deploys the shared development backend; ordinary
-   PR preview runs do not replace it.
+   also supports explicit deployments of the shared development backend. Trusted,
+   same-repository PR previews automatically register their exact deployed origin
+   and deploy the Gmail backend after Hosting succeeds. Fork PRs remain excluded.
 
    1. Create the three Gmail secrets from step 3 in **each project's** Google Cloud
       Secret Manager. The console's **Create secret** action is an alternative to the
@@ -251,11 +253,18 @@ otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
       | `PROD_GMAIL_OAUTH_REDIRECT_URI` | `https://badminton-ledger-prod.web.app/api/gmail/callback` |
       | `PROD_GMAIL_ALLOWED_ORIGINS` | `https://badminton-ledger-prod.web.app` |
 
-      Append trusted preview origins to the development allowlist, comma-separated,
-      with no trailing slashes. Append any trusted production custom-domain origins
-      to the production allowlist. Changes take effect on the next backend deployment.
+      Keep the development variable as the trusted base-origin list; PR preview
+      URLs are registered automatically, without wildcards or GitHub variable writes.
+      Append trusted custom-domain origins as needed, comma-separated, with no
+      trailing slashes. Changes take effect on the next backend deployment.
       The workflows create the ignored backend environment files on the runner; local
       environment files are not uploaded to GitHub.
+      Before each development deployment, the configuration script reads the current
+      function configuration and Hosting channels. It retains previously registered
+      previews only while their channels exist and have not expired, then adds the
+      current preview's exact URL returned by the Hosting action. Other channels are
+      not automatically trusted. Base origins remain explicitly trusted. Expired
+      previews are pruned on the next deployment, not by a scheduled job.
    3. The workflows reuse the existing `FIREBASE_SERVICE_ACCOUNT` and
       `PROD_FIREBASE_SERVICE_ACCOUNT` GitHub secrets. In each matching Google Cloud
       project, an administrator must prepare the deployment identity:
@@ -277,15 +286,19 @@ otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
         [Cloud Run functions builds](https://cloud.google.com/functions/docs/building).
       - If deployment reports a missing permission, use the named identity and
         resource in the error to resolve it; do not grant Owner or Editor as a shortcut.
-   4. To test before merging, create the `deploy-gmail-dev` repository label and
-      apply it to a trusted, same-repository PR containing this workflow. That label
-      event tests and deploys the PR's Gmail backend to development only; fork PRs
-      cannot run this job. Later pushes do not redeploy automatically: remove and
-      reapply the label to deploy the updated PR, or rerun the desired workflow run.
+   4. Push a trusted same-repository PR containing the workflows to build its preview,
+      register the preview URL, and deploy the development Gmail backend automatically.
+      These deployments replace the shared development backend for all previews;
+      they are serialized with manual development deployments to avoid conflicting
+      allowlist updates. Preview deployment and backend deployment must both finish
+      successfully before testing Gmail.
+      For a backend-only redeployment before merging, apply the `deploy-gmail-dev`
+      repository label to the trusted PR. Remove and reapply it to deploy again,
+      or rerun the desired workflow run.
       Once the workflow reaches the default branch, you can also use **Actions >
       Deploy Gmail backend (development) > Run workflow**, selecting the trusted
-      branch containing the intended version. Both methods change the shared
-      development backend for all previews. Production deployment runs automatically
+      branch containing the intended version. Explicit deployments preserve active,
+      previously registered preview origins. Production deployment runs automatically
       when changes reach `main`, so prepare both projects and all four variables
       before merging.
 
