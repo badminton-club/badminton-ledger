@@ -146,8 +146,9 @@ Two GitHub Actions workflows deploy Hosting and the matching Firestore rules:
 ### Gmail backend setup
 
 Gmail now requires the `gmailApi` Cloud Function (Node.js 22) and a Blaze-enabled
-Firebase project. The Hosting workflows do **not** deploy Functions or configure
-secrets. Complete the backend deployment below before deploying the UI/preview;
+Firebase project. The production workflow deploys Functions before Hosting;
+development Functions deploy through a separate manual workflow. Neither creates
+Gmail secrets. Complete the backend setup below before deploying the UI/preview;
 otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
 `badminton-ledger` (development) and `badminton-ledger-prod` (production).
 
@@ -225,7 +226,71 @@ otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
    even when you test a PR preview.
    Then rerun the PR preview deployment. Repeat the setup with the production
    client, secrets, callback, and origins using `--project badminton-ledger-prod`
-   before releasing to production.
+      before releasing to production.
+
+   #### Deploying the Gmail backend with GitHub Actions
+
+   Use Actions if local dependency installation is unavailable. Once configured,
+   [the production workflow](.github/workflows/firebase-hosting-live.yml) tests and
+   deploys Gmail before publishing Hosting on every push to `main`.
+   [Deploy Gmail backend (development)](.github/workflows/firebase-functions-dev.yml)
+   is manually triggered and only deploys the shared development backend; PR previews
+   do not replace it.
+
+   1. Create the three Gmail secrets from step 3 in **each project's** Google Cloud
+      Secret Manager. The console's **Create secret** action is an alternative to the
+      CLI. Use separate OAuth clients and encryption keys for development and production.
+      Keep the secrets out of GitHub and frontend configuration.
+   2. In GitHub, open **Settings > Secrets and variables > Actions > Variables**
+      and create these **repository variables**:
+
+      | Variable | Value |
+      | --- | --- |
+      | `GMAIL_OAUTH_REDIRECT_URI` | `https://badminton-ledger.web.app/api/gmail/callback` |
+      | `GMAIL_ALLOWED_ORIGINS` | `https://badminton-ledger.web.app` |
+      | `PROD_GMAIL_OAUTH_REDIRECT_URI` | `https://badminton-ledger-prod.web.app/api/gmail/callback` |
+      | `PROD_GMAIL_ALLOWED_ORIGINS` | `https://badminton-ledger-prod.web.app` |
+
+      Append trusted preview origins to the development allowlist, comma-separated,
+      with no trailing slashes. Append any trusted production custom-domain origins
+      to the production allowlist. Changes take effect on the next backend deployment.
+      The workflows create the ignored backend environment files on the runner; local
+      environment files are not uploaded to GitHub.
+   3. The workflows reuse the existing `FIREBASE_SERVICE_ACCOUNT` and
+      `PROD_FIREBASE_SERVICE_ACCOUNT` GitHub secrets. In each matching Google Cloud
+      project, an administrator must prepare the deployment identity:
+      - Enable Cloud Functions, Cloud Build, Artifact Registry, Cloud Run Admin, and
+        Secret Manager APIs, and ensure Firebase's Blaze billing is enabled.
+      - Retain the existing Hosting/Firestore deployment permissions. Grant the
+        deployment service account **Cloud Functions Admin**, **Cloud Run Admin**,
+        and **Service Usage Consumer** in that project.
+      - Grant it **Service Account User** on the function's runtime and build service
+        accounts, not unrelated service accounts. The default Gen 2 runtime account
+        is usually `PROJECT_NUMBER-compute@developer.gserviceaccount.com`; confirm
+        the build identity in Cloud Build settings.
+      - On each of the three Gmail secrets, grant the deployment identity
+        **Secret Manager Viewer** and the runtime identity **Secret Manager Secret
+        Accessor**. Pre-grant runtime access so CI does not need to change secret IAM.
+      - Ensure the runtime identity has **Cloud Datastore User** and **Firebase
+        Authentication Viewer** for Firestore access and revoked-token checks.
+        Ensure the configured build identity has the permissions required by
+        [Cloud Run functions builds](https://cloud.google.com/functions/docs/building).
+      - If deployment reports a missing permission, use the named identity and
+        resource in the error to resolve it; do not grant Owner or Editor as a shortcut.
+   4. Merge the workflows onto the default branch so GitHub exposes the manual
+      trigger. Open **Actions > Deploy Gmail backend (development) > Run workflow**,
+      selecting the trusted branch containing the backend version you intend to deploy.
+      This changes the shared development backend for all previews. Production
+      deployment runs automatically when the changes reach `main`, so prepare both
+      projects and all four variables before merging.
+
+   The manual workflow does **not** publish the development live website or Firestore
+   rules. Complete step 5 above for the stable callback and confirmation page, even
+   when using a PR preview, and enable the OAuth-state TTL described in step 4.
+   If first deployment requests an Artifact Registry cleanup policy, a project
+   administrator can configure it with
+   `firebase functions:artifacts:setpolicy --location us-central1 --project PROJECT_ID`
+   from an approved CLI environment before rerunning the workflow.
 
 To test, launch the installed preview, connect Gmail, open its authorization link
 in the browser, select the desired inbox, and finish consent. The callback opens
