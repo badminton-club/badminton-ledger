@@ -338,6 +338,8 @@ explicitly search. Do not expect iOS to automatically reopen the installed app.
 The import page uses **Scan connected Gmail** to scan explicitly. Connection
 checks and disconnect are under **Manage Gmail connection**; connecting or
 confirming access never starts a scan automatically.
+Manual connection checks show progress and an explicit connected/disconnected
+result even when the connection status has not changed; they do not scan Gmail.
 Closing/reopening it should retain the server connection when signed into the same
 account and club, without repeating Google consent on each login. This does not
 make iOS share the app's own login session with Safari. **Disconnect Gmail** removes

@@ -92,6 +92,8 @@ export default function EtransfersPage() {
   const [authorizationUrl, setAuthorizationUrl] = useState('');
   const [waitingForConnection, setWaitingForConnection] = useState(false);
   const [connectionBusy, setConnectionBusy] = useState(false);
+  const [checkingConnection, setCheckingConnection] = useState(false);
+  const [connectionCheckMessage, setConnectionCheckMessage] = useState('');
   const connectionGeneration = useRef(0);
   const statusRequest = useRef(0);
   const pendingStatus = useRef<number | null>(null);
@@ -109,16 +111,25 @@ export default function EtransfersPage() {
     && auth.currentUser?.uid === uid
   ), [clubId, uid]);
 
-  const checkConnection = useCallback(async () => {
+  const checkConnection = useCallback(async (showFeedback = false) => {
     if (!isAdmin || !clubId || !uid || connectionAction.current || pendingStatus.current !== null) return;
     const generation = connectionGeneration.current;
     const request = ++statusRequest.current;
     pendingStatus.current = request;
+    setCheckingConnection(true);
+    if (showFeedback) setConnectionCheckMessage('');
     try {
       const status = await getGmailConnectionStatus();
       if (!isCurrentConnection(generation) || request !== statusRequest.current) return;
       setGmailConnected(status.connected);
       setConnectionError('');
+      if (showFeedback) {
+        setConnectionCheckMessage(status.connected
+          ? 'Connection checked: Gmail is connected. You can scan when ready.'
+          : 'Connection checked: Gmail is not connected. Finish browser authorization and confirm the club, or start a new connection.');
+      } else {
+        setConnectionCheckMessage('');
+      }
       if (status.connected) {
         setWaitingForConnection(false);
         setAuthorizationUrl('');
@@ -127,9 +138,13 @@ export default function EtransfersPage() {
       if (!isCurrentConnection(generation) || request !== statusRequest.current) return;
       setGmailConnected(err instanceof GmailConnectionRequiredError ? false : null);
       setConnectionError(err instanceof Error ? err.message : 'Unable to check Gmail connection.');
+      setConnectionCheckMessage('');
       setWaitingForConnection(false);
     } finally {
-      if (pendingStatus.current === request) pendingStatus.current = null;
+      if (pendingStatus.current === request) {
+        pendingStatus.current = null;
+        setCheckingConnection(false);
+      }
     }
   }, [isAdmin, clubId, uid, isCurrentConnection]);
 
@@ -143,6 +158,8 @@ export default function EtransfersPage() {
     setAuthorizationUrl('');
     setWaitingForConnection(false);
     setConnectionBusy(false);
+    setCheckingConnection(false);
+    setConnectionCheckMessage('');
     setSearching(false);
     setSearchError('');
     setSearchMessage('');
@@ -168,6 +185,8 @@ export default function EtransfersPage() {
       if (!isCurrentConnection(generation)) return;
       statusRequest.current += 1;
       pendingStatus.current = null;
+      setCheckingConnection(false);
+      setConnectionCheckMessage('');
       setWaitingForConnection(false);
       setAuthorizationUrl('');
       setConnectionError('Gmail authorization link expired. Connect Gmail again to get a new link.');
@@ -185,6 +204,8 @@ export default function EtransfersPage() {
     statusRequest.current += 1;
     pendingStatus.current = null;
     setConnectionBusy(true);
+    setCheckingConnection(false);
+    setConnectionCheckMessage('');
     setConnectionError('');
     setAuthorizationUrl('');
     setWaitingForConnection(false);
@@ -212,6 +233,8 @@ export default function EtransfersPage() {
     statusRequest.current += 1;
     pendingStatus.current = null;
     setConnectionBusy(true);
+    setCheckingConnection(false);
+    setConnectionCheckMessage('');
     setWaitingForConnection(false);
     setAuthorizationUrl('');
     setConnectionError('');
@@ -674,8 +697,8 @@ export default function EtransfersPage() {
           <details>
             <summary className="text-muted small">Manage Gmail connection</summary>
             <div className="d-flex flex-wrap gap-2 mt-2">
-              <Button size="sm" variant="outline-secondary" onClick={() => { void checkConnection(); }} disabled={connectionBusy}>
-                Check connection
+              <Button size="sm" variant="outline-secondary" onClick={() => { void checkConnection(true); }} disabled={connectionBusy || checkingConnection} aria-busy={checkingConnection}>
+                {checkingConnection ? <><Spinner size="sm" animation="border" className="me-2" />Checking connection…</> : 'Check connection'}
               </Button>
               <Button size="sm" variant="outline-danger" onClick={handleDisconnect} disabled={connectionBusy || searching}>
                 Disconnect Gmail
@@ -704,6 +727,11 @@ export default function EtransfersPage() {
               : 'Connect once to authorize read-only Gmail access. Connecting does not scan or import payments.'}
           </p>
           {connectionError && <Alert variant="danger" className="mt-2 mb-0">{connectionError}</Alert>}
+          {connectionCheckMessage && (
+            <Alert variant={gmailConnected ? 'success' : 'info'} role="status" className="mt-2 mb-0">
+              {connectionCheckMessage}
+            </Alert>
+          )}
         </Card.Body>
       </Card>
 

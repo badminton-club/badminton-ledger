@@ -164,6 +164,46 @@ describe('EtransfersPage', () => {
     expect(searchEtransferEmails).not.toHaveBeenCalled();
   });
 
+  it.each([true, false])('shows progress and a result when a manual check leaves connected=%s unchanged', async (connected) => {
+    const user = userEvent.setup();
+    jest.mocked(getGmailConnectionStatus).mockResolvedValue({ connected });
+    renderPage();
+    await screen.findByText(connected
+      ? 'Gmail connected.'
+      : 'Gmail not connected. Connect or reconnect to authorize access.');
+    await user.click(screen.getByText('Manage Gmail connection'));
+    let resolve!: (value: { connected: boolean }) => void;
+    jest.mocked(getGmailConnectionStatus).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    const checks = jest.mocked(getGmailConnectionStatus).mock.calls.length;
+    await user.click(screen.getByRole('button', { name: 'Check connection' }));
+    const checking = screen.getByRole('button', { name: 'Checking connection…' });
+    expect(checking).toBeDisabled();
+    expect(checking).toHaveAttribute('aria-busy', 'true');
+    await user.click(checking);
+    expect(getGmailConnectionStatus).toHaveBeenCalledTimes(checks + 1);
+    await act(async () => { resolve({ connected }); });
+    expect(await screen.findByText(connected
+      ? 'Connection checked: Gmail is connected. You can scan when ready.'
+      : 'Connection checked: Gmail is not connected. Finish browser authorization and confirm the club, or start a new connection.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check connection' })).toBeEnabled();
+    expect(searchEtransferEmails).not.toHaveBeenCalled();
+    expect(startGmailConnection).not.toHaveBeenCalled();
+  });
+
+  it('shows manual check errors and clears progress so the user can retry', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Gmail not connected. Connect or reconnect to authorize access.');
+    await user.click(screen.getByText('Manage Gmail connection'));
+    jest.mocked(getGmailConnectionStatus).mockRejectedValueOnce(new Error('Status check failed.'));
+    await user.click(screen.getByRole('button', { name: 'Check connection' }));
+    expect(await screen.findByText('Status check failed.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check connection' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Check connection' }));
+    expect(await screen.findByText(/Connection checked: Gmail is not connected/)).toBeInTheDocument();
+    expect(screen.queryByText('Status check failed.')).not.toBeInTheDocument();
+  });
+
   it('polls only during an explicit connection attempt and stops after success', async () => {
     const { unmount } = renderPage();
     await screen.findByText('Gmail not connected. Connect or reconnect to authorize access.');
