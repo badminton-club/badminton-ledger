@@ -301,6 +301,15 @@ otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
       - Retain the existing Hosting/Firestore deployment permissions. Grant the
         deployment service account **Cloud Functions Admin**, **Cloud Run Admin**,
         and **Service Usage Consumer** in that project.
+      - Grant the deployment service account **Cloud Datastore Index Admin**
+        (`roles/datastore.indexAdmin`) in that project for the player-linking
+        collection-group index. Rules deployment permissions alone do not allow
+        updating index configuration. A 403 on
+        `collectionGroups/etransferSenderMappings/fields/senderEmail` means this
+        permission is missing; grant the role and rerun the failed workflow.
+        Configure it separately for the development and production deployment
+        accounts. Do not add `--force` to remove existing indexes absent from
+        the local index file.
       - Grant it **Service Account User** on the function's runtime and build service
         accounts, not unrelated service accounts. The default Gen 2 runtime account
         is usually `PROJECT_NUMBER-compute@developer.gserviceaccount.com`; confirm
