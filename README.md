@@ -237,7 +237,10 @@ otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
    [Deploy Gmail backend (development)](.github/workflows/firebase-functions-dev.yml)
    also supports explicit deployments of the shared development backend. Trusted,
    same-repository PR previews automatically register their exact deployed origin
-   and deploy the Gmail backend after Hosting succeeds. Fork PRs remain excluded.
+   and deploy the Gmail backend after preview Hosting succeeds. They then publish
+   the same development UI build to the stable `badminton-ledger.web.app` site so
+   the OAuth callback has the current confirmation page and API rewrite. Fork PRs
+   remain excluded. Production Hosting is not changed by this workflow.
 
    1. Create the three Gmail secrets from step 3 in **each project's** Google Cloud
       Secret Manager. The console's **Create secret** action is an alternative to the
@@ -289,9 +292,12 @@ otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
    4. Push a trusted same-repository PR containing the workflows to build its preview,
       register the preview URL, and deploy the development Gmail backend automatically.
       These deployments replace the shared development backend for all previews;
-      they are serialized with manual development deployments to avoid conflicting
-      allowlist updates. Preview deployment and backend deployment must both finish
-      successfully before testing Gmail.
+      they also replace the stable development website with the trusted PR's build.
+      The build rejects non-development Firebase project/auth-domain settings to
+      prevent the stable callback from attempting production sign-in.
+      Deployments are serialized with manual development deployments to avoid conflicting
+      allowlist updates. Preview, backend, and stable callback website deployments
+      must all finish successfully before testing Gmail.
       For a backend-only redeployment before merging, apply the `deploy-gmail-dev`
       repository label to the trusted PR. Remove and reapply it to deploy again,
       or rerun the desired workflow run.
@@ -303,8 +309,8 @@ otherwise `/api/gmail/*` requests will not work. Repeat setup separately for
       before merging.
 
    The manual workflow does **not** publish the development live website or Firestore
-   rules. Complete step 5 above for the stable callback and confirmation page, even
-   when using a PR preview, and enable the OAuth-state TTL described in step 4.
+   rules. Run the full PR workflow (or complete step 5 above) for the stable callback
+   and confirmation page, and enable the OAuth-state TTL described in step 4.
    If first deployment requests an Artifact Registry cleanup policy, a project
    administrator can configure it with
    `firebase functions:artifacts:setpolicy --location us-central1 --project PROJECT_ID`

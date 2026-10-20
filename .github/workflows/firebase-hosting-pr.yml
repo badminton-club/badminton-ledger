@@ -54,7 +54,16 @@ jobs:
           REACT_APP_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.REACT_APP_FIREBASE_MESSAGING_SENDER_ID }}
           REACT_APP_FIREBASE_APP_ID: ${{ secrets.REACT_APP_FIREBASE_APP_ID }}
           REACT_APP_FIREBASE_MEASUREMENT_ID: ${{ secrets.REACT_APP_FIREBASE_MEASUREMENT_ID }}
-        run: npm run build
+        run: |
+          node -e '
+            if (process.env.REACT_APP_FIREBASE_PROJECT_ID !== "badminton-ledger") {
+              throw new Error("Development builds must use the badminton-ledger Firebase project");
+            }
+            if (process.env.REACT_APP_FIREBASE_AUTH_DOMAIN !== "badminton-ledger.firebaseapp.com") {
+              throw new Error("Set REACT_APP_FIREBASE_AUTH_DOMAIN to badminton-ledger.firebaseapp.com");
+            }
+          '
+          npm run build
 
       - name: Validate Firestore rules
         run: npx --yes firebase-tools@15.28.1 emulators:exec --only firestore --project demo-badminton-ledger "true"
@@ -105,3 +114,6 @@ jobs:
 
       - name: Deploy Gmail backend
         run: npx --yes firebase-tools@15.28.1 deploy --only functions:gmail --project badminton-ledger --non-interactive
+
+      - name: Deploy stable development callback website
+        run: npx --yes firebase-tools@15.28.1 deploy --only hosting --project badminton-ledger --non-interactive
