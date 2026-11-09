@@ -46,5 +46,8 @@ jobs:
           GMAIL_ALLOWED_ORIGINS: ${{ vars.GMAIL_ALLOWED_ORIGINS }}
         run: node .github/scripts/configure-gmail-development.cjs
 
+      - name: Deploy player linking index
+        run: npx --yes firebase-tools@15.28.1 deploy --only firestore:indexes --project badminton-ledger --non-interactive
+
       - name: Deploy Gmail backend
         run: npx --yes firebase-tools@15.28.1 deploy --only functions:gmail --project badminton-ledger --non-interactive

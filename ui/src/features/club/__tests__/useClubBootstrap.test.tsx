@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { useClubBootstrap } from '../useClubBootstrap';
 import { makeClubState, makeTestStore } from '../../../test-utils/renderWithProviders';
 import * as clubService from '../../../services/firebase/clubs';
+import * as playerLinking from '../../../services/firebase/playerLinking';
 import { setCurrentClub } from '../clubSlice';
 import {
   resetFirebaseTestState,
@@ -29,6 +30,7 @@ beforeEach(() => {
   jest.restoreAllMocks();
   resetFirebaseTestState();
   localStorage.clear();
+  jest.spyOn(playerLinking, 'autoLinkPlayerByEmail').mockResolvedValue({ linked: 0, conflicts: 0 });
 });
 
 function renderBootstrap(store: ReturnType<typeof makeTestStore>, route = '/') {
@@ -42,6 +44,97 @@ function renderBootstrap(store: ReturnType<typeof makeTestStore>, route = '/') {
 }
 
 describe('useClubBootstrap', () => {
+  it('finds a new account’s matching club and player after verified sign-in', async () => {
+    jest.mocked(playerLinking.autoLinkPlayerByEmail).mockImplementationOnce(async () => {
+      seedUserDoc(currentUser.uid, { clubs: ['club-a'] });
+      seedClubMetaDoc('club-a', { name: 'Matched Club' });
+      seedMemberDoc(currentUser.uid, { role: 'member', playerId: 'player-a' }, 'club-a');
+      __seedDoc('clubs/club-a/players/player-a', { firstName: 'Matched', lastName: 'Player' });
+      return { linked: 1, conflicts: 0 };
+    });
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    renderBootstrap(store);
+    await waitFor(() => expect(store.getState().club.currentClubId).toBe('club-a'));
+    await waitFor(() => expect(store.getState().club.accountName).toBe('Matched Player'));
+    expect(store.getState().club.role).toBe('member');
+    expect(store.getState().club.clubs[0].name).toBe('Matched Club');
+    expect(playerLinking.autoLinkPlayerByEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not delay existing navigation while the matching service is slow', async () => {
+    let finish!: (value: playerLinking.PlayerLinkResult) => void;
+    jest.mocked(playerLinking.autoLinkPlayerByEmail).mockReturnValueOnce(
+      new Promise((resolve) => { finish = resolve; })
+    );
+    seedUserDoc(currentUser.uid, { clubs: ['club-a'] });
+    seedClubMetaDoc('club-a', { name: 'Club A' });
+    seedMemberDoc(currentUser.uid, { role: 'admin' }, 'club-a');
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    renderBootstrap(store);
+    await waitFor(() => expect(store.getState().club.ready).toBe(true));
+    expect(store.getState().club.role).toBe('admin');
+    await act(async () => { finish({ linked: 0, conflicts: 0 }); });
+  });
+
+  it('never attempts automatic linking with an unverified email', async () => {
+    const store = makeTestStore();
+    setCurrentUser({ ...currentUser, emailVerified: false });
+    renderBootstrap(store);
+    await waitFor(() => expect(store.getState().club.ready).toBe(true));
+    expect(playerLinking.autoLinkPlayerByEmail).not.toHaveBeenCalled();
+  });
+
+  it('surfaces matching failures without blocking existing club navigation', async () => {
+    jest.mocked(playerLinking.autoLinkPlayerByEmail).mockRejectedValueOnce(new Error('Unavailable'));
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    seedUserDoc(currentUser.uid, { clubs: ['club-a'] });
+    seedClubMetaDoc('club-a', { name: 'Club A' });
+    seedMemberDoc(currentUser.uid, { role: 'admin' }, 'club-a');
+    setCurrentUser(currentUser);
+    const store = makeTestStore();
+    const { result } = renderBootstrap(store);
+    await waitFor(() => expect(result.current).toContain('Automatic player linking failed'));
+    expect(store.getState().club.ready).toBe(true);
+    expect(store.getState().club.role).toBe('admin');
+    expect(log).toHaveBeenCalled();
+  });
+
+  it('keeps conflicts visible even when a successful match reloads club permissions', async () => {
+    jest.mocked(playerLinking.autoLinkPlayerByEmail).mockImplementationOnce(async () => {
+      seedUserDoc(currentUser.uid, { clubs: ['club-a'] });
+      seedClubMetaDoc('club-a', { name: 'Club A' });
+      seedMemberDoc(currentUser.uid, { role: 'member', playerId: 'p1' }, 'club-a');
+      return { linked: 1, conflicts: 1 };
+    });
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    const { result } = renderBootstrap(store);
+    await waitFor(() => expect(store.getState().club.currentClubId).toBe('club-a'));
+    await waitFor(() => expect(store.getState().club.ready).toBe(true));
+    expect(result.current).toContain('Ask your club admin');
+  });
+
+  it('ignores matching results from a previous account after switching users', async () => {
+    let finish!: (value: playerLinking.PlayerLinkResult) => void;
+    jest.mocked(playerLinking.autoLinkPlayerByEmail).mockReturnValueOnce(
+      new Promise((resolve) => { finish = resolve; })
+    );
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    renderBootstrap(store);
+    await waitFor(() => expect(playerLinking.autoLinkPlayerByEmail).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      setCurrentUser({ ...currentUser, uid: 'second-user', emailVerified: false });
+    });
+    await waitFor(() => expect(store.getState().club.ready).toBe(true));
+    const fetchClubs = jest.spyOn(clubService, 'fetchUserClubs');
+    await act(async () => { finish({ linked: 1, conflicts: 1 }); });
+    expect(fetchClubs).not.toHaveBeenCalled();
+    expect(store.getState().club.currentClubId).toBeNull();
+  });
+
   it('makes admin tabs ready before a slow linked-player name finishes', async () => {
     seedUserDoc(currentUser.uid, { clubs: ['club-a'] });
     seedClubMetaDoc('club-a', { name: 'Club A', disabledTabs: ['payout'] });

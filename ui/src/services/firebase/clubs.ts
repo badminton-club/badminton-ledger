@@ -42,16 +42,20 @@ const EMPTY_PROFILE: UserProfile = { clubs: [], lastVisitedClub: null };
  * Creates a brand-new, empty club: the club doc, the creator's admin membership,
  * and saves it to their profile as the current club. No data is imported.
  * `ownerUid` lets the Firestore rules bootstrap the first admin.
+ * New clubs receive a UUID independent of their display name.
  */
-export async function createClub(clubId: string, name: string, uid: string): Promise<void> {
+export async function createClub(name: string, uid: string): Promise<string> {
   return serviceCall('createClub', async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) throw new Error('Enter a club name.');
+    const clubId = crypto.randomUUID();
     await setDoc(
       clubDoc(clubId),
-      { name, ownerUid: uid, defaultCourtCount: 4, createdAt: serverTimestamp() },
-      { merge: true }
+      { name: trimmedName, ownerUid: uid, defaultCourtCount: 4, createdAt: serverTimestamp() }
     );
     await setDoc(memberDoc(clubId, uid), { role: 'superAdmin', addedAt: serverTimestamp() }, { merge: true });
     await setDoc(userDoc(uid), { clubs: arrayUnion(clubId), lastVisitedClub: clubId }, { merge: true });
+    return clubId;
   });
 }
 
