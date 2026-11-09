@@ -160,7 +160,7 @@ describe('PlayersPage', () => {
     expect(screen.getByText('Overdrawn $4.00')).toBeInTheDocument();
     expect(screen.queryByText('Overdrawn $12.50')).not.toBeInTheDocument();
     expect(screen.getByText('$12.50')).toBeInTheDocument();
-    expect(screen.getByText('-$4.00')).toBeInTheDocument();
+    expect(screen.queryByText('-$4.00')).not.toBeInTheDocument();
 
     await user.type(screen.getByPlaceholderText(/Search by name/), 'zoe');
     expect(screen.getByText('No players matching "zoe"')).toBeInTheDocument();
@@ -377,13 +377,13 @@ describe('PlayersPage', () => {
     const listedNames = () =>
       within(playerList as HTMLElement).getAllByRole('button').map(item => item.textContent);
 
-    expect(listedNames()).toEqual(['Ada$10.00', 'Bea-$4.00Overdrawn $4.00', 'Cora$8.00 owed', 'Dina-$12.00Overdrawn $12.00$3.00 owed']);
+    expect(listedNames()).toEqual(['Ada$10.00', 'BeaOverdrawn $4.00', 'Cora$8.00 owed', 'DinaOverdrawn $12.00$3.00 owed']);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Sort players' }), 'owed');
-    expect(listedNames()).toEqual(['Cora$8.00 owed', 'Dina-$12.00Overdrawn $12.00$3.00 owed', 'Bea-$4.00Overdrawn $4.00', 'Ada$10.00']);
+    expect(listedNames()).toEqual(['Cora$8.00 owed', 'DinaOverdrawn $12.00$3.00 owed', 'BeaOverdrawn $4.00', 'Ada$10.00']);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Sort players' }), 'overdrawn');
-    expect(listedNames()).toEqual(['Dina-$12.00Overdrawn $12.00$3.00 owed', 'Bea-$4.00Overdrawn $4.00', 'Cora$8.00 owed', 'Ada$10.00']);
+    expect(listedNames()).toEqual(['DinaOverdrawn $12.00$3.00 owed', 'BeaOverdrawn $4.00', 'Cora$8.00 owed', 'Ada$10.00']);
   });
 
   it('loads wallet-only balance history and the selected player’s sessions', async () => {
