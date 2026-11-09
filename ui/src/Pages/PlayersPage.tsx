@@ -525,6 +525,11 @@ export default function PlayersPage() {
                   >
                     <span>{formatPlayerName(player)}</span>
                     <span className="d-flex flex-column align-items-end gap-1">
+                      {(player.balance ?? 0) > 0 && (
+                        <Badge bg="primary" pill style={{ fontSize: 10 }}>
+                          ${player.balance.toFixed(2)}
+                        </Badge>
+                      )}
                       {player.balance < 0 && (
                         <Badge bg="warning" text="dark" style={{ fontSize: 10 }}>
                           Overdrawn ${Math.abs(player.balance).toFixed(2)}
@@ -567,6 +572,11 @@ export default function PlayersPage() {
                   >
                     <span>{formatPlayerName(player)} <Badge bg="secondary" style={{ fontSize: 9 }}>Guest</Badge></span>
                     <span className="d-flex flex-column align-items-end gap-1">
+                      {(player.balance ?? 0) > 0 && (
+                        <Badge bg="primary" pill style={{ fontSize: 10 }}>
+                          ${player.balance.toFixed(2)}
+                        </Badge>
+                      )}
                       {player.balance < 0 && (
                         <Badge bg="warning" text="dark" style={{ fontSize: 10 }}>
                           Overdrawn ${Math.abs(player.balance).toFixed(2)}

@@ -159,6 +159,8 @@ describe('PlayersPage', () => {
     expect(screen.getByText('$3.50 owed')).toBeInTheDocument();
     expect(screen.getByText('Overdrawn $4.00')).toBeInTheDocument();
     expect(screen.queryByText('Overdrawn $12.50')).not.toBeInTheDocument();
+    expect(screen.getByText('$12.50')).toBeInTheDocument();
+    expect(screen.queryByText('-$4.00')).not.toBeInTheDocument();
 
     await user.type(screen.getByPlaceholderText(/Search by name/), 'zoe');
     expect(screen.getByText('No players matching "zoe"')).toBeInTheDocument();
@@ -169,7 +171,7 @@ describe('PlayersPage', () => {
     expect(await screen.findByText('(Prepaid credit)')).toBeInTheDocument();
     expect(await screen.findByText('No balance history yet.')).toBeInTheDocument();
     expect(await screen.findByText('No sessions attended this month.')).toBeInTheDocument();
-    expect(screen.getByText('$12.50')).toBeInTheDocument();
+    expect(screen.getAllByText('$12.50')).toHaveLength(2);
     expect(screen.getByText('Total Sessions attended: 4')).toBeInTheDocument();
     expect(screen.getByText('League coordinator')).toBeInTheDocument();
     expect(
@@ -375,13 +377,13 @@ describe('PlayersPage', () => {
     const listedNames = () =>
       within(playerList as HTMLElement).getAllByRole('button').map(item => item.textContent);
 
-    expect(listedNames()).toEqual(['Ada', 'BeaOverdrawn $4.00', 'Cora$8.00 owed', 'DinaOverdrawn $12.00$3.00 owed']);
+    expect(listedNames()).toEqual(['Ada$10.00', 'BeaOverdrawn $4.00', 'Cora$8.00 owed', 'DinaOverdrawn $12.00$3.00 owed']);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Sort players' }), 'owed');
-    expect(listedNames()).toEqual(['Cora$8.00 owed', 'DinaOverdrawn $12.00$3.00 owed', 'BeaOverdrawn $4.00', 'Ada']);
+    expect(listedNames()).toEqual(['Cora$8.00 owed', 'DinaOverdrawn $12.00$3.00 owed', 'BeaOverdrawn $4.00', 'Ada$10.00']);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Sort players' }), 'overdrawn');
-    expect(listedNames()).toEqual(['DinaOverdrawn $12.00$3.00 owed', 'BeaOverdrawn $4.00', 'Cora$8.00 owed', 'Ada']);
+    expect(listedNames()).toEqual(['DinaOverdrawn $12.00$3.00 owed', 'BeaOverdrawn $4.00', 'Cora$8.00 owed', 'Ada$10.00']);
   });
 
   it('loads wallet-only balance history and the selected player’s sessions', async () => {
@@ -593,7 +595,7 @@ describe('PlayersPage', () => {
     const paidBy = await screen.findByRole('button', { name: 'Paid by' });
     const grid = paidBy.closest('.settlement-button-grid') as HTMLElement;
     await user.click(paidBy);
-    await user.click(screen.getByRole('button', { name: `${payerName} $100.00` }));
+    await user.click(within(grid).getByRole('button', { name: `${payerName} $100.00` }));
 
     await waitFor(() => {
       expect(getClubDocData('sessions', 's1')?.players).toEqual([
