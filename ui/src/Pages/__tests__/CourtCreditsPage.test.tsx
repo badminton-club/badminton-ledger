@@ -192,6 +192,21 @@ describe('CourtCreditsPage', () => {
     expect(rows).toEqual(['10 hrs', '12 hrs', '7 hrs']);
   });
 
+  it('marks session usage that carried over into another batch', async () => {
+    const user = userEvent.setup();
+    const base = { totalCost: 100, costPerHour: 10, hoursPurchased: 10, purchaserName: 'Pat', createdAt: ts('2026-04-10T12:00:00Z') };
+    seedClubDoc('courtCredits', 'older', { ...base, name: 'Older block', remainingHours: 0, purchaseDate: ts('2026-03-01T12:00:00Z') });
+    seedClubDoc('courtCredits', 'newer', { ...base, name: 'Newer block', remainingHours: 8, purchaseDate: ts('2026-04-10T12:00:00Z') });
+    seedClubDoc('transactions', 't1', { resourceType: 'court', batchId: 'older', sessionId: 's1', hoursUsed: 2, date: ts('2026-04-14T12:00:00Z') });
+    seedClubDoc('transactions', 't2', { resourceType: 'court', batchId: 'newer', sessionId: 's1', hoursUsed: 2, date: ts('2026-04-14T12:00:00Z') });
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /Newer block/ }));
+    expect(await screen.findByText('Carried over')).toBeInTheDocument();
+    expect(screen.getByText(/\+2 hrs from Older block/)).toBeInTheDocument();
+  });
+
   it('applies a manual hours adjustment and logs it in the batch history', async () => {
     const user = userEvent.setup();
 

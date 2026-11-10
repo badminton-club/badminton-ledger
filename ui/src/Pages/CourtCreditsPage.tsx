@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Container, Table, Button, Spinner, Alert,
-  Card, Row, Col, Form, Accordion,
+  Card, Row, Col, Form, Accordion, Badge,
 } from 'react-bootstrap';
 import { format, compareDesc } from 'date-fns';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -18,6 +18,7 @@ import {
   fetchCourtCreditBatchById,
   fetchCourtCreditAdjustments,
   fetchCourtCreditUsage,
+  fetchCarriedOverCourtUsage,
 } from '../services/firebase';
 import type { CourtCreditBatch } from '../types';
 
@@ -59,6 +60,29 @@ const INIT_EDIT: EditFormState = {
 function currentUserName(): string {
   const user = auth.currentUser;
   return user?.displayName || user?.email || 'Admin';
+}
+
+async function loadBatchHistory(batchId: string): Promise<HistoryItem[]> {
+  const [adjustments, usages] = await Promise.all([
+    fetchCourtCreditAdjustments(batchId),
+    fetchCourtCreditUsage(batchId),
+  ]);
+  const carried = await fetchCarriedOverCourtUsage(
+    batchId,
+    usages.map(u => (u as any).sessionId as string).filter(Boolean),
+  );
+  const adj = adjustments.map(a => ({
+    ...a,
+    type:      'adjustment' as const,
+    eventDate: (a.adjustmentDate as any)?.toDate?.() ?? new Date((a.adjustmentDate as any) ?? 0),
+  }));
+  const use = usages.map(u => ({
+    ...u,
+    type:      'sessionUsage' as const,
+    eventDate: (u as any).date?.toDate?.() ?? new Date((u as any).date ?? 0),
+    carriedOver: carried.get((u as any).sessionId) ?? [],
+  }));
+  return [...adj, ...use].sort((a, b) => compareDesc(a.eventDate, b.eventDate));
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -130,22 +154,9 @@ export default function CourtCreditsPage() {
     // after a newer selection and overwriting its history with stale data.
     let cancelled = false;
     setIsLoadingHistory(true);
-    Promise.all([
-      fetchCourtCreditAdjustments(activeKey),
-      fetchCourtCreditUsage(activeKey),
-    ]).then(([adjustments, usages]) => {
+    loadBatchHistory(activeKey).then(items => {
       if (cancelled) return;
-      const adj = adjustments.map(a => ({
-        ...a,
-        type:      'adjustment' as const,
-        eventDate: (a.adjustmentDate as any)?.toDate?.() ?? new Date((a.adjustmentDate as any) ?? 0),
-      }));
-      const use = usages.map(u => ({
-        ...u,
-        type:      'sessionUsage' as const,
-        eventDate: (u as any).date?.toDate?.() ?? new Date((u as any).date ?? 0),
-      }));
-      setHistory([...adj, ...use].sort((a, b) => compareDesc(a.eventDate, b.eventDate)));
+      setHistory(items);
     }).catch(() => { if (!cancelled) setHistoryError('Failed to load history.'); })
       .finally(() => { if (!cancelled) setIsLoadingHistory(false); });
     return () => { cancelled = true; };
@@ -289,23 +300,7 @@ export default function CourtCreditsPage() {
       const id = adjustingId;
       handleCancelAdjust();
       await loadBatches(id);
-      // History is keyed on activeKey; refetch it for the batch we just changed.
-      const [adjustments, usages] = await Promise.all([
-        fetchCourtCreditAdjustments(id),
-        fetchCourtCreditUsage(id),
-      ]);
-      setHistory([
-        ...adjustments.map(a => ({
-          ...a,
-          type:      'adjustment' as const,
-          eventDate: (a.adjustmentDate as any)?.toDate?.() ?? new Date((a.adjustmentDate as any) ?? 0),
-        })),
-        ...usages.map(u => ({
-          ...u,
-          type:      'sessionUsage' as const,
-          eventDate: (u as any).date?.toDate?.() ?? new Date((u as any).date ?? 0),
-        })),
-      ].sort((a, b) => compareDesc(a.eventDate, b.eventDate)));
+      setHistory(await loadBatchHistory(id));
     } catch (err: unknown) {
       setAdjustError(err instanceof Error ? err.message : 'Failed to save adjustment.');
     } finally {
@@ -570,6 +565,12 @@ export default function CourtCreditsPage() {
                                         ? `Returned: ${Math.abs(item.hoursUsed as number)} hrs`
                                         : `Used: ${item.hoursUsed as number} hrs`
                                     )}
+                                    {item.type === 'sessionUsage' && (item.carriedOver as { batchId: string; hoursUsed: number }[] | undefined)?.map(c => (
+                                      <div key={c.batchId} style={{ fontSize: '0.8em' }}>
+                                        <Badge bg="info" className="me-1">Carried over</Badge>
+                                        +{c.hoursUsed} hrs from {batches.find(b => b.id === c.batchId)?.name || 'another batch'}
+                                      </div>
+                                    ))}
                                     {item.type === 'adjustment' && (
                                       <>
                                         Reason: {item.reason as string}

@@ -280,6 +280,30 @@ export async function fetchCourtCreditUsage(batchId: string) {
   });
 }
 
+// Court hours a session drew from batches other than `batchId` (a booking that
+// outgrew the older batch carries over into the next one), keyed by sessionId.
+export async function fetchCarriedOverCourtUsage(
+  batchId: string,
+  sessionIds: string[]
+): Promise<Map<string, { batchId: string; hoursUsed: number }[]>> {
+  return serviceCall('fetchCarriedOverCourtUsage', async () => {
+    const result = new Map<string, { batchId: string; hoursUsed: number }[]>();
+    await Promise.all([...new Set(sessionIds)].map(async sessionId => {
+      const snap = await getDocs(query(
+        refs.transactions,
+        where('resourceType', '==', 'court'),
+        where('sessionId',    '==', sessionId)
+      ));
+      const others = snap.docs
+        .map(d => d.data() as { batchId: string; hoursUsed: number })
+        .filter(t => t.batchId !== batchId)
+        .map(t => ({ batchId: t.batchId, hoursUsed: t.hoursUsed }));
+      if (others.length) result.set(sessionId, others);
+    }));
+    return result;
+  });
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 function diffFields<T extends Record<string, unknown>>(
