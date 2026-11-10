@@ -19,6 +19,7 @@ import {
   fetchCourtCreditAdjustments,
   fetchCourtCreditUsage,
   fetchCarriedOverCourtUsage,
+  undoCourtCreditAdjustment,
 } from '../services/firebase';
 import type { CourtCreditBatch } from '../types';
 
@@ -68,6 +69,11 @@ const CARRIED_OVER_STYLE: React.CSSProperties = {
   '--bs-table-striped-bg': 'rgba(255, 193, 7, 0.28)',
   '--bs-table-hover-bg': 'rgba(255, 193, 7, 0.4)',
 } as React.CSSProperties;
+
+function isUndoable(item: HistoryItem): boolean {
+  const changes = item.changes as { field: string }[] | undefined;
+  return item.type === 'adjustment' && changes?.length === 1 && changes[0].field === 'remainingHours';
+}
 
 async function loadBatchHistory(batchId: string): Promise<HistoryItem[]> {
   const [adjustments, usages] = await Promise.all([
@@ -312,6 +318,17 @@ export default function CourtCreditsPage() {
       setAdjustError(err instanceof Error ? err.message : 'Failed to save adjustment.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleUndoAdjustment = async (batchId: string, adjustmentId: string) => {
+    if (!window.confirm('Undo this adjustment? Remaining hours will be restored and the record removed.')) return;
+    try {
+      await undoCourtCreditAdjustment(batchId, adjustmentId);
+      await loadBatches(batchId);
+      setHistory(await loadBatchHistory(batchId));
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : 'Failed to undo adjustment.');
     }
   };
 
@@ -610,7 +627,18 @@ export default function CourtCreditsPage() {
                                       <Link to={`/?date=${format(item.eventDate as Date, 'yyyy-MM-dd')}`}>
                                         View on calendar
                                       </Link>
-                                    ) : item.type === 'adjustment' ? (item.userName as string) : ''}
+                                    ) : item.type === 'adjustment' ? (
+                                      <>
+                                        {item.userName as string}
+                                        {isUndoable(item) && (
+                                          <div>
+                                            <Button variant="link" size="sm" className="p-0" onClick={() => handleUndoAdjustment(batch.id, item.id as string)}>
+                                              Undo
+                                            </Button>
+                                          </div>
+                                        )}
+                                      </>
+                                    ) : ''}
                                   </td>
                                 </tr>
                               );

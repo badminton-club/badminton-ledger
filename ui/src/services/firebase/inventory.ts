@@ -224,10 +224,11 @@ export async function updateCourtCreditBatch(
 ): Promise<void> {
   return serviceCall('updateCourtCreditBatch', async () => {
     //@ts-ignore
-    const changes = diffFields(original, updated, [
+    // Partial updates (e.g. a manual hours adjustment) must only log the fields they touch.
+    const changes = diffFields(original, updated, ([
       'name', 'purchaseDate', 'purchaserName', 'hoursPurchased',
       'totalCost', 'remainingHours', 'costPerHour', 'notes',
-    ]);
+    ] as const).filter(f => f in updated));
     if (changes.length === 0) return;
 
     const batch = writeBatch(refs.courtCredits.firestore);
@@ -264,6 +265,34 @@ export async function fetchCourtCreditAdjustments(
     );
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() })) as InventoryAdjustment[];
+  });
+}
+
+// Reverts a remaining-hours adjustment (shifts today's remaining by the opposite
+// delta, so later changes are kept) and removes its history record.
+export async function undoCourtCreditAdjustment(
+  batchId: string,
+  adjustmentId: string
+): Promise<void> {
+  return serviceCall('undoCourtCreditAdjustment', async () => {
+    const adjRef = doc(refs.inventoryAdjustments, adjustmentId);
+    const [adjSnap, batchSnap] = await Promise.all([getDoc(adjRef), getDoc(doc(refs.courtCredits, batchId))]);
+    if (!adjSnap.exists()) throw new Error('Adjustment not found.');
+    if (!batchSnap.exists()) throw new Error('Batch not found.');
+    const changes = (adjSnap.data().changes ?? []) as FieldChange[];
+    if (changes.length !== 1 || changes[0].field !== 'remainingHours') {
+      throw new Error('Only manual hour adjustments can be undone.');
+    }
+    const delta = (Number(changes[0].newValue) || 0) - (Number(changes[0].oldValue) || 0);
+    const { remainingHours, hoursPurchased } = batchSnap.data();
+    const reverted = Math.round((remainingHours - delta) * 100) / 100;
+    if (reverted < 0 || reverted > hoursPurchased) {
+      throw new Error("Undoing this would put remaining hours outside 0 and the hours purchased.");
+    }
+    const batch = writeBatch(refs.courtCredits.firestore);
+    batch.update(doc(refs.courtCredits, batchId), { remainingHours: reverted });
+    batch.delete(adjRef);
+    await batch.commit();
   });
 }
 

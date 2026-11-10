@@ -250,6 +250,11 @@ describe('CourtCreditsPage', () => {
 
     expect(await screen.findByText(/Reason: Second court missed/)).toBeInTheDocument();
     expect(screen.getByText((_, node) => node?.textContent === 'Remaining Hours: 3')).toBeInTheDocument();
+
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(screen.queryByText(/Reason: Second court missed/)).not.toBeInTheDocument());
+    expect(screen.getByText((_, node) => node?.textContent === 'Remaining Hours: 5')).toBeInTheDocument();
   });
 
   it('validates edits, saves them, logs an adjustment, and keeps the batch open after reload', async () => {
