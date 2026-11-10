@@ -83,6 +83,10 @@ export default function CourtCreditsPage() {
   const [isDeleting,       setIsDeleting]       = useState(false);
   const [deleteError,      setDeleteError]      = useState('');
   const [history,          setHistory]          = useState<HistoryItem[]>([]);
+  const [adjustingId,      setAdjustingId]      = useState<string | null>(null);
+  const [adjustHours,      setAdjustHours]      = useState('');
+  const [adjustReason,     setAdjustReason]     = useState('');
+  const [adjustError,      setAdjustError]      = useState('');
   const [searchParams,     setSearchParams]     = useSearchParams();
 
   // ── Load batches ─────────────────────────────────────────────────────────────
@@ -250,6 +254,65 @@ export default function CourtCreditsPage() {
     }
   };
 
+  const handleCancelAdjust = () => {
+    setAdjustingId(null);
+    setAdjustHours('');
+    setAdjustReason('');
+    setAdjustError('');
+  };
+
+  // Positive hours = additional usage (reduces remaining); negative = hours returned.
+  const handleSaveAdjust = async () => {
+    if (!adjustingId) return;
+    const hours = parseFloat(adjustHours);
+    if (isNaN(hours) || hours === 0) { setAdjustError('Enter a non-zero number of hours.'); return; }
+    if (!adjustReason.trim())        { setAdjustError('Reason is required.'); return; }
+
+    setIsSaving(true);
+    setAdjustError('');
+    try {
+      const original = await fetchCourtCreditBatchById(adjustingId);
+      if (!original) throw new Error('Batch not found.');
+      const newRemaining = original.remainingHours - hours;
+      if (newRemaining < 0) throw new Error(`Only ${original.remainingHours} hrs remaining.`);
+      if (newRemaining > original.hoursPurchased) {
+        throw new Error(`Remaining hours can't exceed the ${original.hoursPurchased} hours purchased.`);
+      }
+      await updateCourtCreditBatch(
+        adjustingId,
+        original,
+        { remainingHours: newRemaining },
+        adjustReason,
+        auth.currentUser?.uid ?? 'admin',
+        currentUserName(),
+      );
+      const id = adjustingId;
+      handleCancelAdjust();
+      await loadBatches(id);
+      // History is keyed on activeKey; refetch it for the batch we just changed.
+      const [adjustments, usages] = await Promise.all([
+        fetchCourtCreditAdjustments(id),
+        fetchCourtCreditUsage(id),
+      ]);
+      setHistory([
+        ...adjustments.map(a => ({
+          ...a,
+          type:      'adjustment' as const,
+          eventDate: (a.adjustmentDate as any)?.toDate?.() ?? new Date((a.adjustmentDate as any) ?? 0),
+        })),
+        ...usages.map(u => ({
+          ...u,
+          type:      'sessionUsage' as const,
+          eventDate: (u as any).date?.toDate?.() ?? new Date((u as any).date ?? 0),
+        })),
+      ].sort((a, b) => compareDesc(a.eventDate, b.eventDate)));
+    } catch (err: unknown) {
+      setAdjustError(err instanceof Error ? err.message : 'Failed to save adjustment.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleDeleteBatch = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
@@ -412,6 +475,14 @@ export default function CourtCreditsPage() {
                           Edit Batch Details
                         </Button>
                         <Button
+                          variant="outline-secondary"
+                          size="sm"
+                          className="ms-2"
+                          onClick={() => { setAdjustingId(batch.id); setAdjustError(''); }}
+                        >
+                          Add Manual Adjustment
+                        </Button>
+                        <Button
                           variant="outline-danger"
                           size="sm"
                           className="ms-2"
@@ -420,6 +491,38 @@ export default function CourtCreditsPage() {
                           Delete Batch
                         </Button>
                       </div>
+                      {adjustingId === batch.id && (
+                        <Form
+                          className="mb-3 p-3 border rounded"
+                          onSubmit={e => { e.preventDefault(); handleSaveAdjust(); }}
+                        >
+                          {adjustError && <Alert variant="danger">{adjustError}</Alert>}
+                          <Row>
+                            <Col md={4} className="mb-3">
+                              <Form.Group controlId="court-credit-adjust-hours">
+                                <Form.Label>Hours used</Form.Label>
+                                <Form.Control
+                                  type="number" step="0.25" value={adjustHours}
+                                  onChange={e => setAdjustHours(e.target.value)}
+                                />
+                                <Form.Text muted>Use a negative number to return hours.</Form.Text>
+                              </Form.Group>
+                            </Col>
+                            <Col md={8} className="mb-3">
+                              <Form.Group controlId="court-credit-adjust-reason">
+                                <Form.Label>Reason <span className="text-danger">*</span></Form.Label>
+                                <Form.Control value={adjustReason} onChange={e => setAdjustReason(e.target.value)} />
+                              </Form.Group>
+                            </Col>
+                          </Row>
+                          <div className="text-end">
+                            <Button variant="secondary" size="sm" className="me-2" onClick={handleCancelAdjust} disabled={isSaving}>Cancel</Button>
+                            <Button variant="primary" size="sm" type="submit" disabled={isSaving}>
+                              {isSaving ? <Spinner as="span" animation="border" size="sm" /> : 'Save Adjustment'}
+                            </Button>
+                          </div>
+                        </Form>
+                      )}
                       <hr />
                       <h5>Batch History</h5>
                       {isLoadingHistory && <Spinner animation="border" size="sm" />}

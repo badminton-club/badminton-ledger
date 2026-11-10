@@ -192,6 +192,36 @@ describe('CourtCreditsPage', () => {
     expect(rows).toEqual(['10 hrs', '12 hrs', '7 hrs']);
   });
 
+  it('applies a manual hours adjustment and logs it in the batch history', async () => {
+    const user = userEvent.setup();
+
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Richmond block',
+      totalCost: 180,
+      costPerHour: 18,
+      hoursPurchased: 10,
+      remainingHours: 5,
+      purchaserName: 'Pat',
+      purchaseDate: ts('2026-04-10T12:00:00Z'),
+      createdAt: ts('2026-04-10T12:00:00Z'),
+    });
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /Richmond block/ }));
+    await user.click(screen.getByRole('button', { name: 'Add Manual Adjustment' }));
+
+    await user.type(screen.getByLabelText('Hours used'), '2');
+    await user.click(screen.getByRole('button', { name: 'Save Adjustment' }));
+    expect(await screen.findByText('Reason is required.')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/Reason/), 'Second court missed');
+    await user.click(screen.getByRole('button', { name: 'Save Adjustment' }));
+
+    expect(await screen.findByText(/Reason: Second court missed/)).toBeInTheDocument();
+    expect(screen.getByText((_, node) => node?.textContent === 'Remaining Hours: 3')).toBeInTheDocument();
+  });
+
   it('validates edits, saves them, logs an adjustment, and keeps the batch open after reload', async () => {
     const user = userEvent.setup();
 
