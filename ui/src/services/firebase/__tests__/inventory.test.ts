@@ -517,6 +517,16 @@ describe('court credit inventory service', () => {
     expect(getClubDocData('transactions', 'tx-c2')).toBeDefined();
   });
 
+  it('refuses to delete a court credit batch that an existing session still uses', async () => {
+    seedClubDoc('courtCredits', 'c1', { name: 'In use' });
+    seedClubDoc('transactions', 'tx-c1', { batchId: 'c1', resourceType: 'court', sessionId: 's1', hoursUsed: 2 });
+    seedClubDoc('sessions', 's1', { courtCreditUsage: [{ id: 'c1', hoursUsed: 2 }] });
+
+    await expect(deleteCourtCreditBatch('c1')).rejects.toThrow(/1 session still use this batch/);
+    expect(getClubDocData('courtCredits', 'c1')).toBeDefined();
+    expect(getClubDocData('transactions', 'tx-c1')).toBeDefined();
+  });
+
   it('updates a court credit batch and logs an adjustment entry', async () => {
     seedClubDoc('courtCredits', 'c1', {
       totalCost: 180,

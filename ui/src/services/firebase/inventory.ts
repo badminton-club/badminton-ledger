@@ -202,6 +202,19 @@ export async function deleteCourtCreditBatch(batchId: string): Promise<void> {
 
     if (!batchSnap.exists()) throw new Error(`Court credit batch ${batchId} not found`);
 
+    // Block deletion while any existing session still draws hours from this batch.
+    const sessionIds = [...new Set(usageSnap.docs.map(d => d.data().sessionId as string | undefined).filter(Boolean))] as string[];
+    const sessionSnaps = await Promise.all(sessionIds.map(id => getDoc(doc(refs.sessions, id))));
+    const dependents = sessionSnaps.filter(sn => sn.exists() &&
+      ((sn.data()!.courtCreditUsage ?? []) as { id: string; hoursUsed: number }[])
+        .some(u => u.id === batchId && u.hoursUsed > 0));
+    if (dependents.length > 0) {
+      throw new Error(
+        `${dependents.length} session${dependents.length === 1 ? '' : 's'} still use this batch. ` +
+        'Delete those sessions or remove this batch from them before deleting it.'
+      );
+    }
+
     const relatedDocs = [...adjustmentSnap.docs, ...usageSnap.docs];
     if (relatedDocs.length >= 500) {
       throw new Error('This batch has too much history to delete in one operation.');
