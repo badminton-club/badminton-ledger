@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Container, Table, Button, Spinner, Alert,
-  Card, Row, Col, Form, Accordion, Badge,
+  Card, Row, Col, Form, Accordion,
 } from 'react-bootstrap';
 import { format, compareDesc } from 'date-fns';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -61,6 +61,13 @@ function currentUserName(): string {
   const user = auth.currentUser;
   return user?.displayName || user?.email || 'Admin';
 }
+
+// Inline so it wins over the striped/hover table row colours.
+const CARRIED_OVER_STYLE: React.CSSProperties = {
+  '--bs-table-bg': 'rgba(255, 193, 7, 0.28)',
+  '--bs-table-striped-bg': 'rgba(255, 193, 7, 0.28)',
+  '--bs-table-hover-bg': 'rgba(255, 193, 7, 0.4)',
+} as React.CSSProperties;
 
 async function loadBatchHistory(batchId: string): Promise<HistoryItem[]> {
   const [adjustments, usages] = await Promise.all([
@@ -552,9 +559,12 @@ export default function CourtCreditsPage() {
                           <thead><tr><th>Date</th><th>Type</th><th>Details</th><th>Remaining</th><th>Source</th></tr></thead>
                           <tbody>
                             {history.map((item, i) => {
+                              const carriedOver = item.type === 'sessionUsage'
+                                ? (item.carriedOver as { batchId: string; hoursUsed: number }[] | undefined) ?? []
+                                : [];
                               return (
+                                <React.Fragment key={`${item.type}-${item.id ?? i}`}>
                                 <tr
-                                  key={`${item.type}-${item.id ?? i}`}
                                   className={item.type === 'sessionUsage' ? 'inventory-history-session' : 'inventory-history-adjustment'}
                                 >
                                   <td>{format(item.eventDate, 'yyyy-MM-dd')}</td>
@@ -565,12 +575,6 @@ export default function CourtCreditsPage() {
                                         ? `Returned: ${Math.abs(item.hoursUsed as number)} hrs`
                                         : `Used: ${item.hoursUsed as number} hrs`
                                     )}
-                                    {item.type === 'sessionUsage' && (item.carriedOver as { batchId: string; hoursUsed: number }[] | undefined)?.map(c => (
-                                      <div key={c.batchId} style={{ fontSize: '0.8em' }}>
-                                        <Badge bg="info" className="me-1">Carried over</Badge>
-                                        +{c.hoursUsed} hrs from {batches.find(b => b.id === c.batchId)?.name || 'another batch'}
-                                      </div>
-                                    ))}
                                     {item.type === 'adjustment' && (
                                       <>
                                         Reason: {item.reason as string}
@@ -591,6 +595,21 @@ export default function CourtCreditsPage() {
                                     ) : item.type === 'adjustment' ? (item.userName as string) : ''}
                                   </td>
                                 </tr>
+                                {carriedOver.map(c => (
+                                  <tr key={c.batchId} className="inventory-history-carried-over" style={CARRIED_OVER_STYLE}>
+                                    <td>{format(item.eventDate, 'yyyy-MM-dd')}</td>
+                                    <td>Carried Over</td>
+                                    <td>
+                                      Also used {c.hoursUsed} hrs from {batches.find(b => b.id === c.batchId)?.name || 'another batch'}
+                                      <div style={{ fontSize: '0.8em' }}>Same session as the row above — not deducted from this batch.</div>
+                                    </td>
+                                    <td>—</td>
+                                    <td>
+                                      <Link to={`/?date=${format(item.eventDate as Date, 'yyyy-MM-dd')}`}>View on calendar</Link>
+                                    </td>
+                                  </tr>
+                                ))}
+                                </React.Fragment>
                               );
                             })}
                           </tbody>

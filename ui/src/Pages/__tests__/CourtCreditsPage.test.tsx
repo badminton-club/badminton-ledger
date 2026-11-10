@@ -203,8 +203,9 @@ describe('CourtCreditsPage', () => {
     renderPage();
 
     await user.click(await screen.findByRole('button', { name: /Newer block/ }));
-    expect(await screen.findByText('Carried over')).toBeInTheDocument();
-    expect(screen.getByText(/\+2 hrs from Older block/)).toBeInTheDocument();
+    expect(await screen.findByText('Carried Over')).toBeInTheDocument();
+    expect(screen.getByText(/Also used 2 hrs from Older block/)).toBeInTheDocument();
+    expect(screen.getByText('Carried Over').closest('tr')).toHaveClass('inventory-history-carried-over');
   });
 
   it('applies a manual hours adjustment and logs it in the batch history', async () => {
