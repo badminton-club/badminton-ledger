@@ -644,7 +644,7 @@ export default function CourtCreditsPage() {
                                   style={carriedOver.length ? CARRIED_OVER_STYLE : undefined}
                                 >
                                   <td>{format(item.eventDate, 'yyyy-MM-dd')}</td>
-                                  <td>{item.type === 'sessionUsage' ? (carriedOver.length ? `Session Usage (${isLaterBatch(batch, carriedOver, batches) ? 'Carried Over' : 'With Leftover'})` : 'Session Usage') : 'Adjustment'}</td>
+                                  <td>{item.type === 'sessionUsage' ? (carriedOver.length ? `Session Usage (${isLaterBatch(batch, carriedOver, batches) ? 'With Leftover' : 'Carried Over'})` : 'Session Usage') : 'Adjustment'}</td>
                                   <td>
                                     {item.type === 'sessionUsage' && (
                                       (item.hoursUsed as number) < 0
@@ -653,7 +653,7 @@ export default function CourtCreditsPage() {
                                     )}
                                     {carriedOver.map(c => (
                                       <div key={c.batchId} style={{ fontSize: '0.8em' }}>
-                                        {isLaterBatch(batch, [c], batches) ? 'Carried over' : 'Leftover used'}: this session also used {c.hoursUsed} hrs {isLaterBatch(batch, [c], batches) ? 'from earlier batch' : 'from next batch'} {batches.find(b => b.id === c.batchId)?.name || ''}
+                                        {isLaterBatch(batch, [c], batches) ? 'Leftover' : 'Carried over'}: this session also used {c.hoursUsed} hrs {isLaterBatch(batch, [c], batches) ? 'from earlier batch' : 'from next batch'} {batches.find(b => b.id === c.batchId)?.name || ''}
                                       </div>
                                     ))}
                                     {item.type === 'adjustment' && (
