@@ -331,7 +331,7 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
         {useCredits && courtCreditAllocation.map(alloc => (
           <div key={alloc.id} className="mt-2 text-muted small">
             {alloc.hoursUsed} hrs @ ${alloc.costPerHour}/hr
-            — {alloc.hoursLeft} hrs remaining in batch
+            — {alloc.hoursLeft} hrs remaining in batch{courtCredits.find(b => b.id === alloc.id)?.name ? ` ${courtCredits.find(b => b.id === alloc.id)?.name}` : ''}
           </div>
         ))}
 
