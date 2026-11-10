@@ -71,6 +71,19 @@ const CARRIED_OVER_STYLE: React.CSSProperties = {
   '--bs-table-hover-bg': 'rgba(255, 193, 7, 0.4)',
 } as React.CSSProperties;
 
+// True when the session's other batch(es) were purchased before this one, i.e. this
+// batch picked up the spill-over; otherwise this is the earlier batch used up first.
+function isLaterBatch(
+  batch: CourtCreditBatch,
+  others: { batchId: string }[],
+  all: CourtCreditBatch[],
+): boolean {
+  return others.some(o => {
+    const other = all.find(b => b.id === o.batchId);
+    return other ? new Date(other.purchaseDate).getTime() <= new Date(batch.purchaseDate).getTime() : false;
+  });
+}
+
 function isUndoable(item: HistoryItem): boolean {
   const changes = item.changes as { field: string }[] | undefined;
   return item.type === 'adjustment' && changes?.length === 1 && changes[0].field === 'remainingHours';
@@ -631,7 +644,7 @@ export default function CourtCreditsPage() {
                                   style={carriedOver.length ? CARRIED_OVER_STYLE : undefined}
                                 >
                                   <td>{format(item.eventDate, 'yyyy-MM-dd')}</td>
-                                  <td>{item.type === 'sessionUsage' ? (carriedOver.length ? 'Session Usage (Carried Over)' : 'Session Usage') : 'Adjustment'}</td>
+                                  <td>{item.type === 'sessionUsage' ? (carriedOver.length ? `Session Usage (${isLaterBatch(batch, carriedOver, batches) ? 'Carried Over' : 'With Leftover'})` : 'Session Usage') : 'Adjustment'}</td>
                                   <td>
                                     {item.type === 'sessionUsage' && (
                                       (item.hoursUsed as number) < 0
@@ -640,7 +653,7 @@ export default function CourtCreditsPage() {
                                     )}
                                     {carriedOver.map(c => (
                                       <div key={c.batchId} style={{ fontSize: '0.8em' }}>
-                                        Carried over: this session also used {c.hoursUsed} hrs from {batches.find(b => b.id === c.batchId)?.name || 'another batch'}
+                                        {isLaterBatch(batch, [c], batches) ? 'Carried over' : 'Leftover used'}: this session also used {c.hoursUsed} hrs {isLaterBatch(batch, [c], batches) ? 'from earlier batch' : 'from next batch'} {batches.find(b => b.id === c.batchId)?.name || ''}
                                       </div>
                                     ))}
                                     {item.type === 'adjustment' && (

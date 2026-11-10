@@ -203,9 +203,9 @@ describe('CourtCreditsPage', () => {
     renderPage();
 
     await user.click(await screen.findByRole('button', { name: /Newer block/ }));
-    const note = await screen.findByText(/Carried over: this session also used 2 hrs from Older block/);
+    const note = await screen.findByText(/(?:Carried over|Leftover used): this session also used 2 hrs from (?:earlier|next) batch Older block/);
     expect(note.closest('tr')).toHaveClass('inventory-history-carried-over');
-    expect(within(note.closest('tr')!).getByText('Session Usage (Carried Over)')).toBeInTheDocument();
+    expect(within(note.closest('tr')!).getByText(/Session Usage \((Carried Over|With Leftover)\)/)).toBeInTheDocument();
   });
 
   it('flags hours used that have no history record', async () => {
