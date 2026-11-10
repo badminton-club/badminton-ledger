@@ -296,6 +296,34 @@ export async function undoCourtCreditAdjustment(
   });
 }
 
+// Reverts every manual remaining-hours adjustment on a batch in one write.
+// Returns how many adjustments were undone.
+export async function undoAllCourtCreditAdjustments(batchId: string): Promise<number> {
+  return serviceCall('undoAllCourtCreditAdjustments', async () => {
+    const batchSnap = await getDoc(doc(refs.courtCredits, batchId));
+    if (!batchSnap.exists()) throw new Error('Batch not found.');
+    const adjustments = (await fetchCourtCreditAdjustments(batchId)).filter(a => {
+      const c = a.changes as FieldChange[] | undefined;
+      return c?.length === 1 && c[0].field === 'remainingHours';
+    });
+    if (adjustments.length === 0) return 0;
+    const delta = adjustments.reduce((sum, a) => {
+      const c = (a.changes as FieldChange[])[0];
+      return sum + (Number(c.newValue) || 0) - (Number(c.oldValue) || 0);
+    }, 0);
+    const { remainingHours, hoursPurchased } = batchSnap.data();
+    const reverted = Math.round((remainingHours - delta) * 100) / 100;
+    if (reverted < 0 || reverted > hoursPurchased) {
+      throw new Error('Undoing all adjustments would put remaining hours outside 0 and the hours purchased.');
+    }
+    const batch = writeBatch(refs.courtCredits.firestore);
+    batch.update(doc(refs.courtCredits, batchId), { remainingHours: reverted });
+    adjustments.forEach(a => batch.delete(doc(refs.inventoryAdjustments, a.id)));
+    await batch.commit();
+    return adjustments.length;
+  });
+}
+
 export async function fetchCourtCreditUsage(batchId: string) {
   return serviceCall('fetchCourtCreditUsage', async () => {
     const q = query(

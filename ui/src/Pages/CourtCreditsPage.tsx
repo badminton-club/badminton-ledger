@@ -20,6 +20,7 @@ import {
   fetchCourtCreditUsage,
   fetchCarriedOverCourtUsage,
   undoCourtCreditAdjustment,
+  undoAllCourtCreditAdjustments,
 } from '../services/firebase';
 import type { CourtCreditBatch } from '../types';
 
@@ -332,6 +333,17 @@ export default function CourtCreditsPage() {
     }
   };
 
+  const handleUndoAllAdjustments = async (batchId: string, count: number) => {
+    if (!window.confirm(`Undo all ${count} manual adjustment(s) on this batch? Remaining hours will be restored and the records removed.`)) return;
+    try {
+      await undoAllCourtCreditAdjustments(batchId);
+      await loadBatches(batchId);
+      setHistory(await loadBatchHistory(batchId));
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : 'Failed to undo adjustments.');
+    }
+  };
+
   const handleDeleteBatch = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
@@ -501,6 +513,16 @@ export default function CourtCreditsPage() {
                         >
                           Add Manual Adjustment
                         </Button>
+                        {history.filter(isUndoable).length > 0 && (
+                          <Button
+                            variant="outline-danger"
+                            size="sm"
+                            className="ms-2"
+                            onClick={() => handleUndoAllAdjustments(batch.id, history.filter(isUndoable).length)}
+                          >
+                            Undo All Adjustments
+                          </Button>
+                        )}
                         <Button
                           variant="outline-danger"
                           size="sm"

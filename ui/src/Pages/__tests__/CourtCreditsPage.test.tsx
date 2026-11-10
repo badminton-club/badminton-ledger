@@ -257,6 +257,26 @@ describe('CourtCreditsPage', () => {
     expect(screen.getByText((_, node) => node?.textContent === 'Remaining Hours: 5')).toBeInTheDocument();
   });
 
+  it('undoes all manual adjustments on a batch at once', async () => {
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Richmond block', totalCost: 180, costPerHour: 18, hoursPurchased: 10, remainingHours: 3,
+      purchaserName: 'Pat', purchaseDate: ts('2026-04-10T12:00:00Z'), createdAt: ts('2026-04-10T12:00:00Z'),
+    });
+    [['a1', 8, 6], ['a2', 6, 3]].forEach(([id, o, n], i) => seedClubDoc('inventoryAdjustments', id as string, {
+      adjustmentDate: ts(`2026-05-0${i + 1}T12:00:00Z`), userId: currentUser.uid, userName: currentUser.displayName,
+      resourceType: 'courtCreditBatch', batchId: 'c1', batchNameSnapshot: 'Richmond block', reason: `Fix ${id}`,
+      changes: [{ field: 'remainingHours', oldValue: o, newValue: n }],
+    }));
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /Richmond block/ }));
+    await user.click(await screen.findByRole('button', { name: 'Undo All Adjustments' }));
+    await waitFor(() => expect(screen.queryByText(/Reason: Fix a1/)).not.toBeInTheDocument());
+    expect(screen.queryByText(/Reason: Fix a2/)).not.toBeInTheDocument();
+    expect(screen.getByText((_, node) => node?.textContent === 'Remaining Hours: 8')).toBeInTheDocument();
+  });
+
   it('validates edits, saves them, logs an adjustment, and keeps the batch open after reload', async () => {
     const user = userEvent.setup();
 
