@@ -328,10 +328,11 @@ export default function SessionDetailsStep({ session, onSave, onCancel }: Props)
           )}
         </InputGroup>
 
-        {useCredits && courtCreditAllocation.map(alloc => (
+        {useCredits && courtCreditAllocation.map((alloc, i) => (
           <div key={alloc.id} className="mt-2 text-muted small">
             {alloc.hoursUsed} hrs @ ${alloc.costPerHour}/hr
             — {alloc.hoursLeft} hrs remaining in batch{courtCredits.find(b => b.id === alloc.id)?.name ? ` ${courtCredits.find(b => b.id === alloc.id)?.name}` : ''}
+            {courtCreditAllocation.length > 1 && (i === 0 ? ' (with leftover)' : ' (carried over)')}
           </div>
         ))}
 
