@@ -572,18 +572,27 @@ export default function CourtCreditsPage() {
                                 ? (item.carriedOver as { batchId: string; hoursUsed: number }[] | undefined) ?? []
                                 : [];
                               return (
-                                <React.Fragment key={`${item.type}-${item.id ?? i}`}>
                                 <tr
-                                  className={item.type === 'sessionUsage' ? 'inventory-history-session' : 'inventory-history-adjustment'}
+                                  key={`${item.type}-${item.id ?? i}`}
+                                  className={[
+                                    item.type === 'sessionUsage' ? 'inventory-history-session' : 'inventory-history-adjustment',
+                                    carriedOver.length ? 'inventory-history-carried-over' : '',
+                                  ].join(' ').trim()}
+                                  style={carriedOver.length ? CARRIED_OVER_STYLE : undefined}
                                 >
                                   <td>{format(item.eventDate, 'yyyy-MM-dd')}</td>
-                                  <td>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
+                                  <td>{item.type === 'sessionUsage' ? (carriedOver.length ? 'Session Usage (Carried Over)' : 'Session Usage') : 'Adjustment'}</td>
                                   <td>
                                     {item.type === 'sessionUsage' && (
                                       (item.hoursUsed as number) < 0
                                         ? `Returned: ${Math.abs(item.hoursUsed as number)} hrs`
                                         : `Used: ${item.hoursUsed as number} hrs`
                                     )}
+                                    {carriedOver.map(c => (
+                                      <div key={c.batchId} style={{ fontSize: '0.8em' }}>
+                                        Carried over: this session also used {c.hoursUsed} hrs from {batches.find(b => b.id === c.batchId)?.name || 'another batch'}
+                                      </div>
+                                    ))}
                                     {item.type === 'adjustment' && (
                                       <>
                                         Reason: {item.reason as string}
@@ -604,21 +613,6 @@ export default function CourtCreditsPage() {
                                     ) : item.type === 'adjustment' ? (item.userName as string) : ''}
                                   </td>
                                 </tr>
-                                {carriedOver.map(c => (
-                                  <tr key={c.batchId} className="inventory-history-carried-over" style={CARRIED_OVER_STYLE}>
-                                    <td>{format(item.eventDate, 'yyyy-MM-dd')}</td>
-                                    <td>Carried Over</td>
-                                    <td>
-                                      Also used {c.hoursUsed} hrs from {batches.find(b => b.id === c.batchId)?.name || 'another batch'}
-                                      <div style={{ fontSize: '0.8em' }}>Same session as the row above — not deducted from this batch.</div>
-                                    </td>
-                                    <td>—</td>
-                                    <td>
-                                      <Link to={`/?date=${format(item.eventDate as Date, 'yyyy-MM-dd')}`}>View on calendar</Link>
-                                    </td>
-                                  </tr>
-                                ))}
-                                </React.Fragment>
                               );
                             })}
                             {unrecordedHours > 0 && (
