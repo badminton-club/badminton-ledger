@@ -282,6 +282,8 @@ export async function fetchCourtCreditUsage(batchId: string) {
 
 // Court hours a session drew from batches other than `batchId` (a booking that
 // outgrew the older batch carries over into the next one), keyed by sessionId.
+// Read from the session's own allocation so it still works if the other batch
+// (and its usage records) was since deleted.
 export async function fetchCarriedOverCourtUsage(
   batchId: string,
   sessionIds: string[]
@@ -289,15 +291,12 @@ export async function fetchCarriedOverCourtUsage(
   return serviceCall('fetchCarriedOverCourtUsage', async () => {
     const result = new Map<string, { batchId: string; hoursUsed: number }[]>();
     await Promise.all([...new Set(sessionIds)].map(async sessionId => {
-      const snap = await getDocs(query(
-        refs.transactions,
-        where('resourceType', '==', 'court'),
-        where('sessionId',    '==', sessionId)
-      ));
-      const others = snap.docs
-        .map(d => d.data() as { batchId: string; hoursUsed: number })
-        .filter(t => t.batchId !== batchId)
-        .map(t => ({ batchId: t.batchId, hoursUsed: t.hoursUsed }));
+      const snap = await getDoc(doc(refs.sessions, sessionId));
+      if (!snap.exists()) return;
+      const usage = (snap.data().courtCreditUsage ?? []) as { id: string; hoursUsed: number }[];
+      const others = usage
+        .filter(u => u.id !== batchId && u.hoursUsed > 0)
+        .map(u => ({ batchId: u.id, hoursUsed: u.hoursUsed }));
       if (others.length) result.set(sessionId, others);
     }));
     return result;
