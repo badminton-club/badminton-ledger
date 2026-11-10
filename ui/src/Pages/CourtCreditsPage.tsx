@@ -94,9 +94,20 @@ async function loadBatchHistory(batchId: string): Promise<HistoryItem[]> {
     ...u,
     type:      'sessionUsage' as const,
     eventDate: (u as any).date?.toDate?.() ?? new Date((u as any).date ?? 0),
-    carriedOver: carried.get((u as any).sessionId) ?? [],
+    carriedOver: [] as { batchId: string; hoursUsed: number }[],
   }));
-  return [...adj, ...use].sort((a, b) => compareDesc(a.eventDate, b.eventDate));
+  const sorted = [...adj, ...use].sort((a, b) => compareDesc(a.eventDate, b.eventDate));
+  // A session edited several times leaves several usage/return records; mark only
+  // the latest "used" one so the marker isn't repeated on every edit.
+  const marked = new Set<string>();
+  sorted.forEach(item => {
+    if (item.type !== 'sessionUsage' || ((item as any).hoursUsed as number) <= 0) return;
+    const sessionId = (item as any).sessionId as string | undefined;
+    if (!sessionId || marked.has(sessionId) || !carried.has(sessionId)) return;
+    marked.add(sessionId);
+    item.carriedOver = carried.get(sessionId)!;
+  });
+  return sorted;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
