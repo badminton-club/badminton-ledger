@@ -208,6 +208,20 @@ describe('CourtCreditsPage', () => {
     expect(screen.getByText('Carried Over').closest('tr')).toHaveClass('inventory-history-carried-over');
   });
 
+  it('flags hours used that have no history record', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Richmond block', totalCost: 100, costPerHour: 10, hoursPurchased: 10, remainingHours: 3,
+      purchaserName: 'Pat', purchaseDate: ts('2026-04-10T12:00:00Z'), createdAt: ts('2026-04-10T12:00:00Z'),
+    });
+    seedClubDoc('transactions', 't1', { resourceType: 'court', batchId: 'c1', sessionId: 's1', hoursUsed: 5, date: ts('2026-04-14T12:00:00Z') });
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /Richmond block/ }));
+    expect(await screen.findByText(/2 hrs used with no history record/)).toBeInTheDocument();
+  });
+
   it('applies a manual hours adjustment and logs it in the batch history', async () => {
     const user = userEvent.setup();
 

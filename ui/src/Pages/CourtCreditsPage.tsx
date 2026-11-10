@@ -542,6 +542,7 @@ export default function CourtCreditsPage() {
                         // such an adjustment shows an incorrect remaining total.
                         const remainingByRow = new Map<HistoryItem, number>();
                         let remaining = batch.remainingHours ?? 0;
+                        let purchased = batch.hoursPurchased ?? 0;
                         for (const item of history) {
                           remainingByRow.set(item, remaining);
                           if (item.type === 'sessionUsage') {
@@ -552,8 +553,16 @@ export default function CourtCreditsPage() {
                             if (remainingChange) {
                               remaining += (Number(remainingChange.oldValue) || 0) - (Number(remainingChange.newValue) || 0);
                             }
+                            const purchasedChange = changes?.find((c) => c.field === 'hoursPurchased');
+                            if (purchasedChange) {
+                              purchased += (Number(purchasedChange.oldValue) || 0) - (Number(purchasedChange.newValue) || 0);
+                            }
                           }
                         }
+                        // Walked all the way back, remaining should equal the hours originally
+                        // purchased. Any shortfall was deducted with no usage or adjustment record
+                        // (e.g. hours shared with another batch whose record is gone).
+                        const unrecordedHours = Math.round((purchased - remaining) * 100) / 100;
                         return (
                         <Table striped bordered hover responsive size="sm">
                           <thead><tr><th>Date</th><th>Type</th><th>Details</th><th>Remaining</th><th>Source</th></tr></thead>
@@ -612,6 +621,20 @@ export default function CourtCreditsPage() {
                                 </React.Fragment>
                               );
                             })}
+                            {unrecordedHours > 0 && (
+                              <tr className="inventory-history-carried-over" style={CARRIED_OVER_STYLE}>
+                                <td>{format(batch.purchaseDate, 'yyyy-MM-dd')}</td>
+                                <td>Unrecorded</td>
+                                <td>
+                                  {unrecordedHours} hrs used with no history record
+                                  <div style={{ fontSize: '0.8em' }}>
+                                    Possibly carried over or shared with another batch, or changed before history was tracked.
+                                  </div>
+                                </td>
+                                <td>{purchased} hrs → {remaining} hrs</td>
+                                <td></td>
+                              </tr>
+                            )}
                           </tbody>
                         </Table>
                         );
