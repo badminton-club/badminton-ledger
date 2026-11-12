@@ -202,6 +202,19 @@ export async function deleteCourtCreditBatch(batchId: string): Promise<void> {
 
     if (!batchSnap.exists()) throw new Error(`Court credit batch ${batchId} not found`);
 
+    // Block deletion while any existing session still draws hours from this batch.
+    const sessionIds = [...new Set(usageSnap.docs.map(d => d.data().sessionId as string | undefined).filter(Boolean))] as string[];
+    const sessionSnaps = await Promise.all(sessionIds.map(id => getDoc(doc(refs.sessions, id))));
+    const dependents = sessionSnaps.filter(sn => sn.exists() &&
+      ((sn.data()!.courtCreditUsage ?? []) as { id: string; hoursUsed: number }[])
+        .some(u => u.id === batchId && u.hoursUsed > 0));
+    if (dependents.length > 0) {
+      throw new Error(
+        `${dependents.length} session${dependents.length === 1 ? '' : 's'} still use this batch. ` +
+        'Delete those sessions or remove this batch from them before deleting it.'
+      );
+    }
+
     const relatedDocs = [...adjustmentSnap.docs, ...usageSnap.docs];
     if (relatedDocs.length >= 500) {
       throw new Error('This batch has too much history to delete in one operation.');
@@ -224,10 +237,11 @@ export async function updateCourtCreditBatch(
 ): Promise<void> {
   return serviceCall('updateCourtCreditBatch', async () => {
     //@ts-ignore
-    const changes = diffFields(original, updated, [
+    // Partial updates (e.g. a manual hours adjustment) must only log the fields they touch.
+    const changes = diffFields(original, updated, ([
       'name', 'purchaseDate', 'purchaserName', 'hoursPurchased',
       'totalCost', 'remainingHours', 'costPerHour', 'notes',
-    ]);
+    ] as const).filter(f => f in updated));
     if (changes.length === 0) return;
 
     const batch = writeBatch(refs.courtCredits.firestore);
@@ -267,6 +281,62 @@ export async function fetchCourtCreditAdjustments(
   });
 }
 
+// Reverts a remaining-hours adjustment (shifts today's remaining by the opposite
+// delta, so later changes are kept) and removes its history record.
+export async function undoCourtCreditAdjustment(
+  batchId: string,
+  adjustmentId: string
+): Promise<void> {
+  return serviceCall('undoCourtCreditAdjustment', async () => {
+    const adjRef = doc(refs.inventoryAdjustments, adjustmentId);
+    const [adjSnap, batchSnap] = await Promise.all([getDoc(adjRef), getDoc(doc(refs.courtCredits, batchId))]);
+    if (!adjSnap.exists()) throw new Error('Adjustment not found.');
+    if (!batchSnap.exists()) throw new Error('Batch not found.');
+    const changes = (adjSnap.data().changes ?? []) as FieldChange[];
+    if (changes.length !== 1 || changes[0].field !== 'remainingHours') {
+      throw new Error('Only manual hour adjustments can be undone.');
+    }
+    const delta = (Number(changes[0].newValue) || 0) - (Number(changes[0].oldValue) || 0);
+    const { remainingHours, hoursPurchased } = batchSnap.data();
+    const reverted = Math.round((remainingHours - delta) * 100) / 100;
+    if (reverted < 0 || reverted > hoursPurchased) {
+      throw new Error("Undoing this would put remaining hours outside 0 and the hours purchased.");
+    }
+    const batch = writeBatch(refs.courtCredits.firestore);
+    batch.update(doc(refs.courtCredits, batchId), { remainingHours: reverted });
+    batch.delete(adjRef);
+    await batch.commit();
+  });
+}
+
+// Reverts every manual remaining-hours adjustment on a batch in one write.
+// Returns how many adjustments were undone.
+export async function undoAllCourtCreditAdjustments(batchId: string): Promise<number> {
+  return serviceCall('undoAllCourtCreditAdjustments', async () => {
+    const batchSnap = await getDoc(doc(refs.courtCredits, batchId));
+    if (!batchSnap.exists()) throw new Error('Batch not found.');
+    const adjustments = (await fetchCourtCreditAdjustments(batchId)).filter(a => {
+      const c = a.changes as FieldChange[] | undefined;
+      return c?.length === 1 && c[0].field === 'remainingHours';
+    });
+    if (adjustments.length === 0) return 0;
+    const delta = adjustments.reduce((sum, a) => {
+      const c = (a.changes as FieldChange[])[0];
+      return sum + (Number(c.newValue) || 0) - (Number(c.oldValue) || 0);
+    }, 0);
+    const { remainingHours, hoursPurchased } = batchSnap.data();
+    const reverted = Math.round((remainingHours - delta) * 100) / 100;
+    if (reverted < 0 || reverted > hoursPurchased) {
+      throw new Error('Undoing all adjustments would put remaining hours outside 0 and the hours purchased.');
+    }
+    const batch = writeBatch(refs.courtCredits.firestore);
+    batch.update(doc(refs.courtCredits, batchId), { remainingHours: reverted });
+    adjustments.forEach(a => batch.delete(doc(refs.inventoryAdjustments, a.id)));
+    await batch.commit();
+    return adjustments.length;
+  });
+}
+
 export async function fetchCourtCreditUsage(batchId: string) {
   return serviceCall('fetchCourtCreditUsage', async () => {
     const q = query(
@@ -277,6 +347,29 @@ export async function fetchCourtCreditUsage(batchId: string) {
     );
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  });
+}
+
+// Court hours a session drew from batches other than `batchId` (a booking that
+// outgrew the older batch carries over into the next one), keyed by sessionId.
+// Read from the session's own allocation so it still works if the other batch
+// (and its usage records) was since deleted.
+export async function fetchCarriedOverCourtUsage(
+  batchId: string,
+  sessionIds: string[]
+): Promise<Map<string, { batchId: string; hoursUsed: number }[]>> {
+  return serviceCall('fetchCarriedOverCourtUsage', async () => {
+    const result = new Map<string, { batchId: string; hoursUsed: number }[]>();
+    await Promise.all([...new Set(sessionIds)].map(async sessionId => {
+      const snap = await getDoc(doc(refs.sessions, sessionId));
+      if (!snap.exists()) return;
+      const usage = (snap.data().courtCreditUsage ?? []) as { id: string; hoursUsed: number }[];
+      const others = usage
+        .filter(u => u.id !== batchId && u.hoursUsed > 0)
+        .map(u => ({ batchId: u.id, hoursUsed: u.hoursUsed }));
+      if (others.length) result.set(sessionId, others);
+    }));
+    return result;
   });
 }
 

@@ -192,6 +192,91 @@ describe('CourtCreditsPage', () => {
     expect(rows).toEqual(['10 hrs', '12 hrs', '7 hrs']);
   });
 
+  it('marks session usage that carried over into another batch', async () => {
+    const user = userEvent.setup();
+    const base = { totalCost: 100, costPerHour: 10, hoursPurchased: 10, purchaserName: 'Pat', createdAt: ts('2026-04-10T12:00:00Z') };
+    seedClubDoc('courtCredits', 'older', { ...base, name: 'Older block', remainingHours: 0, purchaseDate: ts('2026-03-01T12:00:00Z') });
+    seedClubDoc('courtCredits', 'newer', { ...base, name: 'Newer block', remainingHours: 8, purchaseDate: ts('2026-04-10T12:00:00Z') });
+    seedClubDoc('transactions', 't2', { resourceType: 'court', batchId: 'newer', sessionId: 's1', hoursUsed: 2, date: ts('2026-04-14T12:00:00Z') });
+    seedClubDoc('sessions', 's1', { courtCreditUsage: [{ id: 'older', hoursUsed: 2 }, { id: 'newer', hoursUsed: 2 }] });
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /Newer block/ }));
+    const note = await screen.findByText(/(?:Carried over|Leftover): this session also used 2 hrs from (?:earlier|next) batch Older block/);
+    expect(note.closest('tr')).toHaveClass('inventory-history-carried-over');
+    expect(within(note.closest('tr')!).getByText(/Session Usage \((Carried Over|With Leftover)\)/)).toBeInTheDocument();
+  });
+
+  it('flags hours used that have no history record', async () => {
+    const user = userEvent.setup();
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Richmond block', totalCost: 100, costPerHour: 10, hoursPurchased: 10, remainingHours: 3,
+      purchaserName: 'Pat', purchaseDate: ts('2026-04-10T12:00:00Z'), createdAt: ts('2026-04-10T12:00:00Z'),
+    });
+    seedClubDoc('transactions', 't1', { resourceType: 'court', batchId: 'c1', sessionId: 's1', hoursUsed: 5, date: ts('2026-04-14T12:00:00Z') });
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /Richmond block/ }));
+    expect(await screen.findByText(/2 hrs used with no history record/)).toBeInTheDocument();
+  });
+
+  it('applies a manual hours adjustment and logs it in the batch history', async () => {
+    const user = userEvent.setup();
+
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Richmond block',
+      totalCost: 180,
+      costPerHour: 18,
+      hoursPurchased: 10,
+      remainingHours: 5,
+      purchaserName: 'Pat',
+      purchaseDate: ts('2026-04-10T12:00:00Z'),
+      createdAt: ts('2026-04-10T12:00:00Z'),
+    });
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /Richmond block/ }));
+    await user.click(screen.getByRole('button', { name: 'Add Manual Adjustment' }));
+
+    await user.type(screen.getByLabelText('Hours used'), '2');
+    await user.click(screen.getByRole('button', { name: 'Save Adjustment' }));
+    expect(await screen.findByText('Reason is required.')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/Reason/), 'Second court missed');
+    await user.click(screen.getByRole('button', { name: 'Save Adjustment' }));
+
+    expect(await screen.findByText(/Reason: Second court missed/)).toBeInTheDocument();
+    expect(screen.getByText((_, node) => node?.textContent === 'Remaining Hours: 3')).toBeInTheDocument();
+
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(screen.queryByText(/Reason: Second court missed/)).not.toBeInTheDocument());
+    expect(screen.getByText((_, node) => node?.textContent === 'Remaining Hours: 5')).toBeInTheDocument();
+  });
+
+  it('undoes all manual adjustments on a batch at once', async () => {
+    seedClubDoc('courtCredits', 'c1', {
+      name: 'Richmond block', totalCost: 180, costPerHour: 18, hoursPurchased: 10, remainingHours: 3,
+      purchaserName: 'Pat', purchaseDate: ts('2026-04-10T12:00:00Z'), createdAt: ts('2026-04-10T12:00:00Z'),
+    });
+    [['a1', 8, 6], ['a2', 6, 3]].forEach(([id, o, n], i) => seedClubDoc('inventoryAdjustments', id as string, {
+      adjustmentDate: ts(`2026-05-0${i + 1}T12:00:00Z`), userId: currentUser.uid, userName: currentUser.displayName,
+      resourceType: 'courtCreditBatch', batchId: 'c1', batchNameSnapshot: 'Richmond block', reason: `Fix ${id}`,
+      changes: [{ field: 'remainingHours', oldValue: o, newValue: n }],
+    }));
+    jest.spyOn(window, 'confirm').mockReturnValue(true);
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /Richmond block/ }));
+    await user.click(await screen.findByRole('button', { name: 'Undo All Adjustments' }));
+    await waitFor(() => expect(screen.queryByText(/Reason: Fix a1/)).not.toBeInTheDocument());
+    expect(screen.queryByText(/Reason: Fix a2/)).not.toBeInTheDocument();
+    expect(screen.getByText((_, node) => node?.textContent === 'Remaining Hours: 8')).toBeInTheDocument();
+  });
+
   it('validates edits, saves them, logs an adjustment, and keeps the batch open after reload', async () => {
     const user = userEvent.setup();
 

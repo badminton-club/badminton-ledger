@@ -18,6 +18,9 @@ import {
   fetchCourtCreditBatchById,
   fetchCourtCreditAdjustments,
   fetchCourtCreditUsage,
+  fetchCarriedOverCourtUsage,
+  undoCourtCreditAdjustment,
+  undoAllCourtCreditAdjustments,
 } from '../services/firebase';
 import type { CourtCreditBatch } from '../types';
 
@@ -61,6 +64,65 @@ function currentUserName(): string {
   return user?.displayName || user?.email || 'Admin';
 }
 
+// Inline so it wins over the striped/hover table row colours.
+const CARRIED_OVER_STYLE: React.CSSProperties = {
+  '--bs-table-bg': 'rgba(255, 193, 7, 0.28)',
+  '--bs-table-striped-bg': 'rgba(255, 193, 7, 0.28)',
+  '--bs-table-hover-bg': 'rgba(255, 193, 7, 0.4)',
+} as React.CSSProperties;
+
+// True when the session's other batch(es) were purchased before this one, i.e. this
+// batch picked up the spill-over; otherwise this is the earlier batch used up first.
+function isLaterBatch(
+  batch: CourtCreditBatch,
+  others: { batchId: string }[],
+  all: CourtCreditBatch[],
+): boolean {
+  return others.some(o => {
+    const other = all.find(b => b.id === o.batchId);
+    return other ? new Date(other.purchaseDate).getTime() <= new Date(batch.purchaseDate).getTime() : false;
+  });
+}
+
+function isUndoable(item: HistoryItem): boolean {
+  const changes = item.changes as { field: string }[] | undefined;
+  return item.type === 'adjustment' && changes?.length === 1 && changes[0].field === 'remainingHours';
+}
+
+async function loadBatchHistory(batchId: string): Promise<HistoryItem[]> {
+  const [adjustments, usages] = await Promise.all([
+    fetchCourtCreditAdjustments(batchId),
+    fetchCourtCreditUsage(batchId),
+  ]);
+  const carried = await fetchCarriedOverCourtUsage(
+    batchId,
+    usages.map(u => (u as any).sessionId as string).filter(Boolean),
+  );
+  const adj = adjustments.map(a => ({
+    ...a,
+    type:      'adjustment' as const,
+    eventDate: (a.adjustmentDate as any)?.toDate?.() ?? new Date((a.adjustmentDate as any) ?? 0),
+  }));
+  const use = usages.map(u => ({
+    ...u,
+    type:      'sessionUsage' as const,
+    eventDate: (u as any).date?.toDate?.() ?? new Date((u as any).date ?? 0),
+    carriedOver: [] as { batchId: string; hoursUsed: number }[],
+  }));
+  const sorted = [...adj, ...use].sort((a, b) => compareDesc(a.eventDate, b.eventDate));
+  // A session edited several times leaves several usage/return records; mark only
+  // the latest "used" one so the marker isn't repeated on every edit.
+  const marked = new Set<string>();
+  sorted.forEach(item => {
+    if (item.type !== 'sessionUsage' || ((item as any).hoursUsed as number) <= 0) return;
+    const sessionId = (item as any).sessionId as string | undefined;
+    if (!sessionId || marked.has(sessionId) || !carried.has(sessionId)) return;
+    marked.add(sessionId);
+    item.carriedOver = carried.get(sessionId)!;
+  });
+  return sorted;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function CourtCreditsPage() {
@@ -83,6 +145,10 @@ export default function CourtCreditsPage() {
   const [isDeleting,       setIsDeleting]       = useState(false);
   const [deleteError,      setDeleteError]      = useState('');
   const [history,          setHistory]          = useState<HistoryItem[]>([]);
+  const [adjustingId,      setAdjustingId]      = useState<string | null>(null);
+  const [adjustHours,      setAdjustHours]      = useState('');
+  const [adjustReason,     setAdjustReason]     = useState('');
+  const [adjustError,      setAdjustError]      = useState('');
   const [searchParams,     setSearchParams]     = useSearchParams();
 
   // ── Load batches ─────────────────────────────────────────────────────────────
@@ -126,22 +192,9 @@ export default function CourtCreditsPage() {
     // after a newer selection and overwriting its history with stale data.
     let cancelled = false;
     setIsLoadingHistory(true);
-    Promise.all([
-      fetchCourtCreditAdjustments(activeKey),
-      fetchCourtCreditUsage(activeKey),
-    ]).then(([adjustments, usages]) => {
+    loadBatchHistory(activeKey).then(items => {
       if (cancelled) return;
-      const adj = adjustments.map(a => ({
-        ...a,
-        type:      'adjustment' as const,
-        eventDate: (a.adjustmentDate as any)?.toDate?.() ?? new Date((a.adjustmentDate as any) ?? 0),
-      }));
-      const use = usages.map(u => ({
-        ...u,
-        type:      'sessionUsage' as const,
-        eventDate: (u as any).date?.toDate?.() ?? new Date((u as any).date ?? 0),
-      }));
-      setHistory([...adj, ...use].sort((a, b) => compareDesc(a.eventDate, b.eventDate)));
+      setHistory(items);
     }).catch(() => { if (!cancelled) setHistoryError('Failed to load history.'); })
       .finally(() => { if (!cancelled) setIsLoadingHistory(false); });
     return () => { cancelled = true; };
@@ -247,6 +300,71 @@ export default function CourtCreditsPage() {
       setFormError(err instanceof Error ? err.message : 'Failed to update.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleCancelAdjust = () => {
+    setAdjustingId(null);
+    setAdjustHours('');
+    setAdjustReason('');
+    setAdjustError('');
+  };
+
+  // Positive hours = additional usage (reduces remaining); negative = hours returned.
+  const handleSaveAdjust = async () => {
+    if (!adjustingId) return;
+    const hours = parseFloat(adjustHours);
+    if (isNaN(hours) || hours === 0) { setAdjustError('Enter a non-zero number of hours.'); return; }
+    if (!adjustReason.trim())        { setAdjustError('Reason is required.'); return; }
+
+    setIsSaving(true);
+    setAdjustError('');
+    try {
+      const original = await fetchCourtCreditBatchById(adjustingId);
+      if (!original) throw new Error('Batch not found.');
+      const newRemaining = original.remainingHours - hours;
+      if (newRemaining < 0) throw new Error(`Only ${original.remainingHours} hrs remaining.`);
+      if (newRemaining > original.hoursPurchased) {
+        throw new Error(`Remaining hours can't exceed the ${original.hoursPurchased} hours purchased.`);
+      }
+      await updateCourtCreditBatch(
+        adjustingId,
+        original,
+        { remainingHours: newRemaining },
+        adjustReason,
+        auth.currentUser?.uid ?? 'admin',
+        currentUserName(),
+      );
+      const id = adjustingId;
+      handleCancelAdjust();
+      await loadBatches(id);
+      setHistory(await loadBatchHistory(id));
+    } catch (err: unknown) {
+      setAdjustError(err instanceof Error ? err.message : 'Failed to save adjustment.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleUndoAdjustment = async (batchId: string, adjustmentId: string) => {
+    if (!window.confirm('Undo this adjustment? Remaining hours will be restored and the record removed.')) return;
+    try {
+      await undoCourtCreditAdjustment(batchId, adjustmentId);
+      await loadBatches(batchId);
+      setHistory(await loadBatchHistory(batchId));
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : 'Failed to undo adjustment.');
+    }
+  };
+
+  const handleUndoAllAdjustments = async (batchId: string, count: number) => {
+    if (!window.confirm(`Undo all ${count} manual adjustment(s) on this batch? Remaining hours will be restored and the records removed.`)) return;
+    try {
+      await undoAllCourtCreditAdjustments(batchId);
+      await loadBatches(batchId);
+      setHistory(await loadBatchHistory(batchId));
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : 'Failed to undo adjustments.');
     }
   };
 
@@ -412,6 +530,24 @@ export default function CourtCreditsPage() {
                           Edit Batch Details
                         </Button>
                         <Button
+                          variant="outline-secondary"
+                          size="sm"
+                          className="ms-2"
+                          onClick={() => { setAdjustingId(batch.id); setAdjustError(''); }}
+                        >
+                          Add Manual Adjustment
+                        </Button>
+                        {history.filter(isUndoable).length > 0 && (
+                          <Button
+                            variant="outline-danger"
+                            size="sm"
+                            className="ms-2"
+                            onClick={() => handleUndoAllAdjustments(batch.id, history.filter(isUndoable).length)}
+                          >
+                            Undo All Adjustments
+                          </Button>
+                        )}
+                        <Button
                           variant="outline-danger"
                           size="sm"
                           className="ms-2"
@@ -420,6 +556,38 @@ export default function CourtCreditsPage() {
                           Delete Batch
                         </Button>
                       </div>
+                      {adjustingId === batch.id && (
+                        <Form
+                          className="mb-3 p-3 border rounded"
+                          onSubmit={e => { e.preventDefault(); handleSaveAdjust(); }}
+                        >
+                          {adjustError && <Alert variant="danger">{adjustError}</Alert>}
+                          <Row>
+                            <Col md={4} className="mb-3">
+                              <Form.Group controlId="court-credit-adjust-hours">
+                                <Form.Label>Hours used</Form.Label>
+                                <Form.Control
+                                  type="number" step="0.25" value={adjustHours}
+                                  onChange={e => setAdjustHours(e.target.value)}
+                                />
+                                <Form.Text muted>Use a negative number to return hours.</Form.Text>
+                              </Form.Group>
+                            </Col>
+                            <Col md={8} className="mb-3">
+                              <Form.Group controlId="court-credit-adjust-reason">
+                                <Form.Label>Reason <span className="text-danger">*</span></Form.Label>
+                                <Form.Control value={adjustReason} onChange={e => setAdjustReason(e.target.value)} />
+                              </Form.Group>
+                            </Col>
+                          </Row>
+                          <div className="text-end">
+                            <Button variant="secondary" size="sm" className="me-2" onClick={handleCancelAdjust} disabled={isSaving}>Cancel</Button>
+                            <Button variant="primary" size="sm" type="submit" disabled={isSaving}>
+                              {isSaving ? <Spinner as="span" animation="border" size="sm" /> : 'Save Adjustment'}
+                            </Button>
+                          </div>
+                        </Form>
+                      )}
                       <hr />
                       <h5>Batch History</h5>
                       {isLoadingHistory && <Spinner animation="border" size="sm" />}
@@ -437,6 +605,7 @@ export default function CourtCreditsPage() {
                         // such an adjustment shows an incorrect remaining total.
                         const remainingByRow = new Map<HistoryItem, number>();
                         let remaining = batch.remainingHours ?? 0;
+                        let purchased = batch.hoursPurchased ?? 0;
                         for (const item of history) {
                           remainingByRow.set(item, remaining);
                           if (item.type === 'sessionUsage') {
@@ -447,26 +616,46 @@ export default function CourtCreditsPage() {
                             if (remainingChange) {
                               remaining += (Number(remainingChange.oldValue) || 0) - (Number(remainingChange.newValue) || 0);
                             }
+                            const purchasedChange = changes?.find((c) => c.field === 'hoursPurchased');
+                            if (purchasedChange) {
+                              purchased += (Number(purchasedChange.oldValue) || 0) - (Number(purchasedChange.newValue) || 0);
+                            }
                           }
                         }
+                        // Walked all the way back, remaining should equal the hours originally
+                        // purchased. Any shortfall was deducted with no usage or adjustment record
+                        // (e.g. hours shared with another batch whose record is gone).
+                        const unrecordedHours = Math.round((purchased - remaining) * 100) / 100;
                         return (
                         <Table striped bordered hover responsive size="sm">
                           <thead><tr><th>Date</th><th>Type</th><th>Details</th><th>Remaining</th><th>Source</th></tr></thead>
                           <tbody>
                             {history.map((item, i) => {
+                              const carriedOver = item.type === 'sessionUsage'
+                                ? (item.carriedOver as { batchId: string; hoursUsed: number }[] | undefined) ?? []
+                                : [];
                               return (
                                 <tr
                                   key={`${item.type}-${item.id ?? i}`}
-                                  className={item.type === 'sessionUsage' ? 'inventory-history-session' : 'inventory-history-adjustment'}
+                                  className={[
+                                    item.type === 'sessionUsage' ? 'inventory-history-session' : 'inventory-history-adjustment',
+                                    carriedOver.length ? 'inventory-history-carried-over' : '',
+                                  ].join(' ').trim()}
+                                  style={carriedOver.length ? CARRIED_OVER_STYLE : undefined}
                                 >
                                   <td>{format(item.eventDate, 'yyyy-MM-dd')}</td>
-                                  <td>{item.type === 'sessionUsage' ? 'Session Usage' : 'Adjustment'}</td>
+                                  <td>{item.type === 'sessionUsage' ? (carriedOver.length ? `Session Usage (${isLaterBatch(batch, carriedOver, batches) ? 'With Leftover' : 'Carried Over'})` : 'Session Usage') : 'Adjustment'}</td>
                                   <td>
                                     {item.type === 'sessionUsage' && (
                                       (item.hoursUsed as number) < 0
                                         ? `Returned: ${Math.abs(item.hoursUsed as number)} hrs`
                                         : `Used: ${item.hoursUsed as number} hrs`
                                     )}
+                                    {carriedOver.map(c => (
+                                      <div key={c.batchId} style={{ fontSize: '0.8em' }}>
+                                        {isLaterBatch(batch, [c], batches) ? 'Leftover' : 'Carried over'}: this session also used {c.hoursUsed} hrs {isLaterBatch(batch, [c], batches) ? 'from earlier batch' : 'from next batch'} {batches.find(b => b.id === c.batchId)?.name || ''}
+                                      </div>
+                                    ))}
                                     {item.type === 'adjustment' && (
                                       <>
                                         Reason: {item.reason as string}
@@ -484,11 +673,36 @@ export default function CourtCreditsPage() {
                                       <Link to={`/?date=${format(item.eventDate as Date, 'yyyy-MM-dd')}`}>
                                         View on calendar
                                       </Link>
-                                    ) : item.type === 'adjustment' ? (item.userName as string) : ''}
+                                    ) : item.type === 'adjustment' ? (
+                                      <>
+                                        {item.userName as string}
+                                        {isUndoable(item) && (
+                                          <div>
+                                            <Button variant="link" size="sm" className="p-0" onClick={() => handleUndoAdjustment(batch.id, item.id as string)}>
+                                              Undo
+                                            </Button>
+                                          </div>
+                                        )}
+                                      </>
+                                    ) : ''}
                                   </td>
                                 </tr>
                               );
                             })}
+                            {unrecordedHours > 0 && (
+                              <tr className="inventory-history-carried-over" style={CARRIED_OVER_STYLE}>
+                                <td>{format(batch.purchaseDate, 'yyyy-MM-dd')}</td>
+                                <td>Unrecorded</td>
+                                <td>
+                                  {unrecordedHours} hrs used with no history record
+                                  <div style={{ fontSize: '0.8em' }}>
+                                    Possibly carried over or shared with another batch, or changed before history was tracked.
+                                  </div>
+                                </td>
+                                <td>{purchased} hrs → {remaining} hrs</td>
+                                <td></td>
+                              </tr>
+                            )}
                           </tbody>
                         </Table>
                         );
