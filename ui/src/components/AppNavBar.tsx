@@ -13,7 +13,6 @@ import {
     setCurrentClub,
 } from "../features/club/clubSlice";
 import { TOGGLEABLE_TABS } from "../features/club/tabs";
-import ThemeToggle from "./ThemeToggle";
 
 export default function AppNavbar() {
     const dispatch = useAppDispatch();
@@ -72,28 +71,11 @@ export default function AppNavbar() {
                             Home
                         </Nav.Link>
                         {!ready && <Nav.Item role="status" className="text-white small">Loading club navigation…</Nav.Item>}
-                        {ready && currentClubId && !disabledTabs.includes("attendance") && (
-                            <Nav.Link as={Link} to="/attendance">
-                                Attendance
+                        {isAdmin && TOGGLEABLE_TABS.filter((t) => t.key !== "attendance" && !disabledTabs.includes(t.key)).map((t) => (
+                            <Nav.Link key={t.key} as={Link} to={t.path}>
+                                {t.label}
                             </Nav.Link>
-                        )}
-                        {isAdmin && (
-                            <>
-                                {TOGGLEABLE_TABS.filter((t) => t.key !== "attendance" && !disabledTabs.includes(t.key)).map((t) => (
-                                    <Nav.Link key={t.key} as={Link} to={t.path}>
-                                        {t.label}
-                                    </Nav.Link>
-                                ))}
-                                <Nav.Link as={Link} to="/settings">
-                                    Settings
-                                </Nav.Link>
-                            </>
-                        )}
-                        {ready && currentClubId && (
-                            <Nav.Link as={Link} to="/faq">
-                                Help &amp; FAQ
-                            </Nav.Link>
-                        )}
+                        ))}
                         <NavDropdown
                             title={accountName || "Account"}
                             id="account-menu"
@@ -102,10 +84,22 @@ export default function AppNavbar() {
                             <NavDropdown.Item as={Link} to="/auth">
                                 Account
                             </NavDropdown.Item>
+                            {isAdmin && (
+                                <NavDropdown.Item as={Link} to="/settings">
+                                    Settings
+                                </NavDropdown.Item>
+                            )}
+                            {ready && currentClubId && !disabledTabs.includes("attendance") && (
+                                <NavDropdown.Item as={Link} to="/attendance">
+                                    Attendance
+                                </NavDropdown.Item>
+                            )}
+                            {ready && currentClubId && (
+                                <NavDropdown.Item as={Link} to="/faq">
+                                    Help &amp; FAQ
+                                </NavDropdown.Item>
+                            )}
                         </NavDropdown>
-                        <div className="ms-3 d-flex align-items-center">
-                            <ThemeToggle />
-                        </div>
                     </Nav>
                 </Navbar.Collapse>
             </Container>
