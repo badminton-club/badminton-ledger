@@ -138,7 +138,7 @@ describe('AppNavBar', () => {
     await user.click(screen.getByRole('button', { name: 'Ada Lovelace' }));
 
     expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/auth');
-    expect(screen.getByRole('button', { name: 'Switch to dark mode' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Match device' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('switches clubs from the dropdown and updates the current title', async () => {
@@ -163,23 +163,21 @@ describe('AppNavBar', () => {
     expect(screen.getByRole('button', { name: 'Beta Club' })).toBeInTheDocument();
   });
 
-  it('toggles between light and dark mode', async () => {
+  it('switches between light, dark and match-device modes', async () => {
     const user = userEvent.setup();
     renderWithProviders(<AppNavBar />, {
       preloadedState: { club: makeClubState() },
     });
 
     expect(document.documentElement.getAttribute('data-bs-theme')).toBe('light');
-    const toggle = screen.getByRole('button', { name: 'Switch to dark mode' });
+    expect(screen.getByRole('button', { name: 'Match device' })).toHaveAttribute('aria-pressed', 'true');
 
-    await user.click(toggle);
-
-    expect(screen.getByRole('button', { name: 'Switch to light mode' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Dark' }));
     expect(document.documentElement.getAttribute('data-bs-theme')).toBe('dark');
+    expect(screen.getByRole('button', { name: 'Dark' })).toHaveAttribute('aria-pressed', 'true');
 
-    await user.click(screen.getByRole('button', { name: 'Switch to light mode' }));
-
-    expect(screen.getByRole('button', { name: 'Switch to dark mode' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Match device' }));
     expect(document.documentElement.getAttribute('data-bs-theme')).toBe('light');
+    expect(screen.getByRole('button', { name: 'Match device' })).toHaveAttribute('aria-pressed', 'true');
   });
 });

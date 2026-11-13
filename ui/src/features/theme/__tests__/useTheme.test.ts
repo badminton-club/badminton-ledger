@@ -39,9 +39,9 @@ describe('useTheme', () => {
     act(() => listener!({ matches: false }));
     expect(result.current.theme).toBe('dark');
 
-    // toggling back to the device's theme resets to following the device
-    act(() => result.current.toggleTheme());
+    act(() => result.current.setMode('system'));
     expect(window.localStorage.getItem('theme-preference')).toBeNull();
+    expect(result.current.theme).toBe('light');
     act(() => listener!({ matches: true }));
     expect(result.current.theme).toBe('dark');
 
@@ -74,7 +74,7 @@ describe('useTheme', () => {
 
     expect(result.current.theme).toBe('light');
     expect(document.documentElement.getAttribute('data-bs-theme')).toBe('light');
-    expect(window.localStorage.getItem('theme-preference')).toBeNull();
+    expect(window.localStorage.getItem('theme-preference')).toBe('light');
   });
 
   it('restores a previously saved theme on mount', () => {
@@ -97,5 +97,20 @@ describe('useTheme', () => {
     expect(result.current.theme).toBe('dark');
 
     window.matchMedia = original;
+  });
+
+  it('setMode picks light/dark/system and shares state across hooks', () => {
+    const a = renderHook(() => useTheme());
+    const b = renderHook(() => useTheme());
+    expect(a.result.current.mode).toBe('system');
+
+    act(() => a.result.current.setMode('dark'));
+    expect(window.localStorage.getItem('theme-preference')).toBe('dark');
+    expect(b.result.current.mode).toBe('dark');
+    expect(b.result.current.theme).toBe('dark');
+
+    act(() => b.result.current.setMode('system'));
+    expect(window.localStorage.getItem('theme-preference')).toBeNull();
+    expect(a.result.current.mode).toBe('system');
   });
 });
