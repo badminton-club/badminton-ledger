@@ -39,6 +39,12 @@ describe('useTheme', () => {
     act(() => listener!({ matches: false }));
     expect(result.current.theme).toBe('dark');
 
+    // toggling back to the device's theme resets to following the device
+    act(() => result.current.toggleTheme());
+    expect(window.localStorage.getItem('theme')).toBeNull();
+    act(() => listener!({ matches: true }));
+    expect(result.current.theme).toBe('dark');
+
     window.matchMedia = original;
   });
 
@@ -68,7 +74,7 @@ describe('useTheme', () => {
 
     expect(result.current.theme).toBe('light');
     expect(document.documentElement.getAttribute('data-bs-theme')).toBe('light');
-    expect(window.localStorage.getItem('theme')).toBe('light');
+    expect(window.localStorage.getItem('theme')).toBeNull();
   });
 
   it('restores a previously saved theme on mount', () => {

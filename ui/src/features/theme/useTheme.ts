@@ -51,13 +51,17 @@ export function useTheme(): { theme: Theme; toggleTheme: () => void } {
 
   const toggleTheme = useCallback(() => {
     const next: Theme = theme === 'dark' ? 'light' : 'dark';
-    setSaved(next);
+    // Toggling back to the device's theme clears the override, so the app
+    // follows the device setting again.
+    const matchesDevice = next === (systemDark ? 'dark' : 'light');
+    setSaved(matchesDevice ? null : next);
     try {
-      window.localStorage.setItem(STORAGE_KEY, next);
+      if (matchesDevice) window.localStorage.removeItem(STORAGE_KEY);
+      else window.localStorage.setItem(STORAGE_KEY, next);
     } catch {
       // storage unavailable: the choice still applies for this session
     }
-  }, [theme]);
+  }, [theme, systemDark]);
 
   return { theme, toggleTheme };
 }
