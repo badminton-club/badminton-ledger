@@ -10,6 +10,8 @@ beforeEach(() => {
   document.documentElement.removeAttribute('data-bs-theme');
 });
 
+const openAccountMenu = (name = 'Account') => userEvent.click(screen.getByRole('button', { name }));
+
 describe('AppNavBar', () => {
   it('shows a loading indicator instead of partial club tabs until role and settings are ready', () => {
     const { store } = renderWithProviders(<AppNavBar />, {
@@ -22,11 +24,10 @@ describe('AppNavBar', () => {
     expect(store.getState().club.ready).toBe(false);
     act(() => { store.dispatch(setReady(true)); });
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /e-transfer/i })).toBeInTheDocument();
   });
 
-  it('shows home, attendance, and account access for non-admin members', () => {
+  it('shows home and account access, with attendance and help in the account menu, for non-admin members', async () => {
     renderWithProviders(<AppNavBar />, {
       preloadedState: {
         club: makeClubState({
@@ -38,9 +39,10 @@ describe('AppNavBar', () => {
     });
 
     expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/');
+    expect(screen.queryByRole('link', { name: 'Attendance' })).not.toBeInTheDocument();
+    await openAccountMenu();
     expect(screen.getByRole('link', { name: 'Attendance' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Help & FAQ' })).toHaveAttribute('href', '/faq');
-    expect(screen.getByRole('button', { name: 'Account' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Birdies' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Credits' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Players' })).not.toBeInTheDocument();
@@ -48,7 +50,7 @@ describe('AppNavBar', () => {
     expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
-  it('shows admin tabs except the ones disabled for the current club', () => {
+  it('shows admin tabs except the ones disabled for the current club', async () => {
     renderWithProviders(<AppNavBar />, {
       preloadedState: {
         club: makeClubState({
@@ -60,16 +62,17 @@ describe('AppNavBar', () => {
       },
     });
 
-    expect(screen.getByRole('link', { name: 'Attendance' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Birdies' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Players' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Account' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Credits' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Payout' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
+    await openAccountMenu();
+    expect(screen.getByRole('link', { name: 'Attendance' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
   });
 
-  it('places Help & FAQ right after Settings in the admin tab order', () => {
+  it('lists Account, Settings, Attendance, Help & FAQ in order in the account menu', async () => {
     renderWithProviders(<AppNavBar />, {
       preloadedState: {
         club: makeClubState({
@@ -80,14 +83,14 @@ describe('AppNavBar', () => {
       },
     });
 
+    await openAccountMenu();
     const linkNames = screen.getAllByRole('link').map((el) => el.textContent);
-    const settingsIndex = linkNames.indexOf('Settings');
-    const faqIndex = linkNames.indexOf('Help & FAQ');
-    expect(settingsIndex).toBeGreaterThan(-1);
-    expect(faqIndex).toBe(settingsIndex + 1);
+    const start = linkNames.indexOf('Account');
+    expect(start).toBeGreaterThan(-1);
+    expect(linkNames.slice(start, start + 4)).toEqual(['Account', 'Settings', 'Attendance', 'Help & FAQ']);
   });
 
-  it('hides Attendance for a non-admin member when disabled for the club', () => {
+  it('hides Attendance for a non-admin member when disabled for the club', async () => {
     renderWithProviders(<AppNavBar />, {
       preloadedState: {
         club: makeClubState({
@@ -98,19 +101,22 @@ describe('AppNavBar', () => {
         }),
       },
     });
+    await openAccountMenu();
     expect(screen.queryByRole('link', { name: 'Attendance' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Help & FAQ' })).toBeInTheDocument();
   });
 
-  it('hides Help & FAQ when no club is selected yet', () => {
+  it('hides Help & FAQ when no club is selected yet', async () => {
     renderWithProviders(<AppNavBar />, {
       preloadedState: {
         club: makeClubState({ currentClubId: null, clubs: [] }),
       },
     });
+    await openAccountMenu();
     expect(screen.queryByRole('link', { name: 'Help & FAQ' })).not.toBeInTheDocument();
   });
 
-  it('hides Attendance for an admin when disabled, without a leftover duplicate in the admin tab list', () => {
+  it('hides Attendance for an admin when disabled, without a leftover duplicate in the admin tab list', async () => {
     renderWithProviders(<AppNavBar />, {
       preloadedState: {
         club: makeClubState({
@@ -121,6 +127,7 @@ describe('AppNavBar', () => {
         }),
       },
     });
+    await openAccountMenu();
     expect(screen.queryByRole('link', { name: 'Attendance' })).not.toBeInTheDocument();
     // Other admin-only tabs are unaffected.
     expect(screen.getByRole('link', { name: 'Birdies' })).toBeInTheDocument();
@@ -138,7 +145,6 @@ describe('AppNavBar', () => {
     await user.click(screen.getByRole('button', { name: 'Ada Lovelace' }));
 
     expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/auth');
-    expect(screen.getByRole('button', { name: 'Switch to dark mode' })).toBeInTheDocument();
   });
 
   it('switches clubs from the dropdown and updates the current title', async () => {
@@ -161,25 +167,5 @@ describe('AppNavBar', () => {
 
     expect(store.getState().club.currentClubId).toBe('club-b');
     expect(screen.getByRole('button', { name: 'Beta Club' })).toBeInTheDocument();
-  });
-
-  it('toggles between light and dark mode', async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<AppNavBar />, {
-      preloadedState: { club: makeClubState() },
-    });
-
-    expect(document.documentElement.getAttribute('data-bs-theme')).toBe('light');
-    const toggle = screen.getByRole('button', { name: 'Switch to dark mode' });
-
-    await user.click(toggle);
-
-    expect(screen.getByRole('button', { name: 'Switch to light mode' })).toBeInTheDocument();
-    expect(document.documentElement.getAttribute('data-bs-theme')).toBe('dark');
-
-    await user.click(screen.getByRole('button', { name: 'Switch to light mode' }));
-
-    expect(screen.getByRole('button', { name: 'Switch to dark mode' })).toBeInTheDocument();
-    expect(document.documentElement.getAttribute('data-bs-theme')).toBe('light');
   });
 });

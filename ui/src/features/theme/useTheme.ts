@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 
 export type Theme = 'light' | 'dark';
+export type ThemeMode = Theme | 'system';
 
-const STORAGE_KEY = 'theme';
+// New key: the old 'theme' key was auto-saved on every visit, so it is not a real user choice.
+const STORAGE_KEY = 'theme-preference';
 
 function prefersDark(): boolean {
   return (
@@ -22,16 +24,34 @@ function getSavedTheme(): Theme | null {
   }
 }
 
+const CHANGE_EVENT = 'theme-preference-change';
+
+function savePreference(value: Theme | null) {
+  try {
+    if (value) window.localStorage.setItem(STORAGE_KEY, value);
+    else window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // storage unavailable: the choice still applies for this session
+  }
+  // Keeps every useTheme instance (navbar toggle, account menu) in sync.
+  window.dispatchEvent(new Event(CHANGE_EVENT));
+}
+
 /**
  * Tracks the app's light/dark theme, reflecting it on `<html data-bs-theme="...">`
  * — the attribute Bootstrap 5.3 reads for dark mode — so Bootstrap components and
  * this app's `--color-*` CSS variables (see App.css) restyle together.
  *
- * The device's `prefers-color-scheme` is the default and is followed live. A theme
- * is only saved to localStorage once the user toggles it; that saved choice then
- * overrides the device setting on later visits.
+ * By default the device's `prefers-color-scheme` is followed live. A theme is only
+ * saved to localStorage once the user toggles it; that saved choice then overrides
+ * the device setting until `setMode('system')` clears it.
  */
-export function useTheme(): { theme: Theme; toggleTheme: () => void } {
+export function useTheme(): {
+  theme: Theme;
+  toggleTheme: () => void;
+  mode: ThemeMode;
+  setMode: (mode: ThemeMode) => void;
+} {
   const [saved, setSaved] = useState<Theme | null>(getSavedTheme);
   const [systemDark, setSystemDark] = useState<boolean>(prefersDark);
 
@@ -43,6 +63,16 @@ export function useTheme(): { theme: Theme; toggleTheme: () => void } {
     return () => mql.removeEventListener?.('change', onChange);
   }, []);
 
+  useEffect(() => {
+    const sync = () => setSaved(getSavedTheme());
+    window.addEventListener(CHANGE_EVENT, sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener(CHANGE_EVENT, sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+
   const theme: Theme = saved ?? (systemDark ? 'dark' : 'light');
 
   useEffect(() => {
@@ -51,17 +81,15 @@ export function useTheme(): { theme: Theme; toggleTheme: () => void } {
 
   const toggleTheme = useCallback(() => {
     const next: Theme = theme === 'dark' ? 'light' : 'dark';
-    // Toggling back to the device's theme clears the override, so the app
-    // follows the device setting again.
-    const matchesDevice = next === (systemDark ? 'dark' : 'light');
-    setSaved(matchesDevice ? null : next);
-    try {
-      if (matchesDevice) window.localStorage.removeItem(STORAGE_KEY);
-      else window.localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      // storage unavailable: the choice still applies for this session
-    }
-  }, [theme, systemDark]);
+    setSaved(next);
+    savePreference(next);
+  }, [theme]);
 
-  return { theme, toggleTheme };
+  const setMode = useCallback((mode: ThemeMode) => {
+    const value = mode === 'system' ? null : mode;
+    setSaved(value);
+    savePreference(value);
+  }, []);
+
+  return { theme, toggleTheme, mode: saved ?? 'system', setMode };
 }

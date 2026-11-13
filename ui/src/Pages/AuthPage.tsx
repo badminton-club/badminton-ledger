@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Container, Card, Button, Alert, ListGroup, Badge, Form, InputGroup, Spinner } from 'react-bootstrap';
 import type { User } from 'firebase/auth';
+import AppearanceCard from '../components/AppearanceCard';
 import { FirebaseError } from 'firebase/app';
 import {
   signInWithGoogle,
@@ -590,6 +591,7 @@ export default function AuthPage() {
           )}
         </Card.Body>
       </Card>
+      <AppearanceCard />
 
       {user && (
         <Card className="mt-3">
