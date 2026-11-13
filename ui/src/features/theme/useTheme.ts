@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 
 export type Theme = 'light' | 'dark';
 
-const STORAGE_KEY = 'theme';
+// New key: the old 'theme' key was auto-saved on every visit, so it is not a real user choice.
+const STORAGE_KEY = 'theme-preference';
 
 function prefersDark(): boolean {
   return (
