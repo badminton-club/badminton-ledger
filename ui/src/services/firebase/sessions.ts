@@ -11,6 +11,7 @@ import {
   Timestamp,
   increment,
 } from 'firebase/firestore';
+import { startOfDay } from 'date-fns';
 import { db, refs } from './client';
 import { serviceCall, toJSDate, deductBirds } from './utils';
 import type {
@@ -142,7 +143,7 @@ export async function addSession(data: NewSessionData): Promise<string> {
         ...data,
         players:   resolvedPlayers,
         id:        sessionRef.id,
-        date:      Timestamp.fromDate(data.date),
+        date:      Timestamp.fromDate(startOfDay(data.date)),
         createdAt: serverTimestamp(),
       });
 
@@ -341,7 +342,7 @@ export async function editSession(
       tx.update(sessionRef, {
         ...updatedData,
         players:   resolvedPlayers,
-        date:      Timestamp.fromDate(updatedData.date),
+        date:      Timestamp.fromDate(startOfDay(updatedData.date)),
         updatedAt: serverTimestamp(),
       });
 

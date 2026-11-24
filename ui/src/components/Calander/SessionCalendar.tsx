@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Button, ButtonGroup, Spinner } from "react-bootstrap";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { getMonth, getYear, lastDayOfMonth } from "date-fns";
+import { getMonth, getYear, lastDayOfMonth, endOfMonth } from "date-fns";
 import { useSearchParams, useNavigate } from "react-router-dom";
 
 import { useAppDispatch, useAppSelector } from "../../hooks";
@@ -61,7 +61,7 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected, high
         try {
             const result = await fetchSessions({
                 startDate: new Date(getYear(currentDate), getMonth(currentDate), 1),
-                endDate: lastDayOfMonth(currentDate),
+                endDate: endOfMonth(currentDate),
             });
             setSessions(result);
         } catch (err) {
