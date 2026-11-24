@@ -180,7 +180,10 @@ async function resolveSenderMatch(
     return { playerId: mappedPlayerId, source: 'mapping' };
   }
 
-  const candidate = findUniqueBestPlayerMatch(senderName, players);
+  const candidate = findUniqueBestPlayerMatch(
+    senderName,
+    players.filter((p) => !p.isGuest),
+  );
   return candidate
     ? { playerId: candidate.id, source: 'name-lookup' }
     : { playerId: null, source: null };

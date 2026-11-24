@@ -52,6 +52,15 @@ describe('findPlayersByName', () => {
     expect(players.map((player) => player.id)).toEqual(['p1']);
   });
 
+  it('excludes guest players from name matches', async () => {
+    const base = { firstNameLower: 'alice', lastNameLower: 'chen', lastName: 'Chen', firstName: 'Alice', email: null, balance: 0, owed: 0, description: '', sessionCount: 0 };
+    seedClubDoc('players', 'member', base);
+    seedClubDoc('players', 'guest', { ...base, isGuest: true });
+
+    expect((await findPlayersByName('Alice Chen')).map((p) => p.id)).toEqual(['member']);
+    expect((await findPlayersByName('Alice')).map((p) => p.id)).toEqual(['member']);
+  });
+
   it('falls back to first-name-only matching when no full-name match exists', async () => {
     seedClubDoc('players', 'p1', {
       firstName: 'Alice',
