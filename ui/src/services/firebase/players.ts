@@ -58,6 +58,13 @@ export async function findPlayersByName(parsedName: string): Promise<Player[]> {
   });
 }
 
+/** Converts a player to/from a guest (hidden from name matching and the main roster). */
+export async function setPlayerGuest(playerId: string, isGuest: boolean): Promise<void> {
+  return serviceCall('setPlayerGuest', async () => {
+    await updateDoc(doc(refs.players, playerId), { isGuest });
+  });
+}
+
 /**
  * Adds a new player. Automatically adds lowercase search fields and
  * initialises sessionCount to 0 (replaces attendedSessionIds[]).

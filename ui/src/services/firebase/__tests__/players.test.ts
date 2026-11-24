@@ -2,6 +2,7 @@ import {
   addPlayer,
   deletePlayer,
   findPlayersByName,
+  setPlayerGuest,
   formatPlayerName,
   updatePlayerProfile,
 } from '../players';
@@ -336,5 +337,20 @@ describe('deletePlayer', () => {
     setCurrentClubId(null);
     await expect(deletePlayer('p1')).rejects.toThrow('No club selected');
     setCurrentClubId(TEST_CLUB_ID); // restore for any tests that run after this file
+  });
+});
+
+describe('setPlayerGuest', () => {
+  it('toggles guest status, which controls name matching', async () => {
+    seedClubDoc('players', 'p1', {
+      firstName: 'Sam', firstNameLower: 'sam', lastName: null, lastNameLower: null,
+      email: null, balance: 0, owed: 0, description: '', sessionCount: 0,
+    });
+    await setPlayerGuest('p1', true);
+    expect(getClubDocData('players', 'p1')!.isGuest).toBe(true);
+    await expect(findPlayersByName('Sam')).resolves.toEqual([]);
+
+    await setPlayerGuest('p1', false);
+    expect((await findPlayersByName('Sam')).map((p) => p.id)).toEqual(['p1']);
   });
 });

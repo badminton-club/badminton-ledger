@@ -17,7 +17,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import {
   db, refs, fetchSessionById, setPlayerSettlement, setPlayerPaidBy,
 } from '../services/firebase';
-import { addPlayer, updatePlayerProfile, deletePlayer } from '../services/firebase/players';
+import { addPlayer, updatePlayerProfile, deletePlayer, setPlayerGuest } from '../services/firebase/players';
 import {
   query, where, getDocs, orderBy,
   doc, runTransaction, increment, serverTimestamp,
@@ -425,6 +425,18 @@ export default function PlayersPage() {
     }
   };
 
+  const handleToggleGuest = async (player: Player) => {
+    setSavingDetails(true);
+    setDeleteError('');
+    try {
+      await setPlayerGuest(player.id, !player.isGuest);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to update player.');
+    } finally {
+      setSavingDetails(false);
+    }
+  };
+
   // Add player
   const handleAddPlayer = async (data: NewPlayerInput) => {
     const id = await addPlayer(data);
@@ -624,6 +636,14 @@ export default function PlayersPage() {
                     )}
                   </h5>
                   <div className="d-flex gap-2">
+                    <Button
+                      variant="outline-secondary"
+                      size="sm"
+                      disabled={savingDetails}
+                      onClick={() => handleToggleGuest(selectedPlayer)}
+                    >
+                      {selectedPlayer.isGuest ? 'Make permanent' : 'Hide (make guest)'}
+                    </Button>
                     <Button variant="outline-secondary" size="sm" onClick={startEditDetails}>
                       Edit
                     </Button>
@@ -701,8 +721,9 @@ export default function PlayersPage() {
                         />
                         <Form.Text>
                           Hides them from the main Players list (they'll appear in a separate "Guests" section
-                          instead) and from other players' default payer dropdown. Their balance, history, and
-                          session matching are unaffected.
+                          instead), from other players' default payer dropdown, and from name matching when
+                          adding session attendees or suggesting e-Transfer payers. Their balance and history
+                          are unaffected. Untick to make them a permanent player again.
                         </Form.Text>
                       </Form.Group>
                       <div className="d-flex gap-2">
