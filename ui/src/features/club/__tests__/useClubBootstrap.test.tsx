@@ -30,6 +30,7 @@ beforeEach(() => {
   jest.restoreAllMocks();
   resetFirebaseTestState();
   localStorage.clear();
+  sessionStorage.clear();
   jest.spyOn(playerLinking, 'autoLinkPlayerByEmail').mockResolvedValue({ linked: 0, conflicts: 0 });
 });
 
@@ -371,6 +372,22 @@ describe('useClubBootstrap', () => {
     await waitFor(() => expect(store.getState().club.invitationError).toContain('someone-else@example.com'));
     expect(store.getState().club.currentClubId).toBeNull();
     expect(__getDocData(`clubs/club-c/members/${currentUser.uid}`)).toBeUndefined();
+  });
+
+  it("prefers this tab's own last pick over lastVisitedClub so tabs can show different clubs", async () => {
+    sessionStorage.setItem('currentClubId', 'club-a');
+    seedUserDoc(currentUser.uid, { clubs: ['club-a', 'club-b'], lastVisitedClub: 'club-b' });
+    seedClubMetaDoc('club-a', { name: 'Club A' });
+    seedMemberDoc(currentUser.uid, { role: 'admin' }, 'club-a');
+    seedClubMetaDoc('club-b', { name: 'Club B' });
+    seedMemberDoc(currentUser.uid, { role: 'member' }, 'club-b');
+
+    const store = makeTestStore();
+    setCurrentUser(currentUser);
+    renderBootstrap(store);
+
+    await waitFor(() => expect(store.getState().club.currentClubId).toBe('club-a'));
+    expect(sessionStorage.getItem('currentClubId')).toBe('club-a');
   });
 
   it('falls back to localStorage when there is no lastVisitedClub match', async () => {

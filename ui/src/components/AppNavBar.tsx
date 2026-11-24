@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Navbar, Nav, NavDropdown, Container, Badge } from "react-bootstrap";
 import { Link } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "../hooks";
@@ -23,6 +23,14 @@ export default function AppNavbar() {
     const disabledTabs = useAppSelector(selectDisabledTabs);
     const accountName = useAppSelector(selectAccountName);
     const ready = useAppSelector(selectClubReady);
+    const clubName = currentClub?.name;
+
+    // Lets users tell apart tabs that have different clubs open
+    useEffect(() => {
+        const base = document.title.replace(/^.+ \u00b7 (?=Badminton)/, "");
+        document.title = clubName && clubs.length > 1 ? `${clubName} \u00b7 ${base}` : base;
+    }, [clubName, clubs.length]);
+
     const isAdmin = ready && (role === "admin" || role === "superAdmin");
 
     return (
@@ -63,6 +71,22 @@ export default function AppNavbar() {
                                         )}
                                     </NavDropdown.Item>
                                 ))}
+                                {clubs.length > 1 && (
+                                    <>
+                                        <NavDropdown.Divider />
+                                        <NavDropdown.Header>Open in new tab</NavDropdown.Header>
+                                        {clubs.filter((c) => c.id !== currentClubId).map((c) => (
+                                            <NavDropdown.Item
+                                                key={`tab-${c.id}`}
+                                                href={`/?club=${encodeURIComponent(c.id)}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                            >
+                                                {c.name} ↗
+                                            </NavDropdown.Item>
+                                        ))}
+                                    </>
+                                )}
                             </NavDropdown>
                         )}
                     </Nav>
