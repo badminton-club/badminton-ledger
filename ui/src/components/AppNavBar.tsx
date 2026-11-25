@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Navbar, Nav, NavDropdown, Container, Badge } from "react-bootstrap";
 import { Link } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "../hooks";
@@ -16,6 +16,7 @@ import { TOGGLEABLE_TABS } from "../features/club/tabs";
 
 export default function AppNavbar() {
     const dispatch = useAppDispatch();
+    const [clubMenuOpen, setClubMenuOpen] = useState(false);
     const clubs = useAppSelector(selectUserClubs);
     const currentClub = useAppSelector(selectCurrentClub);
     const currentClubId = useAppSelector(selectCurrentClubId);
@@ -56,37 +57,50 @@ export default function AppNavbar() {
                             <NavDropdown
                                 title={currentClub ? currentClub.name : "Select club"}
                                 id="club-switcher"
+                                show={clubMenuOpen}
+                                onToggle={(next) => setClubMenuOpen(next)}
                             >
-                                {clubs.map((c) => (
-                                    <NavDropdown.Item
-                                        key={c.id}
-                                        active={c.id === currentClubId}
-                                        onClick={() => dispatch(setCurrentClub(c.id))}
-                                    >
-                                        {c.name}
-                                        {c.role && (
-                                            <Badge bg={c.role === "admin" ? "success" : "secondary"} className="ms-2">
-                                                {c.role}
-                                            </Badge>
-                                        )}
-                                    </NavDropdown.Item>
-                                ))}
-                                {clubs.length > 1 && (
-                                    <>
-                                        <NavDropdown.Divider />
-                                        <NavDropdown.Header>Open in new tab</NavDropdown.Header>
-                                        {clubs.filter((c) => c.id !== currentClubId).map((c) => (
-                                            <NavDropdown.Item
-                                                key={`tab-${c.id}`}
-                                                href={`/?club=${encodeURIComponent(c.id)}`}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
+                                {clubs.map((c) => {
+                                    const duplicateName = clubs.some((o) => o.id !== c.id && o.name === c.name);
+                                    return (
+                                        <div
+                                            key={c.id}
+                                            className={`dropdown-item d-flex align-items-center${c.id === currentClubId ? " active" : ""}`}
+                                        >
+                                            <button
+                                                type="button"
+                                                className="btn btn-link p-0 border-0 text-reset text-decoration-none text-start flex-grow-1"
+                                                onClick={() => {
+                                                    dispatch(setCurrentClub(c.id));
+                                                    setClubMenuOpen(false);
+                                                }}
                                             >
-                                                {c.name} ↗
-                                            </NavDropdown.Item>
-                                        ))}
-                                    </>
-                                )}
+                                                {c.name}
+                                                {duplicateName && (
+                                                    <small className="ms-2 opacity-75">#{c.id.slice(0, 4)}</small>
+                                                )}
+                                                {c.role && (
+                                                    <Badge bg={c.role === "admin" ? "success" : "secondary"} className="ms-2">
+                                                        {c.role}
+                                                    </Badge>
+                                                )}
+                                            </button>
+                                            {clubs.length > 1 && (
+                                                <a
+                                                    href={`/?club=${encodeURIComponent(c.id)}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="ms-2 text-reset text-decoration-none"
+                                                    title="Open in new tab"
+                                                    aria-label={`Open ${c.name} in new tab`}
+                                                    onClick={() => setClubMenuOpen(false)}
+                                                >
+                                                    {"\u2197"}
+                                                </a>
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </NavDropdown>
                         )}
                     </Nav>

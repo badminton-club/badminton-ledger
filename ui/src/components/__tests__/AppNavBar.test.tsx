@@ -169,7 +169,7 @@ describe('AppNavBar', () => {
     expect(screen.getByRole('button', { name: 'Beta Club' })).toBeInTheDocument();
   });
 
-  it('offers other clubs in a new tab and prefixes the title with the current club', async () => {
+  it('lists each club once with a new-tab link and prefixes the title with the current club', async () => {
     document.title = 'Badminton Ledger';
     renderWithProviders(<AppNavBar />, {
       preloadedState: {
@@ -186,7 +186,7 @@ describe('AppNavBar', () => {
 
     expect(document.title).toBe('Alpha Club \u00b7 Badminton Ledger');
     await userEvent.click(screen.getByRole('button', { name: 'Alpha Club' }));
-    const link = screen.getByRole('link', { name: /Beta Club ↗/ });
+    const link = screen.getByRole('link', { name: 'Open Beta Club in new tab' });
     expect(link).toHaveAttribute('href', '/?club=club-b');
     expect(link).toHaveAttribute('target', '_blank');
   });
