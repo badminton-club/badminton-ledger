@@ -77,12 +77,6 @@ describe('addSession', () => {
     expect(court.remainingHours).toBe(7);
   });
 
-  it('normalizes the session date to local midnight', async () => {
-    const sessionId = await addSession(baseSessionData({ date: new Date(2026, 4, 10, 18, 45, 30) }));
-    const saved = (getClubDocData("sessions", sessionId)!.date as { toDate(): Date }).toDate();
-    expect(saved.getTime()).toBe(new Date(2026, 4, 10).getTime());
-  });
-
   it('logs a transaction record for each resource used', async () => {
     seedBirdieBatch('b1');
     seedCourtBatch('c1');

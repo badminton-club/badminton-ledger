@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { getMonth, getYear, isToday } from "date-fns";
+import { getMonth, getYear, isSameDay, isToday } from "date-fns";
 import { getFirstDayOfMonthWeekday, getTotalDaysInMonth } from "../../utils/dateUtils";
 import type { Session } from "../../types";
 import { isSessionPlayerUnpaid } from "../../utils/sessionPayment";
@@ -30,7 +30,7 @@ export default function CalendarGrid({ currentDate, sessions, selectedDate, cred
 
     for (let day = 1; day <= totalDays; day++) {
         const date = new Date(year, month, day);
-        const daySessions = sessions.filter((s) => +s.date === +date);
+        const daySessions = sessions.filter((s) => isSameDay(s.date, date));
         const today = isToday(date);
         const selected = selectedDate && +selectedDate === +date;
         const allPaid =

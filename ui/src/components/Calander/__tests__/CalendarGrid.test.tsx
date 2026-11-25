@@ -84,6 +84,19 @@ describe('CalendarGrid', () => {
     expect(onDayClick).toHaveBeenCalledWith(new Date(2026, 7, 10));
   });
 
+  it('places sessions saved with a time of day on their calendar day', () => {
+    renderWithProviders(
+      <CalendarGrid
+        currentDate={new Date(2026, 7, 1)}
+        selectedDate={null}
+        onDayClick={jest.fn()}
+        sessions={[makeSession('s1', new Date(2026, 7, 10, 18, 45)), makeSession('s2', new Date(2026, 7, 10, 9, 0))]}
+      />
+    );
+
+    expect(screen.getByText('10').parentElement as HTMLElement).toHaveTextContent('×2');
+  });
+
   it('only shows the expand ("View session details") button on days that have a session', () => {
     renderWithProviders(
       <CalendarGrid

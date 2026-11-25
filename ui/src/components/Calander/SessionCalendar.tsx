@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Button, ButtonGroup, Spinner } from "react-bootstrap";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { getMonth, getYear, lastDayOfMonth, endOfMonth } from "date-fns";
+import { getMonth, getYear, lastDayOfMonth, endOfMonth, endOfDay, isSameDay } from "date-fns";
 import { useSearchParams, useNavigate } from "react-router-dom";
 
 import { useAppDispatch, useAppSelector } from "../../hooks";
@@ -139,7 +139,7 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected, high
         searchParams.delete("new");
         setSearchParams(searchParams, { replace: true });
 
-        fetchSessions({ startDate: target, endDate: target })
+        fetchSessions({ startDate: target, endDate: endOfDay(target) })
             .then((daySessions) => {
                 if (daySessions.length > 0) handleOpenModal(daySessions[0], target);
                 else if (wantsNew && isAdmin) openAddSession(target);
@@ -158,7 +158,7 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected, high
     const handleDayClick = (date: Date) => {
         setSelectedDate(date);
         onDaySelected?.(date);
-        const hasSession = sessions.some((session) => +session.date === +date);
+        const hasSession = sessions.some((session) => isSameDay(session.date, date));
         // Only admins can create sessions — clicking an empty day should just
         // select it (so members can see "no session" state), not launch the
         // admin-only paste/create flow that would fail on submit anyway.
@@ -178,7 +178,7 @@ export default function SessionCalendar({ onSessionsChanged, onDaySelected, high
     // day's session without first selecting it. Only wired up for days that
     // actually have a session (see CalendarGrid).
     const handleExpandDay = (date: Date) => {
-        const daySessions = sessions.filter((s) => +s.date === +date);
+        const daySessions = sessions.filter((s) => isSameDay(s.date, date));
         if (daySessions.length === 0) return;
         setSelectedDate(date);
         onDaySelected?.(date);
