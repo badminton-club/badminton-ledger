@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Container, Row, Col, Button, Alert } from "react-bootstrap";
-import { format } from "date-fns";
+import { format, isSameDay } from "date-fns";
 import { Link, useSearchParams } from "react-router-dom";
 // import "./HomePage.css";
 import SessionCalendar from "components/Calander/SessionCalendar";
@@ -67,7 +67,7 @@ export default function HomePage() {
     // the already-loaded recent-sessions array (older sessions beyond that
     // window are left as-is, since there's nothing in the array to select).
     const handleCalendarDaySelected = useCallback((date: Date) => {
-        const idx = sessions.findIndex((s) => +s.date === +date);
+        const idx = sessions.findIndex((s) => isSameDay(s.date, date));
         if (idx !== -1) setSessionIndex(idx);
     }, [sessions]);
 
