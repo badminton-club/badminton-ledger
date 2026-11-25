@@ -30,12 +30,14 @@ import {
 } from './clubSlice';
 
 const LS_KEY = 'currentClubId';
+// Per-tab choice: survives refresh and tab duplication, but not shared with other tabs
+const SESSION_KEY = 'currentClubId';
 
 /**
  * Bootstraps club context from the signed-in user:
  *  - saves a `?club=<id>` deep link into the user's club list and opens it
  *  - loads the user's saved clubs and picks the current one
- *    (?club → last visited → localStorage → first)
+ *    (?club → this tab's last pick → last visited → localStorage → first)
  *  - keeps the client's scoped `refs` and the user's role/last-visited in sync
  */
 export function useClubBootstrap(): string | null {
@@ -119,9 +121,11 @@ export function useClubBootstrap(): string | null {
       dispatch(setClubs(liveClubs));
 
       const stored = localStorage.getItem(LS_KEY);
+      const tabStored = sessionStorage.getItem(SESSION_KEY);
       const pick =
         (invitedClubId && liveClubs.some((c) => c.id === invitedClubId) ? invitedClubId : null) ??
         (clubParam && liveClubs.some((c) => c.id === clubParam) ? clubParam : null) ??
+        (tabStored && liveClubs.some((c) => c.id === tabStored) ? tabStored : null) ??
         (profile.lastVisitedClub && liveClubs.some((c) => c.id === profile.lastVisitedClub)
           ? profile.lastVisitedClub
           : null) ??
@@ -193,6 +197,7 @@ export function useClubBootstrap(): string | null {
       return;
     }
     localStorage.setItem(LS_KEY, currentClubId);
+    sessionStorage.setItem(SESSION_KEY, currentClubId);
     const user = auth.currentUser;
     if (!user || scope?.uid !== user.uid) return;
     const generation = authGeneration.current;

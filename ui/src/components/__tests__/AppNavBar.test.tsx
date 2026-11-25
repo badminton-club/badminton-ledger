@@ -168,4 +168,26 @@ describe('AppNavBar', () => {
     expect(store.getState().club.currentClubId).toBe('club-b');
     expect(screen.getByRole('button', { name: 'Beta Club' })).toBeInTheDocument();
   });
+
+  it('lists each club once with a new-tab link and prefixes the title with the current club', async () => {
+    document.title = 'Badminton Ledger';
+    renderWithProviders(<AppNavBar />, {
+      preloadedState: {
+        club: makeClubState({
+          role: 'admin',
+          currentClubId: 'club-a',
+          clubs: [
+            { id: 'club-a', name: 'Alpha Club', role: 'admin' },
+            { id: 'club-b', name: 'Beta Club', role: 'member' },
+          ],
+        }),
+      },
+    });
+
+    expect(document.title).toBe('Alpha Club \u00b7 Badminton Ledger');
+    await userEvent.click(screen.getByRole('button', { name: 'Alpha Club' }));
+    const link = screen.getByRole('link', { name: 'Open Beta Club in new tab' });
+    expect(link).toHaveAttribute('href', '/?club=club-b');
+    expect(link).toHaveAttribute('target', '_blank');
+  });
 });
