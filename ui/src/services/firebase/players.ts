@@ -15,6 +15,7 @@ import type { Player, NewPlayerInput } from 'types';
 /**
  * Searches players by name.
  * Tries full name first (firstName + lastName), falls back to firstName only.
+ * Guest players are excluded.
  */
 export async function findPlayersByName(parsedName: string): Promise<Player[]> {
   return serviceCall('findPlayersByName', async () => {
@@ -28,10 +29,11 @@ export async function findPlayersByName(parsedName: string): Promise<Player[]> {
     const results: Player[] = [];
 
     const addUnique = (snap: { id: string; data: () => Record<string, unknown> }) => {
-      if (!seen.has(snap.id)) {
-        results.push({ id: snap.id, ...snap.data() } as Player);
-        seen.add(snap.id);
-      }
+      if (seen.has(snap.id)) return;
+      seen.add(snap.id);
+      // One-off guests are never name-match candidates
+      if (snap.data().isGuest) return;
+      results.push({ id: snap.id, ...snap.data() } as Player);
     };
 
     // Try full name match first
@@ -53,6 +55,13 @@ export async function findPlayersByName(parsedName: string): Promise<Player[]> {
     }
 
     return results;
+  });
+}
+
+/** Converts a player to/from a guest (hidden from name matching and the main roster). */
+export async function setPlayerGuest(playerId: string, isGuest: boolean): Promise<void> {
+  return serviceCall('setPlayerGuest', async () => {
+    await updateDoc(doc(refs.players, playerId), { isGuest });
   });
 }
 

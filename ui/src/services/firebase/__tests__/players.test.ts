@@ -2,6 +2,7 @@ import {
   addPlayer,
   deletePlayer,
   findPlayersByName,
+  setPlayerGuest,
   formatPlayerName,
   updatePlayerProfile,
 } from '../players';
@@ -50,6 +51,15 @@ describe('findPlayersByName', () => {
     const players = await findPlayersByName('  ALICE   VAN   BUREN  ');
 
     expect(players.map((player) => player.id)).toEqual(['p1']);
+  });
+
+  it('excludes guest players from name matches', async () => {
+    const base = { firstNameLower: 'alice', lastNameLower: 'chen', lastName: 'Chen', firstName: 'Alice', email: null, balance: 0, owed: 0, description: '', sessionCount: 0 };
+    seedClubDoc('players', 'member', base);
+    seedClubDoc('players', 'guest', { ...base, isGuest: true });
+
+    expect((await findPlayersByName('Alice Chen')).map((p) => p.id)).toEqual(['member']);
+    expect((await findPlayersByName('Alice')).map((p) => p.id)).toEqual(['member']);
   });
 
   it('falls back to first-name-only matching when no full-name match exists', async () => {
@@ -327,5 +337,20 @@ describe('deletePlayer', () => {
     setCurrentClubId(null);
     await expect(deletePlayer('p1')).rejects.toThrow('No club selected');
     setCurrentClubId(TEST_CLUB_ID); // restore for any tests that run after this file
+  });
+});
+
+describe('setPlayerGuest', () => {
+  it('toggles guest status, which controls name matching', async () => {
+    seedClubDoc('players', 'p1', {
+      firstName: 'Sam', firstNameLower: 'sam', lastName: null, lastNameLower: null,
+      email: null, balance: 0, owed: 0, description: '', sessionCount: 0,
+    });
+    await setPlayerGuest('p1', true);
+    expect(getClubDocData('players', 'p1')!.isGuest).toBe(true);
+    await expect(findPlayersByName('Sam')).resolves.toEqual([]);
+
+    await setPlayerGuest('p1', false);
+    expect((await findPlayersByName('Sam')).map((p) => p.id)).toEqual(['p1']);
   });
 });
